@@ -1,0 +1,3 @@
+# Patch context and the unmodified upstream license are vendored data.
+patches/*.patch -whitespace
+LICENSE-GPL -whitespace
