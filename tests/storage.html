@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><title>Browser storage regressions</title><pre id="result">RUNNING</pre>
+<script src="../templates/storage.js"></script>
+<script>
+(async()=>{
+ const name='vera20k-web-regression-'+crypto.randomUUID(),store=createVeraStorage(name);
+ const assert=(value,message)=>{if(!value)throw Error(message);};
+ try{
+  await store.write({path:'/retail/RA2MD.INI',bytes:new Uint8Array([1,2]),modified_ms:123});
+  const file=new File(['retail fixture'],'ra2.mix');
+  await store.saveLibrary('fixture',[{path:'ra2.mix',file}]);
+  store.close();
+  const restored=createVeraStorage(name),rows=await restored.users(),library=await restored.library();
+  assert(rows.length===1&&rows[0].bytes[1]===2&&rows[0].modified_ms===123,'user bytes/timestamp survive reopening');
+  assert(library.folder==='fixture'&&await library.files[0].file.text()==='retail fixture','resource File survives reopening');
+  // A failed multi-entry backup must roll back all preceding writes.
+  try{await restored.importUsers([{path:'/saves/new.sav',bytes:new Uint8Array([3])},{path:'/bad',bytes:()=>{}}]);throw Error('expected clone failure');}catch(error){assert(error.name==='DataCloneError','expected data clone error');}
+  assert((await restored.users()).length===1,'failed backup import is atomic');
+  await restored.remove('/retail/RA2MD.INI');assert((await restored.users())[0].deleted===true,'deletion tombstone survives reload and overrides original resource imports');
+  assert((await restored.library()).files.length===1,'user deletion preserves cached resources');
+  restored.close();indexedDB.deleteDatabase(name);
+  document.getElementById('result').textContent='PASS: settings and resource blobs survive reopen; failed backup is atomic; deletion preserves library';
+ }catch(error){document.getElementById('result').textContent='FAIL: '+error.stack;store.close();}
+})();
+</script>

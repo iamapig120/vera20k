@@ -1,0 +1,7 @@
+{
+  "name": "vera20k-web-gateway",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node server.mjs", "test": "node --test server.test.mjs" },
+  "dependencies": { "ws": "8.18.3" }
+}

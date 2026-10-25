@@ -1,0 +1,14 @@
+*
+!index.html
+!launcher.css
+!launcher.js
+!storage.js
+!build-info.txt
+!assets/
+!assets/RA2MD.png
+!pkg/
+!pkg/vera20k.js
+!pkg/vera20k_bg.wasm
+
+!lobby.js
+!network.js

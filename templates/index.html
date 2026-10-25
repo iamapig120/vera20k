@@ -1,42 +1,116 @@
 <!doctype html>
 <html lang="zh-CN">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="VERA20k Web 版，在浏览器中运行《红色警戒2：尤里的复仇》，导入本机游戏资源即可开始游戏。">
-<title>VERA20k · 红色警戒2：尤里的复仇</title>
-<style>
-body{margin:0;background:#11151b;color:#e0e6ee;font:15px system-ui}header{padding:16px 24px;border-bottom:1px solid #343d49}h1{font-size:22px;margin:0 0 10px}p{margin:8px 0;color:#b1bdca}button,input{font:inherit;margin:8px 12px 8px 0}button{padding:8px 18px;cursor:pointer}#game{display:flex;justify-content:center;margin:12px auto}canvas{width:min(960px,100%);height:auto;aspect-ratio:8/5;outline:none;display:block}#status{white-space:pre-wrap;color:#a8d7ff}
-</style>
-<header><h1>VERA20k · Web 预览</h1>
-<p>选择你本机的《红色警戒2：尤里的复仇》游戏目录。资源仅在当前浏览器读取，不上传服务器。</p>
-<p>需要支持 WebGPU 的桌面浏览器。首版使用单线程、关闭音频；暂不支持联网、存档和随机地图。</p>
-<input id="files" type="file" webkitdirectory multiple><button id="start" disabled>启动游戏</button>
-<div id="status">正在初始化 WebAssembly…</div></header><main id="game"></main>
-<aside aria-label="免责声明"><strong>免责声明：</strong>
-<p>当前红警项目基于 VERA20k 开源项目实现，与 Electronic Arts Inc. 没有任何关联。所有权利均归其各自所有者所有。</p></aside>
-<script type="module">
-import init, {import_file, start_game} from './pkg/vera20k.js';
-const status=document.querySelector('#status'), button=document.querySelector('#start'), files=document.querySelector('#files');
-let ready=false;
-try {
- if(!navigator.gpu) throw Error('当前浏览器未提供 WebGPU，请使用支持 WebGPU 的浏览器。');
- await init(); ready=true; status.textContent='请选择原版游戏目录。';
-} catch(error) {status.textContent='初始化失败：'+error;}
-files.onchange=()=>{button.disabled=!ready||!files.files.length;};
-button.onclick=async()=>{
- button.disabled=true;files.disabled=true;
- try {
- const selected=[...files.files];
- // Import gameplay archives and loose game data, excluding movies/music and executables.
- const keep=selected.filter(f=>/\.(mix|mmx|yro|ini|map|mpr|yrm|csf|fnt|pal|shp|vxl|hva|tmp|vpl|pcx)$/i.test(f.name)&& !/^(movies\d*|movmd\d*|theme|thememd)\.mix$/i.test(f.name));
- for(let i=0;i<keep.length;i++){
-  const f=keep[i], relative=(f.webkitRelativePath||f.name).split('/').slice(f.webkitRelativePath?1:0).join('/');
-  status.textContent=`读取资源 ${i+1}/${keep.length}：${relative}`;
-  import_file(relative,new Uint8Array(await f.arrayBuffer()));
-  await new Promise(r=>setTimeout(r,0));
- }
- status.textContent='资源读取完成，正在创建渲染器…';
- start_game();
- }catch(error){status.textContent='启动失败：'+error+'\n请刷新页面后重试。';}
-};
-</script></html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="theme-color" content="#000000">
+    <meta name="description" content="VERA20k Web 版，在浏览器中运行《红色警戒2：尤里的复仇》，导入本机游戏资源即可开始游戏。">
+    <title>VERA20k · 红色警戒2：尤里的复仇</title>
+    <link rel="icon" href="./assets/RA2MD.png">
+    <link rel="stylesheet" href="./launcher.css">
+</head>
+
+<body>
+    <main id="launcher">
+        <div class="launch-screen">
+            <div class="import-panel">
+                <header class="game-brand"><img class="brand-icon" src="./assets/RA2MD.png" alt="尤里标志">
+                    <div class="brand-copy">
+                        <h1>红色警戒2</h1>
+                        <p class="expansion">尤里的复仇</p>
+                    </div>
+                </header>
+                <p class="import-title">导入你的《尤里的复仇》游戏资源</p>
+                <section class="drop-zone" id="drop-zone" aria-label="拖入游戏文件夹或点击选择游戏资源">
+                    <div class="resource-illustration" aria-hidden="true"><svg class="folder-art" viewBox="0 0 110 90">
+                            <path d="M5 20V10h39l12 12h48v62H5z" fill="#d5af45" stroke="#ffe7a3" stroke-width="2" />
+                            <path d="M5 31h101L95 84H5z" fill="#efd270" stroke="#fff0b5" stroke-width="2" />
+                            <path d="M10 36h90L91 78H10z" fill="#f5db83" />
+                        </svg><svg class="file-art" viewBox="0 0 60 76">
+                            <path d="M4 2h34l18 18v53H4z" fill="#e0e0d9" stroke="#888" stroke-width="2" />
+                            <path d="M38 2v18h18" fill="#fff" stroke="#888" />
+                            <path d="M13 35h34M13 44h34M13 53h25" stroke="#a7a7a0" stroke-width="3" />
+                        </svg></div>
+                    <div class="drop-arrow" aria-hidden="true"></div>
+                    <p class="drop-title">将游戏文件夹拖放到这里</p>
+                    <p class="drop-subtitle">或者点击下方按钮选择安装目录</p>
+                    <div class="actions" aria-label="选择资源并开始游戏">
+                        <div class="resource-slot"><input id="files" type="file" webkitdirectory multiple hidden
+                                aria-label="选择尤里的复仇安装目录"><button class="menu-button" id="choose-folder" type="button"
+                                title="选择包含 ra2.mix 和 ra2md.mix 的游戏文件夹"><svg viewBox="0 0 24 22" aria-hidden="true">
+                                    <path d="M2 7V3h8l3 4h9v12H2z" />
+                                    <path d="M2 9h20" />
+                                </svg><span>选择游戏文件夹…</span></button>
+                            <div class="folder-selected" id="folder-selected" hidden><button id="change-folder"
+                                    class="menu-button" type="button" title="更换游戏资源目录"><svg viewBox="0 0 24 22"
+                                        aria-hidden="true">
+                                        <path d="m3 11 6 6L21 4" />
+                                    </svg><span>已选择 · 更换文件夹</span></button>
+                                <div class="folder-name" id="folder-name"></div>
+                                <div class="folder-meta" id="folder-meta"></div>
+                            </div>
+                        </div>
+                        <button class="menu-button launch-button" id="start" type="button" disabled><svg
+                                class="play-icon" viewBox="0 0 20 24" aria-hidden="true">
+                                <path d="M2 1v22l18-11z" />
+                            </svg><span id="start-label">开始游戏</span></button>
+                    </div>
+                    <p class="selection-note">选择包含 ra2.mix 和 ra2md.mix 的文件夹 · 资源仅在本机读取</p>
+                </section>
+                <div id="button-caption"></div>
+                <div class="progress-area" id="progress-area" hidden>
+                    <div class="progress-track" role="progressbar" aria-label="游戏加载进度" aria-valuemin="0"
+                        aria-valuemax="100" aria-valuenow="0" id="progress">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <div class="progress-copy"><span id="progress-detail"></span><span id="progress-percent">0%</span>
+                    </div>
+                </div>
+                <div class="feedback" id="feedback" role="status" aria-live="polite"></div>
+                <details class="error-details" id="error-details" hidden>
+                    <summary>查看详细信息</summary>
+                    <pre id="error-message"></pre>
+                </details><button class="retry" id="retry" type="button" hidden>重新加载页面</button>
+            </div>
+            <footer class="footer">
+                <div class="environment" id="environment"><span class="dot"></span><span
+                        id="environment-label">正在准备</span></div>
+                <details class="help" id="guide">
+                    <summary>游戏资源 / 帮助</summary>
+                    <div class="help-copy">
+                        <p>选择已解压的《尤里的复仇》安装文件夹，当前不支持直接导入安装程序或压缩包。</p>
+                        <p>资源只在浏览器本机使用，不会上传或修改。</p>
+                        <p>需要支持 WebGPU 的桌面浏览器。支持单机、音效和音乐；联机需要可用的联机网关。</p>
+                        <p><label for="gateway-address">联机网关地址（可选）</label><br>
+                            <input id="gateway-address" type="url" placeholder="https://gateway.example.com"
+                                autocomplete="off" spellcheck="false" aria-describedby="gateway-status"></p>
+                        <p id="gateway-status" role="status">留空使用本站网关；网关不可用时仍可单机。</p>
+                    </div>
+                </details>
+            </footer>
+            <div class="edition">VERA20K · WEB EDITION</div>
+        </div>
+        <aside class="disclaimer" aria-label="免责声明"><strong>免责声明：</strong>
+            <p>当前红警项目基于 VERA20k 开源项目实现，与 Electronic Arts Inc. 没有任何关联。所有权利均归其各自所有者所有。</p>
+        </aside>
+    </main>
+    <div id="game" aria-label="尤里的复仇游戏画面"></div>
+    <aside id="storage-tools" aria-label="本机数据">
+        <details id="storage-panel">
+            <summary>本机数据 / 备份</summary>
+            <div class="storage-actions"><span id="storage-status" role="status">正在准备本机数据…</span><button
+                    id="export-data" type="button" disabled>导出备份</button><button id="import-data" type="button"
+                    disabled>导入备份</button><button id="retry-storage" type="button" hidden>重试读取与保存</button><button
+                    id="clear-cache" type="button">清除资源缓存</button><input id="backup-file" type="file"
+                    accept="application/json,.json" hidden></div>
+        </details>
+    </aside>
+    <div id="status" aria-hidden="true"></div>
+    <script src="./storage.js"></script>
+<script src="./lobby.js"></script>
+<script src="./network.js"></script>
+    <script type="module" src="./launcher.js"></script>
+</body>
+
+</html>

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=web.config
 source "$ROOT/web.config"
-UPSTREAM=$(dirname "$ROOT")
+UPSTREAM="$ROOT/vera20k"
 REF=HEAD
 BUILD="$ROOT/.build"
 ENGINE="$BUILD/engine"
@@ -40,8 +40,10 @@ identity() {
   } | git hash-object --stdin
 }
 prepare() {
-  UPSTREAM=$(cd "$UPSTREAM" && pwd)
-  case "$UPSTREAM/" in "$ROOT/"*) fail 'Upstream must be outside the Web repository';; esac
+  [[ -e "$UPSTREAM/.git" ]] || fail 'Upstream is not initialized. Run: git submodule update --init --recursive (or use --upstream PATH).'
+  UPSTREAM=$(cd "$UPSTREAM" && pwd -P)
+  [[ "$(git -C "$UPSTREAM" rev-parse --show-toplevel)" == "$UPSTREAM" ]] || fail 'Upstream must be a Git repository root'
+  case "$UPSTREAM/" in "$ROOT/"|"$BUILD/"*) fail 'Upstream must not be the Web repository or generated source';; esac
   REVISION=$(git -C "$UPSTREAM" rev-parse --verify "$REF^{commit}")
   IDENTITY=$(identity)
   if [[ -d "$ENGINE" ]]; then
@@ -88,11 +90,25 @@ prepare() {
 }
 # One HTML file also works on file://: no fetch, module imports or backend.
 bundle_static() {
-  local directory=$1
+  local directory=$1 line
   cp "$ROOT/templates/index.html" "$directory/index.html"
+  [[ $(wc -c < "$directory/index.html") -lt 10000 ]] || fail 'index.html must be smaller than 10,000 bytes'
+  cp "$ROOT/templates/.assetsignore" "$directory/.assetsignore"
+  cp "$ROOT/templates/lobby.js" "$ROOT/templates/network.js" "$ROOT/templates/storage.js" "$ROOT/templates/launcher.css" "$ROOT/templates/launcher.js" "$directory/"
+  mkdir -p "$directory/assets"
+  cp "$ROOT/assets/RA2MD.png" "$directory/assets/RA2MD.png"
   {
-    sed '/^<script type="module">/,$d' "$ROOT/templates/index.html"
-    printf '%s\n' '<script type="module">'
+   while IFS= read -r line || [[ -n "$line" ]]; do
+    line=${line#"${line%%[![:space:]]*}"}
+    if [[ "$line" == '<link rel="stylesheet" href="./launcher.css">' ]]; then
+      printf '<style>\n'; cat "$directory/launcher.css"; printf '</style>\n'
+    elif [[ "$line" == '<script src="./lobby.js"></script>' || "$line" == '<script src="./network.js"></script>' ]]; then
+      local script=${line#*./}; script=${script%%\"*}
+      printf '<script>\n'; cat "$directory/$script"; printf '\n</script>\n'
+    elif [[ "$line" == '<script src="./storage.js"></script>' ]]; then
+      printf '<script>\n'; cat "$directory/storage.js"; printf '\n</script>\n'
+    elif [[ "$line" == '<script type="module" src="./launcher.js"></script>' ]]; then
+      printf '%s\n' '<script type="module">'
     sed -E \
       -e 's/^export (const|class|function) /\1 /' \
       -e '/^export \{.*\};$/d' \
@@ -100,24 +116,49 @@ bundle_static() {
     printf '\nconst init=__wbg_init;\nconst bundledWasm=Uint8Array.from(atob("'
     base64 < "$directory/pkg/vera20k_bg.wasm" | tr -d '\r\n'
     printf '"), c=>c.charCodeAt(0));\n'
-    sed -n '/^import init, /,$p' "$ROOT/templates/index.html" |
-      sed -e '1d' -e 's/await init();/await init({module_or_path: bundledWasm});/'
+      sed -e '/^import init, /d' -e 's/await engineBytes()/bundledWasm/' "$directory/launcher.js"
+      printf '\n</script>\n'
+    else
+      while [[ "$line" == *./assets/RA2MD.png* ]]; do
+        printf '%sdata:image/png;base64,' "${line%%./assets/RA2MD.png*}"
+        base64 < "$directory/assets/RA2MD.png" | tr -d '\r\n'
+        line=${line#*./assets/RA2MD.png}
+      done
+      printf '%s\n' "$line"
+    fi
+   done < "$directory/index.html"
   } > "$directory/standalone.html"
+  # HTML and modules must never mix across releases. Python's static server
+  # and regular static hosts can otherwise reuse old module/Wasm responses.
+  local version
+  version=$(cat "$directory/lobby.js" "$directory/network.js" "$directory/launcher.js" "$directory/storage.js" "$directory/launcher.css" "$directory/pkg/vera20k.js" "$directory/pkg/vera20k_bg.wasm" | git hash-object --stdin)
+  sed -e "s@./launcher.css@./launcher.css?v=$version@g" \
+      -e "s@./lobby.js@./lobby.js?v=$version@g" \
+      -e "s@./network.js@./network.js?v=$version@g" \
+      -e "s@./storage.js@./storage.js?v=$version@g" \
+      -e "s@./launcher.js@./launcher.js?v=$version@g" "$directory/index.html" > "$directory/index.versioned"
+  mv "$directory/index.versioned" "$directory/index.html"
+  sed -e "s@./pkg/vera20k.js'@./pkg/vera20k.js?v=$version'@g" \
+      -e "s@./pkg/vera20k_bg.wasm'@./pkg/vera20k_bg.wasm?v=$version'@g" \
+      "$directory/launcher.js" > "$directory/launcher.versioned"
+  mv "$directory/launcher.versioned" "$directory/launcher.js"
 }
 build() {
   prepare
-  for tool in cargo rustc wasm-bindgen; do command -v "$tool" >/dev/null || fail "Missing $tool on PATH; see README.md"; done
+  for tool in cargo rustc wasm-bindgen python3; do command -v "$tool" >/dev/null || fail "Missing $tool on PATH; see README.md"; done
   expected=$(awk '$0 == "name = \"wasm-bindgen\"" {seen=1;next} seen && $1 == "version" {gsub(/"/,"",$3);print $3;exit}' "$ENGINE/Cargo.lock")
   [[ -n "$expected" ]] || fail 'wasm-bindgen missing from Cargo.lock'
   actual=$(wasm-bindgen --version)
   [[ "$actual" == "wasm-bindgen $expected" ]] || fail "CLI version must match Cargo.lock: expected $expected, got $actual"
   (
     cd "$ENGINE"
-    CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}" cargo build -p vera20k --lib --locked \
-      --target wasm32-unknown-unknown --no-default-features --profile fast --target-dir "$BUILD/target"
+    CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}" python3 -m tools.cargo_run -- build -p vera20k --lib --locked \
+      --target wasm32-unknown-unknown --no-default-features --profile fast
   )
   stage=$(mktemp -d "$BUILD/dist.XXXXXX")
-  wasm-bindgen --target web --out-dir "$stage/pkg" "$BUILD/target/wasm32-unknown-unknown/fast/vera20k.wasm"
+  local cargo_target
+  cargo_target=$(cd "$ENGINE" && python3 -c 'from pathlib import Path; from tools.cargo_run import build_store, owned_target; root=Path.cwd(); print(owned_target(root, build_store(root)[1]))')
+  wasm-bindgen --target web --out-dir "$stage/pkg" "$cargo_target/wasm32-unknown-unknown/fast/vera20k.wasm"
   bundle_static "$stage"
   printf 'Upstream: %s\nRevision: %s\nwasm-bindgen: %s\n' "$UPSTREAM_URL" "$REVISION" "$expected" > "$stage/build-info.txt"
   if [[ -d "$DIST" ]]; then rm -rf "$DIST"; fi
@@ -131,11 +172,13 @@ package() {
   mkdir -p "$(dirname "$output")"
   output=$(cd "$(dirname "$output")" && pwd)/$(basename "$output")
   case "$output" in "$DIST/"*) fail 'ZIP must be outside dist/';; esac
-  local files=(index.html standalone.html build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm)
+  local files=(index.html standalone.html launcher.css launcher.js storage.js lobby.js network.js assets/RA2MD.png build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm)
   for file in pkg/vera20k.d.ts pkg/vera20k_bg.wasm.d.ts; do
     if [[ -f "$DIST/$file" ]]; then files+=("$file"); fi
   done
-  for file in "${files[@]}"; do [[ ! -L "$DIST/$file" ]] || fail "Unexpected symlink: $file"; done
+  for file in "${files[@]}"; do
+    [[ -f "$DIST/$file" && ! -L "$DIST/$file" ]] || fail "Missing file or unexpected symlink: $file"
+  done
   # Replace the ZIP rather than updating it, so stale members cannot survive.
   local zip_stage
   zip_stage=$(mktemp -d "$BUILD/zip.XXXXXX")
@@ -171,7 +214,7 @@ Usage: bash web.sh [--upstream PATH] [--ref REF] COMMAND
   bundle                          Rebuild HTML from existing dist/pkg (no Cargo)
   package [--output PATH]          ZIP the fixed public-file allowlist
   refresh-patch --adapted PATH --base REF
-No server or Python is used. Open dist/standalone.html directly in a browser.
+The output is static. Single-player needs no gateway; multiplayer uses an optional WebSocket gateway.
 EOF
 }
 while [[ $# -gt 0 ]]; do

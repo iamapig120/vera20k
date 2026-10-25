@@ -24,8 +24,22 @@ mod memory {
     };
     #[cfg(target_arch = "wasm32")]
     use web_time::SystemTime;
-    static FILES: OnceLock<Mutex<BTreeMap<PathBuf, Arc<[u8]>>>> = OnceLock::new();
-    fn files() -> &'static Mutex<BTreeMap<PathBuf, Arc<[u8]>>> {
+    #[cfg(target_arch = "wasm32")]
+    type PersistenceCallbacks = (fn(&str, &[u8], u64), fn(&str));
+    #[cfg(target_arch = "wasm32")]
+    static PERSISTENCE: OnceLock<PersistenceCallbacks> = OnceLock::new();
+    /// The browser app installs its storage bridge before any engine writes.
+    #[cfg(target_arch = "wasm32")]
+    pub fn set_persistence_callbacks(write: fn(&str, &[u8], u64), remove: fn(&str)) {
+        let _ = PERSISTENCE.set((write, remove));
+    }
+    #[derive(Clone)]
+    struct Entry {
+        bytes: Arc<[u8]>,
+        modified_ms: u64,
+    }
+    static FILES: OnceLock<Mutex<BTreeMap<PathBuf, Entry>>> = OnceLock::new();
+    fn files() -> &'static Mutex<BTreeMap<PathBuf, Entry>> {
         FILES.get_or_init(Default::default)
     }
     fn key(path: &Path) -> PathBuf {
@@ -46,17 +60,26 @@ mod memory {
     }
     /// Import bytes before loading the game. Paths use the selected directory layout.
     pub fn import_file(path: impl AsRef<Path>, bytes: Vec<u8>) {
-        files()
-            .lock()
-            .unwrap()
-            .insert(key(path.as_ref()), bytes.into());
+        restore_file(path, bytes, 0);
+    }
+    pub fn restore_file(path: impl AsRef<Path>, bytes: Vec<u8>, modified_ms: u64) {
+        files().lock().unwrap().insert(
+            key(path.as_ref()),
+            Entry {
+                bytes: bytes.into(),
+                modified_ms,
+            },
+        );
+    }
+    pub fn restore_deleted_file(path: impl AsRef<Path>) {
+        files().lock().unwrap().remove(&key(path.as_ref()));
     }
     pub fn read_shared(path: impl AsRef<Path>) -> io::Result<Arc<[u8]>> {
         files()
             .lock()
             .unwrap()
             .get(&key(path.as_ref()))
-            .cloned()
+            .map(|entry| entry.bytes.clone())
             .ok_or_else(missing)
     }
     pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
@@ -66,23 +89,55 @@ mod memory {
         String::from_utf8(read(path)?).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
     pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
-        import_file(path, bytes.as_ref().to_vec());
+        put(path.as_ref(), bytes.as_ref(), false)
+    }
+    pub fn write_new(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
+        put(path.as_ref(), bytes.as_ref(), true)
+    }
+    fn put(path: &Path, bytes: &[u8], exclusive: bool) -> io::Result<()> {
+        let path = key(path);
+        let modified_ms = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        {
+            let mut files = files().lock().unwrap();
+            if exclusive && files.contains_key(&path) {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "file already exists",
+                ));
+            }
+            files.insert(
+                path.clone(),
+                Entry {
+                    bytes: bytes.into(),
+                    modified_ms,
+                },
+            );
+        }
+        #[cfg(target_arch = "wasm32")]
+        if let Some((write, _)) = PERSISTENCE.get() {
+            write(&path.to_string_lossy(), bytes, modified_ms);
+        }
         Ok(())
     }
     pub fn create_dir_all(_path: impl AsRef<Path>) -> io::Result<()> {
         Ok(())
     }
     pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
-        files()
-            .lock()
-            .unwrap()
-            .remove(&key(path.as_ref()))
-            .map(|_| ())
-            .ok_or_else(missing)
+        let path = key(path.as_ref());
+        files().lock().unwrap().remove(&path).ok_or_else(missing)?;
+        #[cfg(target_arch = "wasm32")]
+        if let Some((_, remove)) = PERSISTENCE.get() {
+            remove(&path.to_string_lossy());
+        }
+        Ok(())
     }
     pub struct Metadata {
         file: bool,
         len: u64,
+        modified_ms: u64,
     }
     impl Metadata {
         pub fn is_file(&self) -> bool {
@@ -95,7 +150,7 @@ mod memory {
             self.len
         }
         pub fn modified(&self) -> io::Result<SystemTime> {
-            Ok(SystemTime::UNIX_EPOCH)
+            Ok(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(self.modified_ms))
         }
     }
     pub fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
@@ -104,13 +159,15 @@ mod memory {
         if let Some(bytes) = files.get(&path) {
             return Ok(Metadata {
                 file: true,
-                len: bytes.len() as u64,
+                len: bytes.bytes.len() as u64,
+                modified_ms: bytes.modified_ms,
             });
         }
         if files.keys().any(|p| p.starts_with(&path)) {
             return Ok(Metadata {
                 file: false,
                 len: 0,
+                modified_ms: 0,
             });
         }
         Err(missing())
@@ -200,5 +257,35 @@ mod tests {
                 .kind(),
             std::io::ErrorKind::InvalidData
         );
+    }
+    #[test]
+    fn new_save_collision_preserves_bytes_and_restored_modification_time() {
+        let path = "/web-save-regression/slot.sav";
+        memory::restore_file(path, b"old".to_vec(), 1234);
+        assert_eq!(
+            memory::write_new(path, b"new").unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(memory::read(path).unwrap(), b"old");
+        assert_eq!(
+            memory::metadata(path)
+                .unwrap()
+                .modified()
+                .unwrap()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+            1234
+        );
+        memory::write(path, b"replacement").unwrap();
+        assert_eq!(memory::read(path).unwrap(), b"replacement");
+        assert!(
+            memory::metadata(path).unwrap().modified().unwrap() > std::time::SystemTime::UNIX_EPOCH
+        );
+        memory::remove_file(path).unwrap();
+        assert!(memory::read(path).is_err());
+        memory::import_file(path, b"original imported settings".to_vec());
+        memory::restore_deleted_file(path);
+        assert!(memory::read(path).is_err());
     }
 }

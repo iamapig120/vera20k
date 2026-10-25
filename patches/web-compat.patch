@@ -1,8 +1,8 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 0ce984bfa..9ac1a2d53 100644
+index 513b001b1..18e270d30 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -330,6 +330,26 @@ dependencies = [
+@@ -387,6 +387,26 @@ dependencies = [
   "crossbeam-utils",
  ]
  
@@ -27,21 +27,37 @@ index 0ce984bfa..9ac1a2d53 100644
 +]
 +
  [[package]]
- name = "core-foundation"
- version = "0.9.4"
-@@ -2173,6 +2193,9 @@ version = "0.2.0"
+ name = "cookie"
+ version = "0.18.2"
+@@ -842,9 +862,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
  dependencies = [
+  "cfg-if",
++ "js-sys",
+  "libc",
+  "r-efi",
+  "wasip2",
++ "wasm-bindgen",
+ ]
+ 
+ [[package]]
+@@ -2659,9 +2681,13 @@ dependencies = [
   "anyhow",
+  "base64 0.22.1",
   "bytemuck",
 + "console_error_panic_hook",
 + "console_log",
 + "cpal",
-  "getrandom",
+  "getrandom 0.3.4",
   "glam",
   "image",
-@@ -2188,6 +2211,10 @@ dependencies = [
-  "sha1",
++ "js-sys",
+  "libc",
+  "log",
+  "objc2 0.6.4",
+@@ -2675,6 +2701,10 @@ dependencies = [
   "thiserror 2.0.18",
+  "ureq",
   "vera20k-core",
 + "wasm-bindgen",
 + "wasm-bindgen-futures",
@@ -50,33 +66,58 @@ index 0ce984bfa..9ac1a2d53 100644
   "wgpu",
   "windows-sys 0.61.2",
   "winit",
-@@ -2214,6 +2241,7 @@ dependencies = [
-  "serde_json",
+@@ -2691,6 +2721,7 @@ dependencies = [
+  "glam",
+  "half",
+  "hashbrown 0.16.1",
++ "js-sys",
+  "libc",
+  "log",
+  "memmap2",
+@@ -2702,6 +2733,8 @@ dependencies = [
   "thiserror 2.0.18",
   "unicode-ident",
+  "vera20k-relay-protocol",
++ "wasm-bindgen",
 + "web-time",
  ]
  
  [[package]]
 diff --git a/Cargo.toml b/Cargo.toml
-index 49ecf117e..49bd6ea25 100644
+index 1500ffb22..8769b7295 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -58,6 +58,9 @@ telemetry-dashboard = ["vera20k-core/telemetry", "dep:getrandom", "dep:sha1"]
+@@ -58,16 +58,22 @@ telemetry-dashboard = ["vera20k-core/telemetry", "dep:sha1"]
  # dashboard alone or the default/shipping feature set.
  debug-tools = ["telemetry-dashboard", "dev-overlays", "vera20k-core/debug-tools"]
  
 +[lib]
 +crate-type = ["cdylib", "rlib"]
 +
++[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
++ureq = { version = "3.5", default-features = false, features = ["rustls", "json"] }
++
  [dependencies]
  # The GPU-free engine. Its dev features follow this package's.
  vera20k-core = { path = "src" }
-@@ -105,6 +108,16 @@ image = { version = "0.25", default-features = false, features = ["png", "ico"]
+ 
+ # Background HTTPS lobby I/O; verified TLS is independent of simulation.
+-ureq = { version = "3.5", default-features = false, features = ["rustls", "json"] }
++
+ base64 = "0.22"
+ 
+ # OS multiplayer session nonces and RFC6455 handshake; no simulation RNG or command intake.
+-getrandom = { version = "=0.3.4" }
++getrandom = { version = "=0.3.4", features = ["wasm_js"] }
+ sha1 = { version = "=0.10.6", optional = true }
+ 
+ # --- GPU rendering ---
+@@ -113,6 +119,17 @@ image = { version = "0.25", default-features = false, features = ["png", "ico"]
  # Playback only: the engine decodes its own audio and hands rodio PCM buffers, so
  # rodio's decoders (symphonia), dither and microphone recording stay off.
  rodio = { version = "0.22", default-features = false, features = ["playback"] }
 +web-time = "1"
++js-sys = "0.3"
 +
 +[target.'cfg(target_arch = "wasm32")'.dependencies]
 +wasm-bindgen = "0.2"
@@ -90,36 +131,38 @@ index 49ecf117e..49bd6ea25 100644
  [target.'cfg(unix)'.dependencies]
  # Continuing presentation uptime across saved-game process restarts. The
 diff --git a/src/Cargo.toml b/src/Cargo.toml
-index 5594bd173..54f1c5543 100644
+index ddab872f7..f51253e8f 100644
 --- a/src/Cargo.toml
 +++ b/src/Cargo.toml
-@@ -56,7 +56,7 @@ serde_json = { workspace = true }
+@@ -64,7 +64,7 @@ serde_json = { workspace = true }
  # RA2's binary asset formats (.mix, .shp, .vxl, .pal, .tmp, .hva) are parsed by
  # hand-written readers in `assets/` — no parser library, no RA2-specific crates.
  # memmap2 maps disk MIX archives instead of reading them into memory.
--memmap2 = "0.9"
+-memmap2 = "0.9.12"
 +
  
  # --- Error handling ---
  thiserror = { workspace = true }
-@@ -80,6 +80,12 @@ num-bigint = "0.4"
+@@ -88,6 +88,14 @@ num-bigint = "0.4"
  # --- Unix saved-list timestamps ---
  # Local time and the user's locale (src/util/native_file_time.rs). The
  # lockfile already carries libc 0.2.
 +[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-+memmap2 = "0.9"
++memmap2 = "0.9.12"
 +
 +[target.'cfg(target_arch = "wasm32")'.dependencies]
 +web-time = "1"
++wasm-bindgen = "0.2"
++js-sys = "0.3"
 +
  [target.'cfg(unix)'.dependencies]
  libc = "0.2"
  
 diff --git a/src/app/app_bundle.rs b/src/app/app_bundle.rs
-index b8d353e7b..441116a3d 100644
+index 3d7b8080a..88cf79f4a 100644
 --- a/src/app/app_bundle.rs
 +++ b/src/app/app_bundle.rs
-@@ -28,7 +28,9 @@ pub fn enter_data_folder() -> bool {
+@@ -25,7 +25,9 @@ pub fn enter_data_folder() -> bool {
      let Some(folder) = data_folder() else {
          return false;
      };
@@ -130,16 +173,16 @@ index b8d353e7b..441116a3d 100644
          Ok(()) => true,
          Err(error) => {
              // The logger does not exist yet.
-@@ -211,7 +213,7 @@ mod first_launch {
+@@ -201,7 +203,7 @@ mod first_launch {
              .to_str()
              .context("The game folder's path is not valid UTF-8")?;
          let path = data_folder.join("config.toml");
 -        let config = match std::fs::read_to_string(&path) {
 +        let config = match crate::util::file_system::read_to_string(&path) {
              Ok(config) => set_paths_key(&config, "ra2_dir", ra2_dir),
-             // RA2MD.INI goes beside config.toml rather than into the game folder.
+             // VERA.INI goes beside config.toml rather than into the game folder.
              Err(error) if error.kind() == std::io::ErrorKind::NotFound => set_paths_key(
-@@ -223,7 +225,7 @@ mod first_launch {
+@@ -213,7 +215,7 @@ mod first_launch {
                  return Err(error).with_context(|| format!("Failed to read {}", path.display()));
              }
          };
@@ -148,7 +191,7 @@ index b8d353e7b..441116a3d 100644
              .with_context(|| format!("Failed to write {}", path.display()))?;
          log::info!("Game folder {ra2_dir} written to {}", path.display());
          Ok(true)
-@@ -307,7 +309,9 @@ mod first_launch {
+@@ -297,7 +299,9 @@ mod first_launch {
      #[cfg(any(target_os = "linux", test))]
      fn steam_libraries(steam: &Path) -> Vec<PathBuf> {
          let mut libraries = vec![steam.to_path_buf()];
@@ -159,7 +202,7 @@ index b8d353e7b..441116a3d 100644
              libraries.extend(list.lines().filter_map(steam_library_path));
          }
          libraries
-@@ -369,7 +373,7 @@ mod first_launch {
+@@ -359,7 +363,7 @@ mod first_launch {
      /// The real folders in `folder`; links are not followed, so the search
      /// stays inside the prefix.
      fn subfolders(folder: &Path) -> impl Iterator<Item = PathBuf> {
@@ -169,7 +212,7 @@ index b8d353e7b..441116a3d 100644
              .flatten()
              .flatten()
 diff --git a/src/app/diagnostics/fps_overlay.rs b/src/app/diagnostics/fps_overlay.rs
-index b37bd6b60..f57f85954 100644
+index 151135691..1a226bb23 100644
 --- a/src/app/diagnostics/fps_overlay.rs
 +++ b/src/app/diagnostics/fps_overlay.rs
 @@ -4,7 +4,7 @@
@@ -182,7 +225,7 @@ index b37bd6b60..f57f85954 100644
  use crate::render::batch::{BatchRenderer, CameraUniform, InstanceBufferPool};
  use crate::render::bit_font::BitFont;
 diff --git a/src/app/diagnostics/shell_capture.rs b/src/app/diagnostics/shell_capture.rs
-index 59b53b787..e957743e6 100644
+index a65dc21e5..709d7c0e3 100644
 --- a/src/app/diagnostics/shell_capture.rs
 +++ b/src/app/diagnostics/shell_capture.rs
 @@ -9,7 +9,7 @@ use std::ffi::OsString;
@@ -194,7 +237,7 @@ index 59b53b787..e957743e6 100644
  
  use anyhow::{Context, Result, bail, ensure};
  use serde::Serialize;
-@@ -2414,8 +2414,8 @@ mod tests {
+@@ -3100,8 +3100,8 @@ mod tests {
      }
  
      fn new_output_path(tag: &str) -> PathBuf {
@@ -206,10 +249,10 @@ index 59b53b787..e957743e6 100644
              .as_nanos();
          std::env::temp_dir().join(format!(
 diff --git a/src/app/diagnostics/shell_capture/movies/lan.rs b/src/app/diagnostics/shell_capture/movies/lan.rs
-index 09d104c75..53ed1d0e1 100644
+index fd8da67e1..eea0b9dd7 100644
 --- a/src/app/diagnostics/shell_capture/movies/lan.rs
 +++ b/src/app/diagnostics/shell_capture/movies/lan.rs
-@@ -4631,8 +4631,8 @@ mod tests {
+@@ -4765,8 +4765,8 @@ mod tests {
          let root = std::env::temp_dir().join(format!(
              "vera20k-lan-transfer-cleanup-{}-{}",
              std::process::id(),
@@ -285,10 +328,19 @@ index 2fba33bea..cf35358ad 100644
  use anyhow::{Context, Result, bail, ensure};
  use serde_json::{Value, json};
 diff --git a/src/app/frame.rs b/src/app/frame.rs
-index 4609b60ae..d5fc28ff5 100644
+index 3c85289f2..b8314d959 100644
 --- a/src/app/frame.rs
 +++ b/src/app/frame.rs
-@@ -536,7 +536,8 @@ impl App {
+@@ -447,6 +447,8 @@ impl App {
+                 splash,
+             )?;
+             if presented {
++                #[cfg(target_arch = "wasm32")]
++                crate::web::frame_presented();
+                 state
+                     .frontend
+                     .startup_splash
+@@ -536,7 +538,8 @@ impl App {
              Self::follow_window_size(state);
              return Ok(());
          };
@@ -298,7 +350,7 @@ index 4609b60ae..d5fc28ff5 100644
          let mut encoder: wgpu::CommandEncoder =
              state
                  .renderer
-@@ -569,7 +570,7 @@ impl App {
+@@ -569,7 +572,7 @@ impl App {
          match &state.frontend.screen {
              GameScreen::InGame if crate::app::match_runtime::network_failure::pending(state) => {
                  crate::app::frontend::skirmish_shell_render::render_network_failure(
@@ -307,7 +359,7 @@ index 4609b60ae..d5fc28ff5 100644
                  )?;
              }
              GameScreen::MainMenu if state.frontend.main_menu_shell_error.is_some() => {
-@@ -586,26 +587,26 @@ impl App {
+@@ -586,26 +589,26 @@ impl App {
                      crate::app::frontend::shell_transition::render_shell_first_paint_slide(
                          state,
                          &mut encoder,
@@ -338,7 +390,7 @@ index 4609b60ae..d5fc28ff5 100644
                  }
              }
              GameScreen::MainMenu if state.frontend.fullscreen_movie.is_some() => {
-@@ -614,7 +615,7 @@ impl App {
+@@ -614,7 +617,7 @@ impl App {
                      crate::app::frontend::movies_credits_render::render_fullscreen_movie(
                          state,
                          &mut encoder,
@@ -347,7 +399,7 @@ index 4609b60ae..d5fc28ff5 100644
                      )?;
                      presented_shell = PresentedShell::FullscreenMovie;
                  } else {
-@@ -623,7 +624,7 @@ impl App {
+@@ -623,7 +626,7 @@ impl App {
                      crate::app::frontend::movies_credits_render::render_fullscreen_black(
                          state,
                          &mut encoder,
@@ -356,7 +408,7 @@ index 4609b60ae..d5fc28ff5 100644
                      );
                  }
              }
-@@ -633,14 +634,14 @@ impl App {
+@@ -633,14 +636,14 @@ impl App {
                      crate::app::frontend::movies_credits_render::render_credits_roll(
                          state,
                          &mut encoder,
@@ -373,7 +425,7 @@ index 4609b60ae..d5fc28ff5 100644
                      );
                  }
              }
-@@ -650,14 +651,14 @@ impl App {
+@@ -650,14 +653,14 @@ impl App {
                  } = crate::app::frontend::shell_transition::render_shell_first_paint_slide(
                      state,
                      &mut encoder,
@@ -390,7 +442,7 @@ index 4609b60ae..d5fc28ff5 100644
                      )? {
                          presented_shell = PresentedShell::MovieList;
                      } else {
-@@ -667,27 +668,27 @@ impl App {
+@@ -667,27 +670,27 @@ impl App {
                      if crate::app::frontend::campaign_shell_render::render_campaign_page(
                          state,
                          &mut encoder,
@@ -423,7 +475,7 @@ index 4609b60ae..d5fc28ff5 100644
                      )? {
                          presented_shell = crate::app::frontend::wol_welcome_render::presented_wol_page(state);
                      } else {
-@@ -697,7 +698,7 @@ impl App {
+@@ -697,7 +700,7 @@ impl App {
                      if crate::app::frontend::load_saved_game_render::render_load_saved_game_page(
                          state,
                          &mut encoder,
@@ -432,7 +484,7 @@ index 4609b60ae..d5fc28ff5 100644
                      )? {
                          presented_shell = PresentedShell::LoadSavedGame;
                      } else {
-@@ -705,14 +706,14 @@ impl App {
+@@ -705,14 +708,14 @@ impl App {
                      }
                  } else if Self::native_launcher_options_active(state) {
                      crate::app::frontend::skirmish_shell_render::render_launcher_options(
@@ -449,7 +501,7 @@ index 4609b60ae..d5fc28ff5 100644
                      )?;
                      if state.frontend.skirmish_shell_chrome.is_some() {
                          presented_shell = PresentedShell::Skirmish;
-@@ -721,7 +722,7 @@ impl App {
+@@ -721,7 +724,7 @@ impl App {
                      match crate::app::frontend::menu_page_render::render_active_menu_page(
                          state,
                          &mut encoder,
@@ -458,7 +510,7 @@ index 4609b60ae..d5fc28ff5 100644
                      )? {
                          crate::app::frontend::menu_page_render::MenuPageRenderResult::Rendered => {
                              presented_shell = match page {
-@@ -741,7 +742,7 @@ impl App {
+@@ -741,7 +744,7 @@ impl App {
                      match crate::app::frontend::main_menu_shell_render::render_main_menu_shell(
                          state,
                          &mut encoder,
@@ -467,7 +519,7 @@ index 4609b60ae..d5fc28ff5 100644
                      )? {
                          crate::app::frontend::main_menu_shell_render::MainMenuShellRenderResult::Rendered {
                              title_receipt,
-@@ -761,7 +762,7 @@ impl App {
+@@ -761,7 +764,7 @@ impl App {
                  match crate::app::loading::pump::render_loading_screen(
                      state,
                      &mut encoder,
@@ -476,7 +528,7 @@ index 4609b60ae..d5fc28ff5 100644
                  ) {
                      crate::app::loading::pump::LoadingRenderResult::NativeRendered => {}
                      crate::app::loading::pump::LoadingRenderResult::GenericFallback => {
-@@ -781,7 +782,7 @@ impl App {
+@@ -781,7 +784,7 @@ impl App {
              }
              GameScreen::InGame if crate::app::frontend::skirmish_shell_render::connection_shell_drawable(state) => {
                  // 0xEA is pushed over whatever the game shows.
@@ -485,7 +537,7 @@ index 4609b60ae..d5fc28ff5 100644
              }
              GameScreen::InGame if crate::app::frontend::skirmish_shell_render::native_in_game_shell_active(state) => {
                  // 621FCE -> 72F540 clears and paints a complete active-game shell.
-@@ -789,21 +790,21 @@ impl App {
+@@ -789,21 +792,21 @@ impl App {
                  if state.match_state.match_presentation.in_game_menu == crate::ui::pause_menu::InGameMenuState::Menu {
                      let buttons = crate::app::input::pause_menu::button_states(state);
                      crate::app::frontend::skirmish_shell_render::render_pause_menu_shell(
@@ -514,7 +566,7 @@ index 4609b60ae..d5fc28ff5 100644
                      )?;
                  }
              }
-@@ -861,7 +862,7 @@ impl App {
+@@ -861,7 +864,7 @@ impl App {
                      let render_output = render::render_game(state, &mut encoder, times)?;
                      state
                          .renderer.combat_light_renderer
@@ -523,7 +575,7 @@ index 4609b60ae..d5fc28ff5 100644
                      render_output
                  };
                  #[cfg(feature = "telemetry-dashboard")]
-@@ -882,20 +883,20 @@ impl App {
+@@ -882,20 +885,20 @@ impl App {
                      crate::app::frontend::skirmish_shell_render::render_coop_score(
                          state,
                          &mut encoder,
@@ -547,7 +599,7 @@ index 4609b60ae..d5fc28ff5 100644
                      )?
                  } else {
                      Self::score_shell_active(state)
-@@ -903,13 +904,13 @@ impl App {
+@@ -903,13 +906,13 @@ impl App {
                              crate::app::frontend::shell_transition::render_shell_first_paint_slide(
                                  state,
                                  &mut encoder,
@@ -563,7 +615,7 @@ index 4609b60ae..d5fc28ff5 100644
                          )?)
                  };
                  if score_rendered {
-@@ -926,7 +927,7 @@ impl App {
+@@ -926,7 +929,7 @@ impl App {
              &state.renderer.gpu,
              &state.renderer.batch_renderer,
              &mut encoder,
@@ -572,7 +624,7 @@ index 4609b60ae..d5fc28ff5 100644
          );
          if state.frontend.screen == GameScreen::InGame
              && let Some(offset_px) = runtime_pass.screen_shake_offset
-@@ -934,7 +935,7 @@ impl App {
+@@ -934,7 +937,7 @@ impl App {
              // Native RenderFrame_main finishes composing overlays and its
              // software cursor before Screen__UpdatePrimarySurface moves the
              // central primary-client rectangle.
@@ -581,7 +633,7 @@ index 4609b60ae..d5fc28ff5 100644
          }
          Self::show_os_cursor_only_without_game_cursor(state, game_render_output.is_some());
  
-@@ -951,8 +952,8 @@ impl App {
+@@ -951,8 +954,8 @@ impl App {
              Some(crate::render::frame_readback::PendingBgra8Readback::encode(
                  &state.renderer.gpu.device,
                  &mut encoder,
@@ -592,7 +644,7 @@ index 4609b60ae..d5fc28ff5 100644
                  state.renderer.gpu.config.width,
                  state.renderer.gpu.config.height,
              )?)
-@@ -975,8 +976,8 @@ impl App {
+@@ -975,8 +978,8 @@ impl App {
              Some(crate::render::frame_readback::PendingBgra8Readback::encode(
                  &state.renderer.gpu.device,
                  &mut encoder,
@@ -603,7 +655,7 @@ index 4609b60ae..d5fc28ff5 100644
                  state.renderer.gpu.config.width,
                  state.renderer.gpu.config.height,
              )?)
-@@ -985,7 +986,7 @@ impl App {
+@@ -985,7 +988,7 @@ impl App {
          };
          let retail_screenshot_current_frame =
              std::mem::take(&mut state.match_state.input.retail_screenshot_requested);
@@ -612,7 +664,7 @@ index 4609b60ae..d5fc28ff5 100644
          let pending_retail_screenshot = state
              .renderer
              .retail_screenshot_frame_cache
-@@ -993,7 +994,7 @@ impl App {
+@@ -993,7 +996,7 @@ impl App {
                  retail_screenshot_current_frame,
                  &state.renderer.gpu.device,
                  &mut encoder,
@@ -621,7 +673,7 @@ index 4609b60ae..d5fc28ff5 100644
                  state.renderer.gpu.config.width,
                  state.renderer.gpu.config.height,
                  state.renderer.upscale_pass.as_ref(),
-@@ -1015,6 +1016,7 @@ impl App {
+@@ -1015,12 +1018,15 @@ impl App {
          } else {
              None
          };
@@ -629,7 +681,15 @@ index 4609b60ae..d5fc28ff5 100644
          let submission = state
              .renderer
              .gpu
-@@ -1098,7 +1100,7 @@ impl App {
+             .queue
+             .submit(std::iter::once(encoder.finish()));
+         output.present();
++        #[cfg(target_arch = "wasm32")]
++        crate::web::frame_presented();
+         // wgpu 27 requires released surface references before reconfiguration;
+         // the diagnostic action below may resize the window.
+         // https://docs.rs/wgpu/27.0.1/wgpu/struct.Surface.html#method.configure
+@@ -1098,7 +1104,7 @@ impl App {
                  submission.clone(),
                  capture_timeout.expect("capture timeout exists with pending readback"),
              )?;
@@ -638,7 +698,7 @@ index 4609b60ae..d5fc28ff5 100644
              let capture_terminal = if shell_capture_current_frame {
                  let session = shell_capture
                      .as_deref_mut()
-@@ -1124,7 +1126,7 @@ impl App {
+@@ -1124,7 +1130,7 @@ impl App {
                  Ok(pixels) => match crate::render::screenshot::write_retail_screenshot(
                      state.renderer.gpu.config.width,
                      state.renderer.gpu.config.height,
@@ -727,7 +787,7 @@ index 45bcf5334..d7e3a37c6 100644
      );
      let mut labels = Vec::new();
 diff --git a/src/app/frontend/main_menu_shell_render.rs b/src/app/frontend/main_menu_shell_render.rs
-index ede804503..a29518ff1 100644
+index 618501939..cd9d7c121 100644
 --- a/src/app/frontend/main_menu_shell_render.rs
 +++ b/src/app/frontend/main_menu_shell_render.rs
 @@ -1,7 +1,7 @@
@@ -739,6 +799,40 @@ index ede804503..a29518ff1 100644
  
  use anyhow::Result;
  
+@@ -770,12 +770,10 @@ fn render_main_menu_shell_to_target_inner(
+         let Some((buffer, count)) = buffer.as_ref() else {
+             continue;
+         };
+-        pass.set_scissor_rect(
+-            draw.scissor.x,
+-            draw.scissor.y,
+-            draw.scissor.w,
+-            draw.scissor.h,
+-        );
++        let Some(scissor) = draw.scissor.clipped_to(state.renderer.gpu.config.width, state.renderer.gpu.config.height) else {
++            continue;
++        };
++        pass.set_scissor_rect(scissor.x, scissor.y, scissor.w, scissor.h);
+         state.renderer.batch_renderer.draw_with_buffer_passthrough(
+             &mut pass,
+             state.renderer.bit_font.atlas(),
+@@ -804,12 +802,10 @@ fn render_main_menu_shell_to_target_inner(
+             let Some((buffer, count)) = buffer.as_ref() else {
+                 continue;
+             };
+-            pass.set_scissor_rect(
+-                draw.scissor.x,
+-                draw.scissor.y,
+-                draw.scissor.w,
+-                draw.scissor.h,
+-            );
++            let Some(scissor) = draw.scissor.clipped_to(state.renderer.gpu.config.width, state.renderer.gpu.config.height) else {
++            continue;
++        };
++        pass.set_scissor_rect(scissor.x, scissor.y, scissor.w, scissor.h);
+             state.renderer.batch_renderer.draw_with_buffer_passthrough(
+                 &mut pass,
+                 state.renderer.bit_font.atlas(),
 diff --git a/src/app/frontend/menu_page_render.rs b/src/app/frontend/menu_page_render.rs
 index 12af0b822..3f5a7f0ef 100644
 --- a/src/app/frontend/menu_page_render.rs
@@ -797,7 +891,7 @@ index 1bb40eb9a..c4570cb9d 100644
      /// The wait lasts while the music and a voice both play, and no longer
      /// than the ceiling.
 diff --git a/src/app/frontend/score_shell_render.rs b/src/app/frontend/score_shell_render.rs
-index 2864eae95..5e3c99380 100644
+index 53e20b672..bbda2d29a 100644
 --- a/src/app/frontend/score_shell_render.rs
 +++ b/src/app/frontend/score_shell_render.rs
 @@ -75,7 +75,7 @@ pub(crate) fn render_score_page(
@@ -809,6 +903,27 @@ index 2864eae95..5e3c99380 100644
      let monitor_frame = if children {
          crate::app::frontend::menu_page_render::paint_shell_monitor(state)
      } else {
+diff --git a/src/app/frontend/shell_pass.rs b/src/app/frontend/shell_pass.rs
+index 3ea995557..a0675cdd1 100644
+--- a/src/app/frontend/shell_pass.rs
++++ b/src/app/frontend/shell_pass.rs
+@@ -159,12 +159,10 @@ pub(crate) fn encode_shell_pass(
+         let Some((buffer, count)) = buffer.as_ref() else {
+             continue;
+         };
+-        pass.set_scissor_rect(
+-            draw.scissor.x,
+-            draw.scissor.y,
+-            draw.scissor.w,
+-            draw.scissor.h,
+-        );
++        let Some(scissor) = draw.scissor.clipped_to(state.render_width(), state.render_height()) else {
++            continue;
++        };
++        pass.set_scissor_rect(scissor.x, scissor.y, scissor.w, scissor.h);
+         batch.draw_with_buffer_passthrough(
+             &mut pass,
+             state.renderer.bit_font.atlas(),
 diff --git a/src/app/frontend/shell_transition.rs b/src/app/frontend/shell_transition.rs
 index 689f2d099..b88fb8377 100644
 --- a/src/app/frontend/shell_transition.rs
@@ -832,10 +947,10 @@ index 689f2d099..b88fb8377 100644
      #[test]
      fn campaign_score_owns_dialog_0x103_and_its_teardown_result() {
 diff --git a/src/app/frontend/skirmish_session.rs b/src/app/frontend/skirmish_session.rs
-index a7dd598f3..3017c40f5 100644
+index ee2aa429b..5d44d25ea 100644
 --- a/src/app/frontend/skirmish_session.rs
 +++ b/src/app/frontend/skirmish_session.rs
-@@ -1266,13 +1266,13 @@ impl MultiplayerShellRuntime {
+@@ -1334,13 +1334,13 @@ impl MultiplayerShellRuntime {
          else {
              return;
          };
@@ -851,25 +966,7 @@ index a7dd598f3..3017c40f5 100644
              log::warn!("Could not write {}: {err}", path.display());
          }
      }
-@@ -1295,7 +1295,7 @@ impl MultiplayerShellRuntime {
-         let Some(path) = self.ini_path.as_deref() else {
-             return;
-         };
--        let existing = match std::fs::read(path) {
-+        let existing = match crate::util::file_system::read(path) {
-             Ok(bytes) => bytes,
-             Err(err) if err.kind() == io::ErrorKind::NotFound => Vec::new(),
-             Err(err) => {
-@@ -1309,7 +1309,7 @@ impl MultiplayerShellRuntime {
-         // Other existing profile writers own their sections. Merge those disk
-         // bytes while retaining this owner's process inputs independently.
-         let updated = update(self, &existing);
--        if let Err(err) = std::fs::write(path, updated) {
-+        if let Err(err) = crate::util::file_system::write(path, updated) {
-             log::warn!(
-                 "Could not persist multiplayer settings to {}: {err}",
-                 path.display()
-@@ -1521,7 +1521,7 @@ fn load_persistence(
+@@ -1575,7 +1575,7 @@ fn load_persistence(
      let Some(path) = path else {
          return fallback();
      };
@@ -878,6 +975,27 @@ index a7dd598f3..3017c40f5 100644
          Ok(bytes) => {
              let snapshot = read_setup_snapshot(&bytes, defaults, SetupProfile::Skirmish)
                  .unwrap_or_else(|err| {
+diff --git a/src/app/frontend/skirmish_shell_render.rs b/src/app/frontend/skirmish_shell_render.rs
+index eb08e793d..74dff0b1d 100644
+--- a/src/app/frontend/skirmish_shell_render.rs
++++ b/src/app/frontend/skirmish_shell_render.rs
+@@ -983,12 +983,10 @@ fn draw_scissored_text<'a>(
+         let Some((buffer, count)) = buf.as_ref() else {
+             continue;
+         };
+-        pass.set_scissor_rect(
+-            draw.scissor.x,
+-            draw.scissor.y,
+-            draw.scissor.w,
+-            draw.scissor.h,
+-        );
++        let Some(scissor) = draw.scissor.clipped_to(state.render_width(), state.render_height()) else {
++            continue;
++        };
++        pass.set_scissor_rect(scissor.x, scissor.y, scissor.w, scissor.h);
+         state.renderer.batch_renderer.draw_with_buffer_passthrough(
+             pass,
+             state.renderer.bit_font.atlas(),
 diff --git a/src/app/frontend/skirmish_shell_render/coop_score.rs b/src/app/frontend/skirmish_shell_render/coop_score.rs
 index b51fe6f8a..d4edef230 100644
 --- a/src/app/frontend/skirmish_shell_render/coop_score.rs
@@ -918,7 +1036,7 @@ index abb3841d2..343eb98b3 100644
  /// LB row colors carry packed00BBGGRR; -1 means the ordinary yellow text.
  fn row_rgb(color: Option<u32>) -> [f32; 3] {
 diff --git a/src/app/frontend/skirmish_shell_render/launcher_options.rs b/src/app/frontend/skirmish_shell_render/launcher_options.rs
-index d9a1abc0e..046194074 100644
+index 13c9afdc7..02d61469d 100644
 --- a/src/app/frontend/skirmish_shell_render/launcher_options.rs
 +++ b/src/app/frontend/skirmish_shell_render/launcher_options.rs
 @@ -16,7 +16,7 @@ use crate::ui::main_menu_dialogs::options::{
@@ -930,8 +1048,42 @@ index d9a1abc0e..046194074 100644
  
  /// A Zoom row: the zoom and the battle's size in game pixels in this window,
  /// what `App::sync_zoom_pass` will give the match.
+@@ -513,12 +513,10 @@ pub(crate) fn render_launcher_options(
+             if draw.scissor.w == 0 || draw.scissor.h == 0 {
+                 continue;
+             }
+-            pass.set_scissor_rect(
+-                draw.scissor.x,
+-                draw.scissor.y,
+-                draw.scissor.w,
+-                draw.scissor.h,
+-            );
++            let Some(scissor) = draw.scissor.clipped_to(state.render_width(), state.render_height()) else {
++            continue;
++        };
++        pass.set_scissor_rect(scissor.x, scissor.y, scissor.w, scissor.h);
+             batch.draw_with_buffer_passthrough(
+                 &mut pass,
+                 state.renderer.bit_font.atlas(),
+@@ -533,12 +531,10 @@ pub(crate) fn render_launcher_options(
+     }
+     for (draw, buffer) in popup_text.iter().zip(&popup_text_buffers) {
+         if let Some((buffer, count)) = buffer {
+-            pass.set_scissor_rect(
+-                draw.scissor.x,
+-                draw.scissor.y,
+-                draw.scissor.w,
+-                draw.scissor.h,
+-            );
++            let Some(scissor) = draw.scissor.clipped_to(state.render_width(), state.render_height()) else {
++            continue;
++        };
++        pass.set_scissor_rect(scissor.x, scissor.y, scissor.w, scissor.h);
+             batch.draw_with_buffer_passthrough(
+                 &mut pass,
+                 state.renderer.bit_font.atlas(),
 diff --git a/src/app/frontend/skirmish_shell_render/multiplayer_setup.rs b/src/app/frontend/skirmish_shell_render/multiplayer_setup.rs
-index 6e4c4f687..6d8fc7f98 100644
+index 23545b27e..7ab9579bd 100644
 --- a/src/app/frontend/skirmish_shell_render/multiplayer_setup.rs
 +++ b/src/app/frontend/skirmish_shell_render/multiplayer_setup.rs
 @@ -27,7 +27,7 @@ use crate::app::frontend::shell_transition::ShellSlideKind;
@@ -957,10 +1109,10 @@ index 8d4322ec9..e92740d37 100644
  pub(crate) fn render_network_options(
      state: &mut AppState,
 diff --git a/src/app/frontend/skirmish_shell_render/preview.rs b/src/app/frontend/skirmish_shell_render/preview.rs
-index 87ebc54e2..6d3092686 100644
+index 691494e70..d2103ab53 100644
 --- a/src/app/frontend/skirmish_shell_render/preview.rs
 +++ b/src/app/frontend/skirmish_shell_render/preview.rs
-@@ -167,7 +167,7 @@ pub(super) fn decode_randmap_preview_from_runtime_file()
+@@ -195,7 +195,7 @@ pub(super) fn decode_randmap_preview_from_runtime_file()
  -> Option<crate::map::preview::DecodedPreview> {
      let config = crate::util::config::GameConfig::load().ok()?;
      let preview_path = config.paths.ra2_dir.join(RANDMAP_PREVIEW_FILE_NAME);
@@ -1005,7 +1157,7 @@ index 087015292..b814d8990 100644
  /// The popups paint over the covered dialog, before their own controls.
  pub(super) const POPUP_DEPTHS: ModalDepths = ModalDepths {
 diff --git a/src/app/frontend/skirmish_shell_render/wol_login.rs b/src/app/frontend/skirmish_shell_render/wol_login.rs
-index 0020d4b79..78a33f76e 100644
+index f0eaddea3..669b58f61 100644
 --- a/src/app/frontend/skirmish_shell_render/wol_login.rs
 +++ b/src/app/frontend/skirmish_shell_render/wol_login.rs
 @@ -17,7 +17,7 @@ use crate::render::batch::SpriteInstance;
@@ -1018,7 +1170,7 @@ index 0020d4b79..78a33f76e 100644
  /// Sprites (skirmish atlas) and texts of `0x10F`'s children; `popup` paints
  /// after everything else.
 diff --git a/src/app/frontend/skirmish_shell_render/wol_page.rs b/src/app/frontend/skirmish_shell_render/wol_page.rs
-index 97e592f25..01e4b8e05 100644
+index 1eb1cf12a..e6a640c68 100644
 --- a/src/app/frontend/skirmish_shell_render/wol_page.rs
 +++ b/src/app/frontend/skirmish_shell_render/wol_page.rs
 @@ -3,7 +3,7 @@
@@ -1031,7 +1183,7 @@ index 97e592f25..01e4b8e05 100644
  use super::SHELL_LABEL_TEXT_RGB;
  use super::controls::list_controls;
 diff --git a/src/app/frontend/startup_splash.rs b/src/app/frontend/startup_splash.rs
-index 47c5a76ba..07adfa780 100644
+index 456d83be0..7a3e982a8 100644
 --- a/src/app/frontend/startup_splash.rs
 +++ b/src/app/frontend/startup_splash.rs
 @@ -5,7 +5,7 @@
@@ -1051,7 +1203,7 @@ index 47c5a76ba..07adfa780 100644
      let source_view = presenter.source_render_view();
      let mut encoder = gpu
          .device
-@@ -244,8 +245,9 @@ pub(crate) fn render_and_present(
+@@ -245,8 +246,9 @@ pub(crate) fn render_and_present(
              1,
          );
      }
@@ -1064,7 +1216,7 @@ index 47c5a76ba..07adfa780 100644
      output.present();
      Ok(true)
 diff --git a/src/app/frontend/state.rs b/src/app/frontend/state.rs
-index 3e89496c6..42af3bac2 100644
+index b12cd74a7..d36df1fb2 100644
 --- a/src/app/frontend/state.rs
 +++ b/src/app/frontend/state.rs
 @@ -5,7 +5,7 @@
@@ -1077,7 +1229,7 @@ index 3e89496c6..42af3bac2 100644
  use super::startup_splash;
  use crate::app::shell_random_map::{RandomMapGenerationJob, RandomMapGenerationRetention};
 diff --git a/src/app/frontend/wol_welcome_render.rs b/src/app/frontend/wol_welcome_render.rs
-index b9a76e103..affd5d2d0 100644
+index 3f4131e87..8e9308deb 100644
 --- a/src/app/frontend/wol_welcome_render.rs
 +++ b/src/app/frontend/wol_welcome_render.rs
 @@ -337,7 +337,7 @@ pub(crate) fn render_wol_page(
@@ -1108,10 +1260,10 @@ index b9a76e103..affd5d2d0 100644
      );
      for (button, pressed, enabled) in &painted_buttons {
 diff --git a/src/app/handler.rs b/src/app/handler.rs
-index b2e07d8b7..b995f4cd7 100644
+index 0c30628b4..2e278153b 100644
 --- a/src/app/handler.rs
 +++ b/src/app/handler.rs
-@@ -333,12 +333,41 @@ impl ApplicationHandler for App {
+@@ -346,12 +346,41 @@ impl ApplicationHandler for App {
                  return;
              }
          };
@@ -1155,7 +1307,16 @@ index b2e07d8b7..b995f4cd7 100644
              Ok(mut state) => {
                  if let Some(request) = self.spawn_request.take()
                      && let Err(error) = Self::start_spawn_session(&mut state, request)
-@@ -1426,6 +1455,30 @@ impl ApplicationHandler for App {
+@@ -1443,6 +1472,8 @@ impl ApplicationHandler for App {
+             WindowEvent::RedrawRequested => {
+                 if let Err(err) = Self::render_frame(state, event_loop, None, None) {
+                     log::error!("Render: {:#}", err);
++                    #[cfg(target_arch = "wasm32")]
++                    { crate::web::set_status(&format!("运行错误：画面渲染失败：{err:#}")); event_loop.exit(); }
+                 }
+             }
+             _ => {}
+@@ -1450,6 +1481,28 @@ impl ApplicationHandler for App {
      }
  
      fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -1169,9 +1330,7 @@ index b2e07d8b7..b995f4cd7 100644
 +                        if let Some(error) = state.frontend.main_menu_shell_error.as_ref() {
 +                            crate::web::set_status(&format!("资源加载失败：{error}"));
 +                        } else {
-+                            crate::web::set_status(
-+                                "已启动。预览版：单线程、无音频，联网尚未适配。",
-+                            );
++                            crate::web::set_status("正在准备首帧…");
 +                        }
 +                        state.platform.window.request_redraw();
 +                        self.state = Some(state);
@@ -1187,7 +1346,7 @@ index b2e07d8b7..b995f4cd7 100644
              Self::follow_window_full_screen(state);
              // cursor lock: the OS drops the clip on focus loss /
 diff --git a/src/app/initialize.rs b/src/app/initialize.rs
-index bb63e9716..296d145ab 100644
+index 969331632..7e9891cd5 100644
 --- a/src/app/initialize.rs
 +++ b/src/app/initialize.rs
 @@ -156,12 +156,12 @@ impl App {
@@ -1205,11 +1364,12 @@ index bb63e9716..296d145ab 100644
          // One parsed retail profile snapshot yields two ordered products: the
          // independent frontend size selected after the early Video read, and the later
          // full-read profile retained by persistence. Capture is a sealed
-@@ -267,639 +267,662 @@ impl App {
+@@ -285,642 +285,684 @@ impl App {
          if let Some(icon) = &retail_icon {
              icon.set_dock_icon();
          }
--        let gpu: GpuContext = GpuContext::new(window.clone())?;
+-        let gpu: GpuContext =
+-            GpuContext::new(window.clone(), event_loop.owned_display_handle(), capture)?;
 -        let batch_renderer: BatchRenderer = BatchRenderer::new(&gpu);
 -        let status_screen_fill = batch_renderer.create_texture(&gpu, &[255; 4], 1, 1);
 -        let status_card_glow =
@@ -1293,8 +1453,9 @@ index bb63e9716..296d145ab 100644
 -        let outcome_banner_art = startup_asset_manager.as_ref().and_then(|assets| {
 -            crate::app::presentation::outcome_banner::OutcomeBannerArt::build(
 -                &gpu,
++        let display = event_loop.owned_display_handle();
 +        Ok(async move {
-+            let gpu: GpuContext = GpuContext::new_async(window.clone()).await?;
++            let gpu: GpuContext = GpuContext::new_async(window.clone(), display, capture).await?;
 +            let batch_renderer: BatchRenderer = BatchRenderer::new(&gpu);
 +            let status_screen_fill = batch_renderer.create_texture(&gpu, &[255; 4], 1, 1);
 +            let status_card_glow =
@@ -1425,7 +1586,8 @@ index bb63e9716..296d145ab 100644
 -                .as_ref()
 -                .map(|config| config.ini.clone())
 -                .unwrap_or_default(),
--        );
+-        )
+-        .with_personal_rules(personal_rules);
 -        process_assets.csf = startup_csf;
 -        let (startup_rules, startup_rules_projection) = startup_asset_manager
 -            .as_ref()
@@ -1526,8 +1688,12 @@ index bb63e9716..296d145ab 100644
 +                    Err(err) => {
 +                        log::warn!("Initial retail startup splash present deferred: {err:#}");
 +                    }
-+                }
-+            }
+                 }
+-                _ => Ok(Vec::new()),
+             }
+-            .unwrap_or_else(|err| {
+-                log::warn!("Could not list Skirmish scenario records: {err:#}");
+-                Vec::new()
 +            if external_launch {
 +                log::info!("External launch: process-start splash skipped");
 +            }
@@ -1535,14 +1701,16 @@ index bb63e9716..296d145ab 100644
 +            // presented swapchain frame stays composited while this thread blocks,
 +            // and the hold armed above is measured from that present, so a slow
 +            // load is spent inside the five seconds instead of before them.
-+            let mut process_assets = crate::app::process_assets::ProcessAssets::new_with_ini_config(
-+                startup_options.media_archive_mode,
-+                startup_audio.load_audio_indices,
-+                game_config
-+                    .as_ref()
-+                    .map(|config| config.ini.clone())
-+                    .unwrap_or_default(),
-+            );
++            let mut process_assets =
++                crate::app::process_assets::ProcessAssets::new_with_ini_config(
++                    startup_options.media_archive_mode,
++                    startup_audio.load_audio_indices,
++                    game_config
++                        .as_ref()
++                        .map(|config| config.ini.clone())
++                        .unwrap_or_default(),
++                )
++                .with_personal_rules(personal_rules);
 +            process_assets.csf = startup_csf;
 +            let (startup_rules, startup_rules_projection) = startup_asset_manager
 +                .as_ref()
@@ -1566,12 +1734,8 @@ index bb63e9716..296d145ab 100644
 +                    Err(err) => {
 +                        log::warn!("Could not register retail neutral shell archives: {err:#}");
 +                    }
-                 }
--                _ => Ok(Vec::new()),
-             }
--            .unwrap_or_else(|err| {
--                log::warn!("Could not list Skirmish scenario records: {err:#}");
--                Vec::new()
++                }
++            }
 +            let skirmish_shell_chrome = None;
 +            let main_menu_shell_chrome = startup_asset_manager.as_ref().and_then(|assets| {
 +                startup_asset_or_error(
@@ -1863,11 +2027,29 @@ index bb63e9716..296d145ab 100644
 -        }
 +            let music_player = startup_audio
 +                .initialize_music_output
-+                .then(MusicPlayer::new)
++                .then(|| {
++                    #[cfg(target_arch = "wasm32")]
++                    {
++                        crate::web::take_music_output()
++                    }
++                    #[cfg(not(target_arch = "wasm32"))]
++                    {
++                        MusicPlayer::new()
++                    }
++                })
 +                .flatten();
 +            let sfx_player = startup_audio
 +                .initialize_sfx_output
-+                .then(SfxPlayer::new)
++                .then(|| {
++                    #[cfg(target_arch = "wasm32")]
++                    {
++                        crate::web::take_sfx_output()
++                    }
++                    #[cfg(not(target_arch = "wasm32"))]
++                    {
++                        SfxPlayer::new()
++                    }
++                })
 +                .flatten();
 +            let launcher_audio_available =
 +                crate::app::audio_runtime::derive_launcher_audio_available(
@@ -2187,6 +2369,7 @@ index bb63e9716..296d145ab 100644
 +                    campaign_art: None,
 +                    load_saved_game: None,
 +                    wol: None,
++                    online_cleanup: Default::default(),
 +                    wol_account: Default::default(),
 +                    wol_test_credentials: Vec::new(),
 +                    network_options: None,
@@ -2305,6 +2488,7 @@ index bb63e9716..296d145ab 100644
 -                campaign_art: None,
 -                load_saved_game: None,
 -                wol: None,
+-                online_cleanup: Default::default(),
 -                wol_account: Default::default(),
 -                wol_test_credentials: Vec::new(),
 -                network_options: None,
@@ -2472,10 +2656,10 @@ index bb63e9716..296d145ab 100644
  }
  
 diff --git a/src/app/input/camera.rs b/src/app/input/camera.rs
-index d54303524..a2da2858b 100644
+index 80ad92f90..5a207e5fd 100644
 --- a/src/app/input/camera.rs
 +++ b/src/app/input/camera.rs
-@@ -419,7 +419,7 @@ const OCTANT_DELTA: [(f32, f32); 8] = [
+@@ -438,7 +438,7 @@ const OCTANT_DELTA: [(f32, f32); 8] = [
  pub(crate) struct EdgeScrollState {
      /// Wall-clock origin for the radar timer. Edge scroll is driven by the real
      /// cursor, so it is presentation state and never enters the sim.
@@ -2484,7 +2668,7 @@ index d54303524..a2da2858b 100644
      /// gamemd's CoastLevel: 0 is the slowest creep, higher is faster.
      coast_level: i32,
      /// Last direction octant. Retained so the map keeps coasting in the same
-@@ -433,7 +433,7 @@ pub(crate) struct EdgeScrollState {
+@@ -452,7 +452,7 @@ pub(crate) struct EdgeScrollState {
  impl Default for EdgeScrollState {
      fn default() -> Self {
          Self {
@@ -2494,10 +2678,10 @@ index d54303524..a2da2858b 100644
              octant: 0,
              last_coast_change: None,
 diff --git a/src/app/input/campaign_input.rs b/src/app/input/campaign_input.rs
-index 75e55e297..fa824b5e3 100644
+index eeb768f1a..11e4bf36e 100644
 --- a/src/app/input/campaign_input.rs
 +++ b/src/app/input/campaign_input.rs
-@@ -103,7 +103,7 @@ mod tests {
+@@ -102,7 +102,7 @@ mod tests {
              input.keys_held.insert(KeyCode::KeyT);
              input
                  .type_select
@@ -2520,7 +2704,7 @@ index fcbc53924..389daa023 100644
  use winit::keyboard::{KeyCode, PhysicalKey};
  
 diff --git a/src/app/input/cursor.rs b/src/app/input/cursor.rs
-index 5623488c1..6f4a50d1a 100644
+index 79dade39c..3138dfe0a 100644
 --- a/src/app/input/cursor.rs
 +++ b/src/app/input/cursor.rs
 @@ -3,7 +3,7 @@
@@ -2533,10 +2717,10 @@ index 5623488c1..6f4a50d1a 100644
  use crate::app::AppState;
  use crate::app::input::commands::preferred_local_owner_name;
 diff --git a/src/app/input/dispatch.rs b/src/app/input/dispatch.rs
-index 666765218..90ed53d34 100644
+index 89d5921da..4108257ff 100644
 --- a/src/app/input/dispatch.rs
 +++ b/src/app/input/dispatch.rs
-@@ -1603,7 +1603,7 @@ pub(crate) fn handle_type_select_key_edge(
+@@ -1607,7 +1607,7 @@ pub(crate) fn handle_type_select_key_edge(
              .match_state
              .input
              .type_select
@@ -2545,7 +2729,7 @@ index 666765218..90ed53d34 100644
          return true;
      }
      if !is_type_select && !state.match_state.input.type_select.owns_key(physical_code) {
-@@ -1613,7 +1613,7 @@ pub(crate) fn handle_type_select_key_edge(
+@@ -1617,7 +1617,7 @@ pub(crate) fn handle_type_select_key_edge(
          .match_state
          .input
          .type_select
@@ -2554,7 +2738,7 @@ index 666765218..90ed53d34 100644
      if execute_tap {
          execute_type_select_tap(state);
      }
-@@ -1853,7 +1853,7 @@ fn dispatch_retail_hotkey(state: &mut AppState, command: HotkeyCommand) {
+@@ -1857,7 +1857,7 @@ fn dispatch_retail_hotkey(state: &mut AppState, command: HotkeyCommand) {
                  .match_presentation
                  .minimap
                  .as_mut()
@@ -2563,7 +2747,7 @@ index 666765218..90ed53d34 100644
              if let Some((rx, ry)) = event {
                  crate::app::input::camera::center_camera_on_cell(state, rx, ry);
              }
-@@ -3737,7 +3737,7 @@ fn control_group_press_action(
+@@ -3747,7 +3747,7 @@ fn control_group_press_action(
      slot: usize,
      group: &[u64],
      selected: &[u64],
@@ -2572,7 +2756,7 @@ index 666765218..90ed53d34 100644
  ) -> Option<GroupPressAction> {
      if modifiers.only_ctrl() {
          return Some(GroupPressAction::Assign);
-@@ -3769,7 +3769,7 @@ fn control_group_action_for_input(
+@@ -3779,7 +3779,7 @@ fn control_group_action_for_input(
      slot: usize,
      group: &[u64],
      selected: &[u64],
@@ -2581,7 +2765,7 @@ index 666765218..90ed53d34 100644
      sim: Option<&crate::sim::world::Simulation>,
  ) -> Option<GroupPressAction> {
      // Recall's double-tap test (`0x0073123B..0x0073129D`) walks only
-@@ -4006,7 +4006,7 @@ fn handle_control_group_command(
+@@ -4004,7 +4004,7 @@ fn handle_control_group_command(
              // A recall on an empty group still clears the selection: the
              // deselect-all runs before the select loop, unconditionally.
              state.match_state.input.last_control_group_press =
@@ -2590,9 +2774,9 @@ index 666765218..90ed53d34 100644
              if let Some(selection) = team_selection(sim, action, &group, &selected) {
                  queue_team_selection(state, selection);
              }
-@@ -4493,7 +4493,7 @@ mod control_group_tests {
-         control_group_press_action, live_group_members, reassign_control_group,
-         selection_voice_recipients, team_selection, team_walk_members,
+@@ -4491,7 +4491,7 @@ mod control_group_tests {
+         schedule_control_group_assignment, selection_voice_recipients, team_selection,
+         team_walk_members,
      };
 -    use std::time::Duration;
 +    use web_time::Duration;
@@ -2600,7 +2784,7 @@ index 666765218..90ed53d34 100644
      fn mods(shift: bool, ctrl: bool, alt: bool) -> KeyModifiers {
          KeyModifiers { shift, ctrl, alt }
 diff --git a/src/app/input/keyboard.rs b/src/app/input/keyboard.rs
-index 6d3c3e603..638e78521 100644
+index 87fcd7921..249548c1f 100644
 --- a/src/app/input/keyboard.rs
 +++ b/src/app/input/keyboard.rs
 @@ -4,10 +4,10 @@ use crate::app::{App, AppState};
@@ -2617,7 +2801,7 @@ index 6d3c3e603..638e78521 100644
  /// A keyboard edge after the front-end/dialog admission gates. Both a window
  /// event and a literal-key production capture enter this same binding owner.
 diff --git a/src/app/input/multiplayer_setup.rs b/src/app/input/multiplayer_setup.rs
-index c6530a4ee..c846cb614 100644
+index 2ea7f2384..97fbe7f71 100644
 --- a/src/app/input/multiplayer_setup.rs
 +++ b/src/app/input/multiplayer_setup.rs
 @@ -7,7 +7,7 @@ use crate::ui::lan_shell::LanEditKey;
@@ -2643,12 +2827,12 @@ index 7adb87be0..d86c789a6 100644
  use winit::keyboard::{KeyCode, PhysicalKey};
  
 diff --git a/src/app/input/saved_local_view_tests.rs b/src/app/input/saved_local_view_tests.rs
-index 3ef74ceb8..a43cc633d 100644
+index c7004e63b..65e33da63 100644
 --- a/src/app/input/saved_local_view_tests.rs
 +++ b/src/app/input/saved_local_view_tests.rs
-@@ -148,7 +148,7 @@ fn saved_view_replaces_reused_ids_and_preserves_order_and_raw_bookmarks() {
+@@ -200,7 +200,7 @@ fn saved_view_replaces_reused_ids_and_preserves_order_and_raw_bookmarks() {
+         outgoing.selection_order = vec![1, 3];
          outgoing.selection_order_pending = true;
-         outgoing.control_groups[4] = vec![1, 2, 3];
          outgoing.follow_target = Some(1);
 -        outgoing.last_control_group_press = Some((9, std::time::Instant::now()));
 +        outgoing.last_control_group_press = Some((9, web_time::Instant::now()));
@@ -2682,10 +2866,10 @@ index 5e9a2103c..edb5a7f79 100644
  
  fn channel(id: SoundSlider) -> AudioVolume {
 diff --git a/src/app/input/state.rs b/src/app/input/state.rs
-index 22cac0d6b..b970b740c 100644
+index 2305c1a6a..d6f17980d 100644
 --- a/src/app/input/state.rs
 +++ b/src/app/input/state.rs
-@@ -256,7 +256,7 @@ pub(crate) struct MatchInputState {
+@@ -248,7 +248,7 @@ pub(crate) struct MatchInputState {
      /// the 800 ms double-tap that centres the camera. Wall clock, never sim
      /// state: the original stamps `timeGetTime()` here and only a recall writes
      /// it — assigning with Ctrl+digit never does.
@@ -2695,24 +2879,10 @@ index 22cac0d6b..b970b740c 100644
      /// its valid byte `+0x119C`. `None` is the cleared pair.
      pub(crate) follow_target: Option<u64>,
 diff --git a/src/app/lan_service.rs b/src/app/lan_service.rs
-index f742ec84f..84a5d6317 100644
+index 2667250f5..3e076efb9 100644
 --- a/src/app/lan_service.rs
 +++ b/src/app/lan_service.rs
-@@ -1406,10 +1406,9 @@ fn drain_match_requests(state: &mut AppState) {
-                 }
-             }
-             NetworkLoadingRequest::Beacon(record) => {
--                if let Ok(message) = crate::net::lan_messages::ingame::BeaconMessage::new(
--                    &local_name(state),
--                    record,
--                ) {
-+                if let Ok(message) =
-+                    crate::net::lan_messages::ingame::BeaconMessage::new(&local_name(state), record)
-+                {
-                     let peers: Vec<_> =
-                         super::match_runtime::network_match::nodes(&state.match_state.session)
-                             .into_iter()
-@@ -1884,14 +1883,14 @@ mod tests {
+@@ -4008,14 +4008,14 @@ mod tests {
      }
  
      fn next_message(service: &mut LanService, session: &MatchSession) -> GlobalMessage {
@@ -2729,13 +2899,40 @@ index f742ec84f..84a5d6317 100644
                  "LAN packet did not arrive"
              );
              std::thread::yield_now();
-@@ -2003,11 +2002,11 @@ mod tests {
+@@ -4064,7 +4064,7 @@ mod tests {
+     #[test]
+     fn go_drain_observes_worker_failure_with_the_empty_queue() {
+         use std::sync::atomic::{AtomicU32, Ordering};
+-        use std::time::{Duration, Instant};
++        use web_time::{Duration, Instant};
+ 
+         static BUCKET: AtomicU32 = AtomicU32::new(0);
+         fn bucket() -> u32 {
+@@ -4794,7 +4794,7 @@ mod tests {
+         // ACKs can retire every sender entry while the guest's shell still
+         // transitions. Both sockets are nonblocking: wait for actual ACKs,
+         // keeping protocol time fixed and every early packet in the queue.
+-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
++        let deadline = web_time::Instant::now() + web_time::Duration::from_secs(2);
+         loop {
+             receiver.transport.as_mut().unwrap().service(32);
+             assert!(receiver.pop_lobby_received(&session).is_none());
+@@ -4810,7 +4810,7 @@ mod tests {
+                 break;
+             }
+             assert!(
+-                std::time::Instant::now() < deadline,
++                web_time::Instant::now() < deadline,
+                 "early setup packets were not acknowledged"
+             );
+             std::thread::yield_now();
+@@ -4906,11 +4906,11 @@ mod tests {
                  .network_endpoint_source(guest_address)
                  .is_none()
          );
 -        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
 +        let deadline = web_time::Instant::now() + web_time::Duration::from_secs(2);
-         while !guest.kicked_exit_ready(true) {
+         while guest.departure_ready(33, true).is_none() {
              guest.transport.as_mut().unwrap().service(33);
              assert!(
 -                std::time::Instant::now() < deadline,
@@ -2743,11 +2940,24 @@ index f742ec84f..84a5d6317 100644
                  "departure did not drain"
              );
              std::thread::yield_now();
+diff --git a/src/app/lan_service/maps.rs b/src/app/lan_service/maps.rs
+index 8469cacc6..31b0c8bd5 100644
+--- a/src/app/lan_service/maps.rs
++++ b/src/app/lan_service/maps.rs
+@@ -10,7 +10,7 @@
+ use std::net::SocketAddrV4;
+ use std::path::PathBuf;
+ use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+-use std::time::{Duration, Instant};
++use web_time::{Duration, Instant};
+ 
+ use anyhow::{Result, anyhow, ensure};
+ 
 diff --git a/src/app/loading/init.rs b/src/app/loading/init.rs
-index 7776d351b..04fe7e39e 100644
+index d0288895b..b82fa064b 100644
 --- a/src/app/loading/init.rs
 +++ b/src/app/loading/init.rs
-@@ -2372,7 +2372,7 @@ pub(crate) fn load_map_initial_with_assets(
+@@ -2419,7 +2419,7 @@ pub(crate) fn load_map_initial_with_assets(
          let mut options = crate::map::rmg::RmgOptions::default();
          let seed_path = ra2_dir.join(seed_name);
          let mut seed_source = None;
@@ -2756,7 +2966,7 @@ index 7776d351b..04fe7e39e 100644
              Ok(bytes) => {
                  seed_source = Some(
                      crate::map::source::GeneratedSeedSource::from_consumed_bytes(seed_path, &bytes),
-@@ -2468,8 +2468,8 @@ pub(crate) fn load_map_initial_with_assets(
+@@ -2515,8 +2515,8 @@ pub(crate) fn load_map_initial_with_assets(
              load_map_by_name_or_path_with_assets(&ra2_dir, map_name, asset_manager)?
          } else if let Some(ref map_name) = quickplay_map {
              load_map_by_name_or_path_with_assets(&ra2_dir, map_name, asset_manager)?
@@ -2768,49 +2978,23 @@ index 7776d351b..04fe7e39e 100644
              LoadedMap {
                  map: MapFile::from_bytes(&bytes)?,
 diff --git a/src/app/loading/pump.rs b/src/app/loading/pump.rs
-index 46439cd12..04af1e06a 100644
+index d7458f8e6..e942d5ca8 100644
 --- a/src/app/loading/pump.rs
 +++ b/src/app/loading/pump.rs
-@@ -1827,7 +1827,7 @@ fn prepare_scenario_initial_before_first_frame(state: &mut AppState) -> anyhow::
- /// file omits the preview layer; every other layer still draws.
- fn decode_random_map_loading_preview(ra2_dir: &Path) -> Option<DecodedPreview> {
-     let path = ra2_dir.join(RANDOM_MAP_PREVIEW_FILE);
+@@ -2176,7 +2176,7 @@ fn decode_random_map_loading_preview(
+         Some(crate::map::source::LoadedMapSource::Loose { path, .. }) => path.clone(),
+         _ => ra2_dir.join(RANDOM_MAP_PREVIEW_FILE),
+     };
 -    let bytes = match std::fs::read(&path) {
 +    let bytes = match crate::util::file_system::read(&path) {
          Ok(bytes) => bytes,
          Err(err) => {
              log::warn!(
-@@ -2465,6 +2465,7 @@ pub(crate) fn present_saved_game_loading(state: &mut AppState) {
-         else {
-             return Ok(());
-         };
-+        let frame_texture = state.renderer.gpu.frame_texture(&output);
-         let mut encoder =
-             state
-                 .renderer
-@@ -2476,14 +2477,15 @@ pub(crate) fn present_saved_game_loading(state: &mut AppState) {
-         crate::app::frontend::skirmish_shell_render::render_saved_game_loading(
-             state,
-             &mut encoder,
--            &output.texture,
-+            &frame_texture,
-         )?;
-         state.renderer.fps_overlay.encode(
-             &state.renderer.gpu,
-             &state.renderer.batch_renderer,
-             &mut encoder,
--            &output.texture,
-+            &frame_texture,
-         );
-+        state.renderer.gpu.encode_web_present(&mut encoder, &output);
-         state
-             .renderer
-             .gpu
 diff --git a/src/app/loading/pump/render.rs b/src/app/loading/pump/render.rs
-index 7772f2385..e10ca4839 100644
+index 2a78ed81f..90f998519 100644
 --- a/src/app/loading/pump/render.rs
 +++ b/src/app/loading/pump/render.rs
-@@ -95,13 +95,15 @@ pub(super) fn present_blank(
+@@ -96,13 +96,15 @@ pub(super) fn present_blank(
      else {
          return Ok(());
      };
@@ -2828,7 +3012,7 @@ index 7772f2385..e10ca4839 100644
      gpu.queue.submit(std::iter::once(encoder.finish()));
      output.present();
      Ok(())
-@@ -861,6 +863,7 @@ pub(super) fn present_native_loading(
+@@ -868,6 +870,7 @@ pub(super) fn present_native_loading(
      else {
          return Ok(());
      };
@@ -2836,7 +3020,7 @@ index 7772f2385..e10ca4839 100644
      let mut encoder = gpu
          .device
          .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-@@ -888,9 +891,10 @@ pub(super) fn present_native_loading(
+@@ -895,9 +898,10 @@ pub(super) fn present_native_loading(
          atlas,
          frame_plan,
          &mut encoder,
@@ -2850,10 +3034,10 @@ index 7772f2385..e10ca4839 100644
      output.present();
      Ok(())
 diff --git a/src/app/match_bootstrap.rs b/src/app/match_bootstrap.rs
-index 95c8d2874..f09d8bce7 100644
+index c9f308c66..6053402ea 100644
 --- a/src/app/match_bootstrap.rs
 +++ b/src/app/match_bootstrap.rs
-@@ -159,7 +159,7 @@ pub struct CampaignLaunchOptions {
+@@ -194,7 +194,7 @@ pub struct CampaignLaunchOptions {
  impl CampaignLaunchOptions {
      fn loose_scenario_file(&self, scenario: &str) -> Option<String> {
          let path = self.scenario_directory.as_ref()?.join(scenario);
@@ -2862,7 +3046,7 @@ index 95c8d2874..f09d8bce7 100644
      }
  }
  
-@@ -654,7 +654,7 @@ impl MatchSeedClock for OrdinaryMatchSeedClock {
+@@ -700,7 +700,7 @@ impl MatchSeedClock for OrdinaryMatchSeedClock {
          }
          #[cfg(not(windows))]
          {
@@ -2872,10 +3056,10 @@ index 95c8d2874..f09d8bce7 100644
                  .duration_since(UNIX_EPOCH)
                  .unwrap_or_default();
 diff --git a/src/app/match_diagnostics.rs b/src/app/match_diagnostics.rs
-index 7659360dc..5d052aa54 100644
+index 52193d513..ea2b546f9 100644
 --- a/src/app/match_diagnostics.rs
 +++ b/src/app/match_diagnostics.rs
-@@ -99,7 +99,7 @@ impl MatchDiagnosticsState {
+@@ -227,7 +227,7 @@ impl MatchDiagnosticsState {
          }
  
          let result = (|| {
@@ -2884,7 +3068,7 @@ index 7659360dc..5d052aa54 100644
              let (path, mut file) = reserve_segment_path(replays_dir, session_tick, unix_secs)?;
              // Keep the exclusively created handle through the write. Reopening
              // its path could truncate a replacement supplied after reservation.
-@@ -107,7 +107,7 @@ impl MatchDiagnosticsState {
+@@ -235,7 +235,7 @@ impl MatchDiagnosticsState {
              drop(file);
              if let Err(error) = written {
                  // Close before deleting so retry cleanup also works on Windows.
@@ -2894,7 +3078,7 @@ index 7659360dc..5d052aa54 100644
              }
              Ok(Some(ReplayLogFlush {
 diff --git a/src/app/match_runtime/frame_pacer.rs b/src/app/match_runtime/frame_pacer.rs
-index 82d58343e..e16f75e25 100644
+index 362256c99..e442e6077 100644
 --- a/src/app/match_runtime/frame_pacer.rs
 +++ b/src/app/match_runtime/frame_pacer.rs
 @@ -8,8 +8,8 @@ const FRAME_BUCKET_SHIFT: u32 = 4;
@@ -2926,7 +3110,7 @@ index 82d58343e..e16f75e25 100644
      {
          // SAFETY: timeGetTime takes no arguments and returns the process-wide
 diff --git a/src/app/match_runtime/sim_tick.rs b/src/app/match_runtime/sim_tick.rs
-index 5aaa40fbf..a2e5adc71 100644
+index 203a8ea1d..2778d32b1 100644
 --- a/src/app/match_runtime/sim_tick.rs
 +++ b/src/app/match_runtime/sim_tick.rs
 @@ -9,7 +9,7 @@
@@ -2949,7 +3133,7 @@ index 5aaa40fbf..a2e5adc71 100644
          .map(|d| d.as_secs())
          .unwrap_or(0);
      (session_tick, now)
-@@ -1258,7 +1258,7 @@ fn advance_one_simulation_frame(
+@@ -1316,7 +1316,7 @@ fn advance_one_simulation_frame(
                      timing.tick_hz = state
                          .match_state
                          .telemetry_tick_rate
@@ -2972,7 +3156,7 @@ index 9a397690e..86e52d6ac 100644
  use crate::sim::telemetry::TimingSample;
  
 diff --git a/src/app/mod.rs b/src/app/mod.rs
-index ce6804c3d..bfa54606d 100644
+index 71f32c15f..f79b7968d 100644
 --- a/src/app/mod.rs
 +++ b/src/app/mod.rs
 @@ -3,15 +3,20 @@
@@ -2997,8 +3181,8 @@ index ce6804c3d..bfa54606d 100644
  use winit::window::{Window, WindowAttributes, WindowId};
  
  use crate::app::match_runtime::sim_tick;
-@@ -49,9 +54,9 @@ mod frame;
- pub mod frontend;
+@@ -50,9 +55,9 @@ pub mod frontend;
+ mod game_data_check;
  mod handler;
  mod in_game;
 -pub(crate) mod lan_service;
@@ -3008,7 +3192,7 @@ index ce6804c3d..bfa54606d 100644
  pub(crate) mod loading;
  pub(crate) mod match_audio;
  pub mod match_bootstrap;
-@@ -124,6 +129,8 @@ pub(crate) use state::{AppState, PlatformState, reset_scenario_exit_runtime};
+@@ -125,6 +130,8 @@ pub(crate) use state::{AppState, PlatformState, reset_scenario_exit_runtime};
  /// Top-level application. Implements winit's ApplicationHandler.
  pub struct App {
      state: Option<AppState>,
@@ -3017,7 +3201,7 @@ index ce6804c3d..bfa54606d 100644
      shell_capture: Option<crate::app::diagnostics::shell_capture::ShellCaptureSession>,
      tactical_capture:
          Option<crate::app::diagnostics::tactical_capture::session::TacticalCaptureSession>,
-@@ -176,6 +183,8 @@ impl App {
+@@ -179,6 +186,8 @@ impl App {
      ) -> Self {
          Self {
              state: None,
@@ -3025,8 +3209,8 @@ index ce6804c3d..bfa54606d 100644
 +            web_pending: None,
              shell_capture: None,
              tactical_capture: None,
-             startup_options,
-@@ -190,6 +199,8 @@ impl App {
+             capture_render_not_before: None,
+@@ -194,6 +203,8 @@ impl App {
      ) -> Self {
          Self {
              state: None,
@@ -3035,7 +3219,7 @@ index ce6804c3d..bfa54606d 100644
              shell_capture: Some(
                  crate::app::diagnostics::shell_capture::ShellCaptureSession::new(request),
              ),
-@@ -206,6 +217,8 @@ impl App {
+@@ -211,6 +222,8 @@ impl App {
      ) -> Self {
          Self {
              state: None,
@@ -3044,7 +3228,7 @@ index ce6804c3d..bfa54606d 100644
              shell_capture: None,
              tactical_capture: Some(
                  crate::app::diagnostics::tactical_capture::session::TacticalCaptureSession::new(
-@@ -228,7 +241,9 @@ impl App {
+@@ -234,7 +247,9 @@ impl App {
  
      pub fn finish_capture(&mut self) -> Result<()> {
          if let Some(error) = self.startup_failure.as_ref().or_else(|| {
@@ -3080,7 +3264,7 @@ index 93c8bd646..ba7d67614 100644
  
      fn assert_soundtrack_output(file: &BinkFile, expected: &[f32], volume: f32, name: &str) {
 diff --git a/src/app/persistence/commands.rs b/src/app/persistence/commands.rs
-index 4738085fd..7a7585e3e 100644
+index 8701a5bac..9d5abad00 100644
 --- a/src/app/persistence/commands.rs
 +++ b/src/app/persistence/commands.rs
 @@ -168,8 +168,8 @@ fn prepare_save<'a>(
@@ -3095,40 +3279,55 @@ index 4738085fd..7a7585e3e 100644
          .unwrap_or(0);
      let mut sinking_waterlines = state
 diff --git a/src/app/persistence/keyboard.rs b/src/app/persistence/keyboard.rs
-index b2f5471ca..512565f24 100644
+index 6a0f60ab8..91fc820e8 100644
 --- a/src/app/persistence/keyboard.rs
 +++ b/src/app/persistence/keyboard.rs
-@@ -10,21 +10,21 @@ fn path(root: &Path) -> PathBuf {
-         .unwrap_or_else(|| root.join("KeyboardMD.ini"))
- }
- pub(crate) fn reload(root: &Path, archive: Option<&[u8]>) -> HotkeyBindings {
--    let bytes = std::fs::read(path(root)).ok();
-+    let bytes = crate::util::file_system::read(path(root)).ok();
-     HotkeyBindings::reload_from_ini_bytes(bytes.as_deref().or(archive))
- }
- /// Process startup shares the profile file owner, but retains the initial
- /// Escape/Delete/Space installation that a dialog reload intentionally omits.
- pub(crate) fn startup(root: &Path, archive: Option<&[u8]>) -> HotkeyBindings {
--    let bytes = std::fs::read(path(root)).ok();
-+    let bytes = crate::util::file_system::read(path(root)).ok();
-     HotkeyBindings::from_ini_bytes(bytes.as_deref().or(archive))
- }
- pub(crate) fn save(root: &Path, bindings: &HotkeyBindings) -> std::io::Result<()> {
--    std::fs::write(path(root), bindings.to_ini_string())
-+    crate::util::file_system::write(path(root), bindings.to_ini_string())
- }
- pub(crate) fn reset(root: &Path, archive: Option<&[u8]>) -> HotkeyBindings {
-     // Native delete failure has no dialog: reload whatever file remains.
--    if let Err(error) = std::fs::remove_file(path(root))
-+    if let Err(error) = crate::util::file_system::remove_file(path(root))
-         && error.kind() != std::io::ErrorKind::NotFound
-     {
-         log::warn!("Could not reset KeyboardMD.ini: {error}");
+@@ -7,7 +7,7 @@ use crate::util::ini_writer::replace_ini_section;
+ use std::path::Path;
+ 
+ fn read(root: &Path) -> Option<Vec<u8>> {
+-    let bytes = std::fs::read(profile_file::path(root)).ok()?;
++    let bytes = crate::util::file_system::read(profile_file::path(root)).ok()?;
+     // An options-only profile must still use the archive's keyboard defaults.
+     IniFile::from_bytes(&bytes).ok()?.section("Hotkey")?;
+     Some(bytes)
+@@ -60,7 +60,7 @@ mod tests {
+         let mut bindings = HotkeyBindings::reload_from_ini_bytes(Some(archive));
+         bindings.assign(HotkeyCommand::StopObject, 88).unwrap();
+         save(&root, &bindings).unwrap();
+-        let saved = std::fs::read(root.join("VERA.INI")).unwrap();
++        let saved = crate::util::file_system::read(root.join("VERA.INI")).unwrap();
+         assert!(saved.starts_with(options));
+         assert_eq!(
+             reload(&root, Some(archive)).first_key(HotkeyCommand::StopObject),
+@@ -70,11 +70,11 @@ mod tests {
+         let reset = reset(&root, Some(archive));
+         assert_eq!(reset.first_key(HotkeyCommand::StopObject), Some(83));
+         assert!(
+-            std::fs::read(root.join("VERA.INI"))
++            crate::util::file_system::read(root.join("VERA.INI"))
+                 .unwrap()
+                 .starts_with(options)
+         );
+-        assert_eq!(std::fs::read(root.join("KeyboardMD.ini")).unwrap(), legacy);
++        assert_eq!(crate::util::file_system::read(root.join("KeyboardMD.ini")).unwrap(), legacy);
+         save(&root, &HotkeyBindings::default()).unwrap();
+         assert_eq!(
+             reload(&root, Some(archive)).first_key(HotkeyCommand::StopObject),
+@@ -96,7 +96,7 @@ mod tests {
+             bindings.command_at(32),
+             Some(HotkeyCommand::CenterOnRadarEvent)
+         );
+-        assert_eq!(std::fs::read(root.join("VERA.INI")).unwrap(), bytes);
++        assert_eq!(crate::util::file_system::read(root.join("VERA.INI")).unwrap(), bytes);
+         std::fs::remove_file(root.join("VERA.INI")).unwrap();
+         std::fs::remove_dir(root).unwrap();
+     }
 diff --git a/src/app/persistence/mod.rs b/src/app/persistence/mod.rs
-index 501ecb514..8d488db31 100644
+index ef4ed8a09..b8fbc14ba 100644
 --- a/src/app/persistence/mod.rs
 +++ b/src/app/persistence/mod.rs
-@@ -14,7 +14,7 @@ pub(crate) use resource_load::{PreparedSavedGame, SavedGamePreparationView};
+@@ -16,7 +16,7 @@ pub(crate) use resource_load::{PreparedSavedGame, SavedGamePreparationView};
  
  use std::path::{Path, PathBuf};
  #[cfg(any(feature = "dev-overlays", test))]
@@ -3137,7 +3336,7 @@ index 501ecb514..8d488db31 100644
  
  use crate::map::resolved_terrain::ResolvedTerrainGrid;
  use crate::rules::overlay_types::OverlayTypeRegistry;
-@@ -446,7 +446,7 @@ impl SaveRepository {
+@@ -462,7 +462,7 @@ impl SaveRepository {
      }
  
      pub(crate) fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
@@ -3146,7 +3345,7 @@ index 501ecb514..8d488db31 100644
      }
  
      pub(crate) fn write_named(
-@@ -454,7 +454,7 @@ impl SaveRepository {
+@@ -470,7 +470,7 @@ impl SaveRepository {
          file_name: &str,
          bytes: &[u8],
      ) -> Result<PathBuf, SaveWriteError> {
@@ -3155,7 +3354,18 @@ index 501ecb514..8d488db31 100644
              #[cfg(any(feature = "dev-overlays", test))]
              stage: SaveWriteStage::CreateDirectory,
              source,
-@@ -476,7 +476,7 @@ impl SaveRepository {
+@@ -483,6 +483,10 @@ impl SaveRepository {
+     /// New saves may not silently replace a timestamp-name collision. Remove
+     /// only our newly created partial file if writing fails.
+     fn create_new_file(&self, path: &Path, bytes: &[u8]) -> Result<(), SaveWriteError> {
++        #[cfg(target_arch = "wasm32")]
++        { crate::util::file_system::write_new(path, bytes).map_err(SaveWriteError::write_file) }
++        #[cfg(not(target_arch = "wasm32"))]
++        {
+         use std::io::Write;
+         let mut file = std::fs::OpenOptions::new()
+             .write(true)
+@@ -492,10 +496,11 @@ impl SaveRepository {
          let result = file.write_all(bytes).and_then(|()| file.sync_all());
          drop(file);
          if let Err(source) = result {
@@ -3164,7 +3374,22 @@ index 501ecb514..8d488db31 100644
              return Err(SaveWriteError::write_file(source));
          }
          Ok(())
-@@ -525,7 +525,7 @@ impl SaveRepository {
++        }
+     }
+ 
+     /// Only an explicit existing repository row can be replaced. Stage the
+@@ -525,6 +530,10 @@ impl SaveRepository {
+     }
+ 
+     fn replace_file(&self, path: &Path, bytes: &[u8]) -> Result<(), SaveWriteError> {
++        #[cfg(target_arch = "wasm32")]
++        { crate::util::file_system::write(path, bytes).map_err(SaveWriteError::write_file) }
++        #[cfg(not(target_arch = "wasm32"))]
++        {
+         static NEXT_STAGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+         let directory = path
+             .parent()
+@@ -541,9 +550,10 @@ impl SaveRepository {
          };
          let result = std::fs::rename(&stage, path);
          if result.is_err() {
@@ -3172,8 +3397,11 @@ index 501ecb514..8d488db31 100644
 +            let _ = crate::util::file_system::remove_file(&stage);
          }
          result.map_err(SaveWriteError::write_file)
++        }
      }
-@@ -553,14 +553,14 @@ impl SaveRepository {
+ 
+     /// The game's one retained initial save per mission. Native67CF13..67CF42
+@@ -569,14 +579,14 @@ impl SaveRepository {
              )));
          }
          if file.is_relative() {
@@ -3190,7 +3418,7 @@ index 501ecb514..8d488db31 100644
              self.validate_existing_save(&path)?;
              self.replace_file(&path, bytes)?;
          } else {
-@@ -577,11 +577,11 @@ impl SaveRepository {
+@@ -593,11 +603,11 @@ impl SaveRepository {
      }
  
      pub(crate) fn delete(&self, path: &Path) -> std::io::Result<()> {
@@ -3204,7 +3432,7 @@ index 501ecb514..8d488db31 100644
      }
  
      /// Native5596A0 browser metadata with each file's write time. The shared
-@@ -600,7 +600,7 @@ impl SaveRepository {
+@@ -616,7 +626,7 @@ impl SaveRepository {
  
      /// Saves whose header reads, with their file time, in directory order.
      fn readable_entries(&self) -> impl Iterator<Item = (SaveEntry, u64)> + '_ {
@@ -3213,7 +3441,7 @@ index 501ecb514..8d488db31 100644
              .into_iter()
              .flatten()
              .filter_map(|item| {
-@@ -626,7 +626,7 @@ impl SaveRepository {
+@@ -642,7 +652,7 @@ impl SaveRepository {
      /// modification time without reading or validating its snapshot header.
      #[cfg(any(feature = "dev-overlays", test))]
      pub(crate) fn quickload_path_by_modified_time(&self) -> Option<PathBuf> {
@@ -3222,7 +3450,7 @@ index 501ecb514..8d488db31 100644
          newest_modified_path(directory.filter_map(|item| {
              let item = item.ok()?;
              let path = item.path();
-@@ -964,7 +964,7 @@ mod tests {
+@@ -980,7 +990,7 @@ mod tests {
              "vera20k-{label}-{}-{}",
              std::process::id(),
              SystemTime::now()
@@ -3231,7 +3459,7 @@ index 501ecb514..8d488db31 100644
                  .expect("system time after Unix epoch")
                  .as_nanos(),
          ))
-@@ -1463,7 +1463,7 @@ mod tests {
+@@ -1479,7 +1489,7 @@ mod tests {
              .expect("write embedded-older fixture");
  
          let base_modified = SystemTime::now()
@@ -3240,7 +3468,7 @@ index 501ecb514..8d488db31 100644
              .expect("fixture modification time");
          std::fs::File::options()
              .write(true)
-@@ -1477,7 +1477,7 @@ mod tests {
+@@ -1493,7 +1503,7 @@ mod tests {
              .expect("open embedded-older fixture")
              .set_times(
                  std::fs::FileTimes::new()
@@ -3250,52 +3478,118 @@ index 501ecb514..8d488db31 100644
              .expect("set embedded-older modification time");
  
 diff --git a/src/app/persistence/options_profile.rs b/src/app/persistence/options_profile.rs
-index 45e4f67f1..9ea85cab7 100644
+index 0cd4af4d9..37d509c71 100644
 --- a/src/app/persistence/options_profile.rs
 +++ b/src/app/persistence/options_profile.rs
-@@ -254,7 +254,9 @@ impl RetailOptionsLoad {
-     /// [`Self::without_ra2md`] so user profile state cannot contaminate sealed
+@@ -254,7 +254,7 @@ impl RetailOptionsLoad {
+     /// [`Self::without_settings`] so user profile state cannot contaminate sealed
      /// capture output.
-     pub(crate) fn from_ra2md(ra2_dir: &Path, startup: &RetailStartupOptions) -> Self {
--        Self::from_ra2md_with(ra2_dir, startup, |path| std::fs::read(path))
-+        Self::from_ra2md_with(ra2_dir, startup, |path| {
+     pub(crate) fn from_settings(ra2_dir: &Path, startup: &RetailStartupOptions) -> Self {
+-        Self::from_settings_with(ra2_dir, startup, |path| std::fs::read(path))
++        Self::from_settings_with(ra2_dir, startup, |path| crate::util::file_system::read(path))
+     }
+ 
+     /// Injectable form of [`Self::from_settings`] used to prove that both
+diff --git a/src/app/persistence/profile_file.rs b/src/app/persistence/profile_file.rs
+index 7f7ef0cf8..1ed00e9e4 100644
+--- a/src/app/persistence/profile_file.rs
++++ b/src/app/persistence/profile_file.rs
+@@ -1,6 +1,8 @@
+ //! VERA's writable player profile. Retail settings are import sources only.
+ 
+-use std::io::{self, Write};
++use std::io;
++#[cfg(not(target_arch = "wasm32"))]
++use std::io::Write;
+ use std::path::{Path, PathBuf};
+ 
+ use crate::rules::ini_parser::IniFile;
+@@ -18,7 +20,11 @@ pub(crate) fn path(directory: &Path) -> PathBuf {
+ /// the old files byte-for-byte, including profiles outside the retail folder.
+ pub(crate) fn import_legacy(paths: &PathsConfig) -> io::Result<()> {
+     let destination = path(paths.settings_dir());
+-    if destination.try_exists()? {
++    if match crate::util::file_system::metadata(&destination) {
++        Ok(_) => true,
++        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
++        Err(error) => return Err(error),
++    } {
+         return Ok(());
+     }
+     let sources = [paths.legacy_settings_dir(), paths.ra2_dir.as_path()];
+@@ -34,7 +40,7 @@ pub(crate) fn import_legacy(paths: &PathsConfig) -> io::Result<()> {
+             );
+         }
+     }
+-    std::fs::create_dir_all(paths.settings_dir())?;
++    crate::util::file_system::create_dir_all(paths.settings_dir())?;
+     // These retain their own schemas and owners, but move out of the retail
+     // folder with the options they accompany.
+     for name in ["wolinfoMD.ini", "coopsave.ini"] {
+@@ -52,12 +58,13 @@ pub(crate) fn import_legacy(paths: &PathsConfig) -> io::Result<()> {
+ fn read_legacy(directories: &[&Path], name: &str) -> io::Result<Option<Vec<u8>>> {
+     for directory in directories {
+         if let Some(path) = find(directory, name) {
+-            return std::fs::read(path).map(Some);
++            return crate::util::file_system::read(path).map(Some);
+         }
+     }
+     Ok(None)
+ }
+ 
++#[cfg(not(target_arch = "wasm32"))]
+ pub(super) fn create_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
+     match std::fs::OpenOptions::new()
+         .write(true)
+@@ -80,11 +87,11 @@ pub(super) fn create_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
+ /// Read current disk bytes for every update, so independent section owners
+ /// cannot erase each other's newer settings.
+ pub(crate) fn update(directory: &Path, transform: impl FnOnce(&[u8]) -> Vec<u8>) -> io::Result<()> {
+-    std::fs::create_dir_all(directory)?;
++    crate::util::file_system::create_dir_all(directory)?;
+     update_with(
+         directory,
+-        |path| std::fs::read(path),
+-        |path, bytes| std::fs::write(path, bytes),
++        |path| crate::util::file_system::read(path),
++        |path, bytes| crate::util::file_system::write(path, bytes),
+         transform,
+     )
+ }
+@@ -104,6 +111,14 @@ pub(super) fn update_with(
+     write(&path, &transform(&input))
+ }
+ 
++#[cfg(target_arch = "wasm32")]
++pub(super) fn create_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
++    match crate::util::file_system::write_new(path, bytes) {
++        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
++        result => result,
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/src/app/persistence/rules_profile.rs b/src/app/persistence/rules_profile.rs
+index 75748a696..99cb2ec3f 100644
+--- a/src/app/persistence/rules_profile.rs
++++ b/src/app/persistence/rules_profile.rs
+@@ -26,12 +26,12 @@ const STARTER: &[u8] = b"; Personal gameplay changes. Original game files are ne
+ /// existing spelling and bytes without replacing their edits.
+ pub(crate) fn load_or_create(directory: &Path) -> io::Result<Vec<u8>> {
+     let path = find(directory, FILENAME).unwrap_or_else(|| directory.join(FILENAME));
+-    match std::fs::read(&path) {
++    match crate::util::file_system::read(&path) {
+         Ok(bytes) => Ok(bytes),
+         Err(error) if error.kind() == io::ErrorKind::NotFound => {
+-            std::fs::create_dir_all(directory)?;
++            crate::util::file_system::create_dir_all(directory)?;
+             super::profile_file::create_new(&path, STARTER)?;
+-            std::fs::read(path)
 +            crate::util::file_system::read(path)
-+        })
-     }
- 
-     /// Injectable form of [`Self::from_ra2md`] used to prove that both
-@@ -605,8 +607,8 @@ impl RetailOptionsProfile {
-     pub(crate) fn commit_ra2md(&self, ra2_dir: &Path) -> io::Result<()> {
-         self.commit_ra2md_with(
-             ra2_dir,
--            |path| std::fs::read(path),
--            |path, bytes| std::fs::write(path, bytes),
-+            |path| crate::util::file_system::read(path),
-+            |path, bytes| crate::util::file_system::write(path, bytes),
-         )
-     }
- 
-@@ -616,8 +618,8 @@ impl RetailOptionsProfile {
-     pub(crate) fn commit_network_options(&self, ra2_dir: &Path) -> io::Result<()> {
-         commit_transformed_profile(
-             ra2_dir,
--            |path| std::fs::read(path),
--            |path, bytes| std::fs::write(path, bytes),
-+            |path| crate::util::file_system::read(path),
-+            |path, bytes| crate::util::file_system::write(path, bytes),
-             |input| self.transform_network_options(input),
-         )
-     }
-@@ -628,8 +630,8 @@ impl RetailOptionsProfile {
-     pub(crate) fn commit_wol_preferences(&self, ra2_dir: &Path) -> io::Result<()> {
-         commit_transformed_profile(
-             ra2_dir,
--            |path| std::fs::read(path),
--            |path, bytes| std::fs::write(path, bytes),
-+            |path| crate::util::file_system::read(path),
-+            |path, bytes| crate::util::file_system::write(path, bytes),
-             |input| self.transform_wol_preferences(input),
-         )
+         }
+         Err(error) => Err(error),
      }
 diff --git a/src/app/persistence/tests/save_browser_tests.rs b/src/app/persistence/tests/save_browser_tests.rs
 index 891e0b3b2..cfe227a01 100644
@@ -3311,7 +3605,7 @@ index 891e0b3b2..cfe227a01 100644
          .write(true)
          .open(&path)
 diff --git a/src/app/persistence/wol_profile.rs b/src/app/persistence/wol_profile.rs
-index 576624603..ebc547863 100644
+index 99fabebb5..cbc436e03 100644
 --- a/src/app/persistence/wol_profile.rs
 +++ b/src/app/persistence/wol_profile.rs
 @@ -294,16 +294,16 @@ impl WolInfoFile {
@@ -3396,10 +3690,10 @@ index 02f3023ee..da72cf8a1 100644
  #[derive(Clone, Copy, Debug, PartialEq)]
  struct DrawInputs {
 diff --git a/src/app/presentation/rally_line_tests.rs b/src/app/presentation/rally_line_tests.rs
-index c7c57513c..888e9d23b 100644
+index 0ef7a2261..7f1f9c2af 100644
 --- a/src/app/presentation/rally_line_tests.rs
 +++ b/src/app/presentation/rally_line_tests.rs
-@@ -630,7 +630,7 @@ fn production_rally_workload_timing() {
+@@ -631,7 +631,7 @@ fn production_rally_workload_timing() {
      use crate::render::terrain_draw_gpu_tests::{Gpu, camera};
      use crate::sim::components::DriveCoord;
      use crate::sim::movement::ground_pose;
@@ -3422,7 +3716,7 @@ index 2e8ac3c88..9ab657781 100644
      let fixture = RetailBridgeFixture::load(&packet);
      let gpu = Gpu::with_features(
 diff --git a/src/app/presentation/render/draw_passes.rs b/src/app/presentation/render/draw_passes.rs
-index 9c322f3aa..421ec975e 100644
+index 62710ef93..8bde67d32 100644
 --- a/src/app/presentation/render/draw_passes.rs
 +++ b/src/app/presentation/render/draw_passes.rs
 @@ -961,7 +961,7 @@ pub(super) fn dispatch_draw_passes(
@@ -3448,10 +3742,10 @@ index 7d096d3f9..34c8b8562 100644
  // Re-export shared types so any remaining `use crate::app::presentation::render::Foo` imports still compile.
  // New code should import from `crate::app::types` directly.
 diff --git a/src/app/presentation/render/packed_material_gpu_tests.rs b/src/app/presentation/render/packed_material_gpu_tests.rs
-index 400127ac7..12b8e6b06 100644
+index f123b342d..8aa1f1c4e 100644
 --- a/src/app/presentation/render/packed_material_gpu_tests.rs
 +++ b/src/app/presentation/render/packed_material_gpu_tests.rs
-@@ -934,7 +934,7 @@ fn retained_packed_workload_timing() {
+@@ -942,7 +942,7 @@ fn retained_packed_workload_timing() {
          let mut pool = InstanceBufferPool::new();
          pool.upload_on_device(&gpu.device, &gpu.queue, "packed_workload", &layer.instances);
          terrain.prepare(&gpu.device, &color, &dv, batch.camera_uniform());
@@ -3460,7 +3754,7 @@ index 400127ac7..12b8e6b06 100644
          let mut encoder = gpu.device.create_command_encoder(&Default::default());
          clear(
              &mut encoder,
-@@ -968,7 +968,7 @@ fn retained_packed_workload_timing() {
+@@ -976,7 +976,7 @@ fn retained_packed_workload_timing() {
          gpu.device
              .poll(wgpu::PollType::Wait {
                  submission_index: Some(submission),
@@ -3483,10 +3777,10 @@ index 2d28bf1cb..50d405467 100644
                      &mut encoder,
                      crate::app::render::merge_passes::ObjectDrawPhase::Display,
 diff --git a/src/app/presentation/sidebar_surface.rs b/src/app/presentation/sidebar_surface.rs
-index d2af54ec9..cca9e6c1c 100644
+index a3d4299db..39fe26b33 100644
 --- a/src/app/presentation/sidebar_surface.rs
 +++ b/src/app/presentation/sidebar_surface.rs
-@@ -270,7 +270,7 @@ impl SidebarSurface {
+@@ -271,7 +271,7 @@ impl SidebarSurface {
  mod tests {
      use super::*;
      use crate::render::gpu::block_on;
@@ -3565,10 +3859,10 @@ index 912196c43..19322f8e1 100644
              .and_then(|status| {
                  status.lines().find_map(|line| {
 diff --git a/src/app/random_map_lifecycle_tests.rs b/src/app/random_map_lifecycle_tests.rs
-index 7d5200269..5f5b40541 100644
+index 1d499e3ad..cd24b4ea2 100644
 --- a/src/app/random_map_lifecycle_tests.rs
 +++ b/src/app/random_map_lifecycle_tests.rs
-@@ -97,7 +97,7 @@ fn receive_production_generation(
+@@ -99,7 +99,7 @@ fn receive_production_generation(
      let mut entries = 0;
      loop {
          match receiver
@@ -3577,7 +3871,7 @@ index 7d5200269..5f5b40541 100644
              .expect("production random-map worker receipt")
          {
              RandomMapUpdate::Started => entries += 1,
-@@ -137,8 +137,8 @@ fn gsi_04_12_random_map_ui_to_sed_launch_lifecycle_converges() {
+@@ -139,8 +139,8 @@ fn gsi_04_12_random_map_ui_to_sed_launch_lifecycle_converges() {
      )
      .expect("retail startup Rules")
      .into_parts();
@@ -3602,7 +3896,7 @@ index 8a2827cac..1c20bd6f0 100644
  use super::{App, AppState};
  use crate::app::shell_route::ShellRoute;
 diff --git a/src/app/shell_lan.rs b/src/app/shell_lan.rs
-index bbe07bb2e..3554417a3 100644
+index e9085182d..f1fe6d5d7 100644
 --- a/src/app/shell_lan.rs
 +++ b/src/app/shell_lan.rs
 @@ -9,7 +9,7 @@ use crate::skirmish_launch::SkirmishHumanSlot;
@@ -3645,6 +3939,30 @@ index f2117be7c..78f1646a0 100644
              visible_rows,
          )
      }
+diff --git a/src/app/shell_main_menu.rs b/src/app/shell_main_menu.rs
+index a9e29e176..8cddd7371 100644
+--- a/src/app/shell_main_menu.rs
++++ b/src/app/shell_main_menu.rs
+@@ -973,11 +973,19 @@ Details: {details}"
+         output: crate::ui::main_menu_dialogs::options::LauncherOptionsFrameOutput,
+     ) {
+         {
++            #[cfg(target_arch = "wasm32")]
++            let mut persist_preview = false;
+             for event in output.events {
++                #[cfg(target_arch = "wasm32")]
++                { persist_preview |= !matches!(&event, crate::ui::main_menu_dialogs::options::LauncherOptionsEvent::Cue(_) | crate::ui::main_menu_dialogs::options::LauncherOptionsEvent::FpsCounterChanged(_)); }
+                 crate::app::persistence::options::launcher::dispatch_launcher_preview_event(
+                     state, event,
+                 );
+             }
++            // Browser refresh has no accepted-dialog teardown. Persist through
++            // the existing Options profile owner as soon as a preview changes it.
++            #[cfg(target_arch = "wasm32")]
++            if persist_preview { crate::app::persistence::options::persist_options_profile(state); }
+         }
+         match output.result {
+             // 0x0055FD06 tears D5 down before every continuation, including
 diff --git a/src/app/shell_movies_credits.rs b/src/app/shell_movies_credits.rs
 index 40d60baa4..3d518d55e 100644
 --- a/src/app/shell_movies_credits.rs
@@ -3659,10 +3977,10 @@ index 40d60baa4..3d518d55e 100644
  use super::{App, AppState};
  use crate::app::frontend::credits_roll::{
 diff --git a/src/app/shell_network_setup.rs b/src/app/shell_network_setup.rs
-index 9f46597bc..6204ffea4 100644
+index 9f5033e36..01231b5fe 100644
 --- a/src/app/shell_network_setup.rs
 +++ b/src/app/shell_network_setup.rs
-@@ -30,7 +30,7 @@ use crate::app::shell_lan::LanJoinAcceptance;
+@@ -35,7 +35,7 @@ use crate::app::shell_lan::LanJoinAcceptance;
  use crate::skirmish_launch::{SkirmishHumanSlot, SkirmishLaunchSession};
  use crate::ui::multiplayer_setup::{MultiplayerSetupState, SetupDialog, SetupFlavor};
  use crate::ui::wol_chat::WolChatLine;
@@ -3672,7 +3990,7 @@ index 9f46597bc..6204ffea4 100644
  /// Requests are service-boundary observations. They never create a peer,
  /// acknowledge readiness or complete GO without an admitted response.
 diff --git a/src/app/shell_network_setup/service.rs b/src/app/shell_network_setup/service.rs
-index fb337f8b2..53d301cbb 100644
+index b0610eb45..e2c07b42a 100644
 --- a/src/app/shell_network_setup/service.rs
 +++ b/src/app/shell_network_setup/service.rs
 @@ -5,7 +5,7 @@ use super::*;
@@ -3684,7 +4002,7 @@ index fb337f8b2..53d301cbb 100644
  
  /// A host's full options as `0x005E3D10`'s default (digit-led) arm decodes
  /// them: from the host, or in Quick Match from the matchbot's `Start`
-@@ -1039,7 +1039,7 @@ pub(super) fn send_preview(state: &mut AppState) -> anyhow::Result<()> {
+@@ -1089,7 +1089,7 @@ pub(super) fn send_preview(state: &mut AppState) -> anyhow::Result<()> {
  }
  
  /// The host's offer waits 1800 buckets for `0x1A` (`0x005E81D0`).
@@ -3693,7 +4011,7 @@ index fb337f8b2..53d301cbb 100644
  const PREVIEW_FILE: &str = "Preview.bin";
  
  /// The host's `[0xAC1154]`: the preview of the map BC shows.
-@@ -1100,10 +1100,10 @@ fn preview_acknowledged(state: &mut AppState, index: usize) -> anyhow::Result<()
+@@ -1150,10 +1150,10 @@ fn preview_acknowledged(state: &mut AppState, index: usize) -> anyhow::Result<()
          .join(PREVIEW_FILE);
      // RawFileClass deletes any old file, then writes the length and the
      // compressed blob.
@@ -3707,7 +4025,7 @@ index fb337f8b2..53d301cbb 100644
      state
          .frontend
          .network_setup_protocol
-@@ -1143,7 +1143,7 @@ fn preview_file_received(
+@@ -1193,7 +1193,7 @@ fn preview_file_received(
          .paths
          .ra2_dir
          .join(&file);
@@ -3716,15 +4034,17 @@ index fb337f8b2..53d301cbb 100644
          .ok()
          .and_then(|bytes| crate::map::preview::preview_bin_blob(&bytes))
          .and_then(|blob| crate::map::preview::paletted_preview_image(&blob));
-@@ -1366,5 +1366,5 @@ fn poll_go(state: &mut AppState) -> Option<Instant> {
+@@ -1482,7 +1482,7 @@ fn poll_go(state: &mut AppState) -> Option<Instant> {
          LanGoWait::Complete | LanGoWait::HandingOff | LanGoWait::Failed => return None,
      };
      // Scheduling is a derived view; only transport observations advance GO.
 -    Some(Instant::now() + std::time::Duration::from_millis(u64::from(buckets) * 16))
 +    Some(Instant::now() + web_time::Duration::from_millis(u64::from(buckets) * 16))
  }
+ 
+ /// Verified RandMap.img keeps the existing preview surface owner. Its local
 diff --git a/src/app/shell_network_setup/wol.rs b/src/app/shell_network_setup/wol.rs
-index 82fec5419..359444d23 100644
+index 7f42d8342..d70da0c44 100644
 --- a/src/app/shell_network_setup/wol.rs
 +++ b/src/app/shell_network_setup/wol.rs
 @@ -7,7 +7,7 @@ use super::chat_notice as message;
@@ -3737,10 +4057,10 @@ index 82fec5419..359444d23 100644
  /// `SetTimer(hDlg, 0x14AF8, 5000)` at `0x7914FF`.
  pub(super) const PING_PERIOD: Duration = Duration::from_millis(5000);
 diff --git a/src/app/shell_random_map.rs b/src/app/shell_random_map.rs
-index af6aa97b3..40ca2a402 100644
+index a65e27ce0..fca1aeb63 100644
 --- a/src/app/shell_random_map.rs
 +++ b/src/app/shell_random_map.rs
-@@ -574,40 +574,59 @@ pub(super) fn spawn_random_map_generation_worker(
+@@ -611,40 +611,59 @@ pub(super) fn spawn_random_map_generation_worker(
      shared_cell_dummy: crate::map::resolved_terrain::SharedCellDummy,
      map_storage_decision: RandomMapStorageDecision,
  ) -> std::io::Result<std::sync::mpsc::Receiver<RandomMapUpdate>> {
@@ -3833,7 +4153,7 @@ index af6aa97b3..40ca2a402 100644
  }
  
  /// Apply the finished worker receipt to the same shell owners the live poll
-@@ -686,7 +705,7 @@ fn write_random_map_preview_to_dir(
+@@ -723,7 +742,7 @@ fn write_random_map_preview_to_dir(
      match crate::assets::pcx_file::encode_direct_rgb(width, height, &rgb) {
          Ok(encoded) => {
              let path = ra2_dir.join(RANDMAP_PREVIEW_FILE);
@@ -3842,7 +4162,7 @@ index af6aa97b3..40ca2a402 100644
                  log::warn!("random map: could not write {}: {err}", path.display());
              }
          }
-@@ -1191,7 +1210,7 @@ impl App {
+@@ -1228,7 +1247,7 @@ impl App {
              .as_ref()
              .map(|config| config.paths.ra2_dir.clone())
              .ok_or_else(|| anyhow::anyhow!("no game config; cannot locate the RA2 directory"))?;
@@ -3851,7 +4171,7 @@ index af6aa97b3..40ca2a402 100644
  
          let description_text = options.description.display_text();
          let display = if options.description.is_empty() {
-@@ -1315,7 +1334,7 @@ impl App {
+@@ -1352,7 +1371,7 @@ impl App {
                  .skirmish_shell_state
                  .random_map_setup_modal
                  .as_mut()
@@ -3860,7 +4180,7 @@ index af6aa97b3..40ca2a402 100644
              {
                  state.platform.window.request_redraw();
              }
-@@ -1550,7 +1569,7 @@ mod tests {
+@@ -1643,7 +1662,7 @@ mod tests {
          let mut entries = 0;
          let generated = loop {
              match receiver
@@ -3869,7 +4189,7 @@ index af6aa97b3..40ca2a402 100644
                  .expect("production generation receipt")
              {
                  RandomMapUpdate::Started => entries += 1,
-@@ -1854,8 +1873,8 @@ mod tests {
+@@ -1947,8 +1966,8 @@ mod tests {
  
      #[test]
      fn gsi_04_12_preview_file_is_teardown_owned_and_precedes_accepted_commit() {
@@ -3960,10 +4280,10 @@ index e14a2a5f8..cec785ef3 100644
              state.platform.window.request_redraw();
          }
 diff --git a/src/app/shell_wol.rs b/src/app/shell_wol.rs
-index 350a45d57..e4bc1228e 100644
+index c0a1b1681..7f80d991d 100644
 --- a/src/app/shell_wol.rs
 +++ b/src/app/shell_wol.rs
-@@ -38,7 +38,7 @@ pub(crate) use test_service::{
+@@ -40,7 +40,7 @@ pub(crate) use test_service::{
  
  /// The wait box's reveal timer and the login drop list's scroll repeats;
  /// the caller schedules the earliest deadline with the other shell timers.
@@ -3998,8 +4318,689 @@ index d8f22bdc7..62db572b8 100644
  
  use super::WolPage;
  use super::service;
+diff --git a/src/app/shell_wol/live_service.rs b/src/app/shell_wol/live_service.rs
+index 777a90ce3..d0b29a3e0 100644
+--- a/src/app/shell_wol/live_service.rs
++++ b/src/app/shell_wol/live_service.rs
+@@ -13,7 +13,7 @@ use std::sync::{
+     Arc,
+     atomic::{AtomicBool, Ordering},
+ };
+-use std::time::{Duration, Instant};
++use web_time::{Duration, Instant};
+ 
+ use anyhow::{Context, Result, anyhow, ensure};
+ use base64::Engine;
+@@ -191,6 +191,7 @@ impl OnlineCleanup {
+                     }
+                 }
+                 http::Response::Offline => {
++                    log::warn!("Online lifecycle: stage=retired_session_offline");
+                     retired.service.clear_cleanup();
+                     retired.service.stopping.store(true, Ordering::Release);
+                 }
+@@ -352,8 +353,10 @@ struct PendingStart {
+ 
+ impl LiveService {
+     fn new() -> Result<Self> {
++        #[cfg(not(target_arch = "wasm32"))]
+         let base =
+             std::env::var("VERA20K_LOBBY_URL").unwrap_or_else(|_| DEFAULT_LOBBY_URL.to_owned());
++        #[cfg(not(target_arch = "wasm32"))]
+         ensure!(
+             base.starts_with("https://")
+                 && !base[8..].chars().any(|ch| matches!(ch, '@' | '?' | '#')),
+@@ -363,6 +366,7 @@ impl LiveService {
+         let (output, responses) = mpsc::channel();
+         let stopping = Arc::new(AtomicBool::new(false));
+         let worker_stopping = Arc::clone(&stopping);
++        #[cfg(not(target_arch = "wasm32"))]
+         std::thread::Builder::new()
+             .name("vera-lobby".into())
+             .spawn(move || {
+@@ -374,6 +378,13 @@ impl LiveService {
+                 )
+             })
+             .context("could not start online lobby worker")?;
++        #[cfg(target_arch = "wasm32")]
++        wasm_bindgen_futures::spawn_local(http::run_async(
++            String::new(),
++            input,
++            output,
++            worker_stopping,
++        ));
+         Ok(Self {
+             stopping,
+             requests,
+@@ -733,6 +744,7 @@ pub(super) fn poll(state: &mut AppState) -> Option<Instant> {
+             );
+         }
+         if poll_relay(state, &mut service).is_err() {
++            log::warn!("Online lifecycle: stage=relay_poll_failed");
+             cancel_pending(state, &mut service);
+             fail_start(state, "Could not establish the gameplay relay connection.");
+         }
+@@ -757,6 +769,11 @@ fn notice(state: &mut AppState, text: &str) {
+ }
+ 
+ fn fail_start(state: &mut AppState, text: &str) {
++    log::warn!(
++        "Online lifecycle: stage=start_failed verify={} protocol={}",
++        crate::app::shell_network_setup::verify(state).is_some(),
++        state.frontend.network_setup_protocol.is_some()
++    );
+     if crate::app::loading::pump::cancel_network_loading(state, text) {
+         return;
+     }
+@@ -1115,13 +1132,34 @@ fn local_choices_match(
+     let Ok(local) = serde_json::to_value(local) else {
+         return false;
+     };
+-    accepted_human_matches(accepted, &local)
++    accepted_human_matches(accepted, &local, true)
+ }
+ 
+-fn accepted_human_matches(accepted: &Value, human: &Value) -> bool {
++/// Host options own row allocation. Local setup admission requires that exact
++/// row; an outgoing guest choice only asks for identity, role and slot values.
++fn accepted_human_matches(accepted: &Value, human: &Value, require_same_row: bool) -> bool {
+     accepted["launch"]["humans"]
+         .as_array()
+-        .is_some_and(|humans| humans.iter().any(|candidate| candidate == human))
++        .is_some_and(|humans| {
++            humans.iter().any(|candidate| {
++                if require_same_row {
++                    return candidate == human;
++                }
++                let (Some(candidate), Some(expected)) = (candidate.as_object(), human.as_object())
++                else {
++                    return false;
++                };
++                // Preserve every identity/role/slot field and reject absent
++                // fields; only the host-assigned raw row may differ.
++                candidate.len() == expected.len()
++                    && ["name", "role", "slot"]
++                        .iter()
++                        .all(|key| expected.contains_key(*key))
++                    && expected.iter().all(|(key, value)| {
++                        key == "raw_slot_index" || candidate.get(key) == Some(value)
++                    })
++            })
++        })
+ }
+ 
+ fn restore_accepted_options(state: &mut AppState, service: &LiveService) {
+@@ -1189,6 +1227,7 @@ fn poll_start_preparation(state: &mut AppState, service: &mut LiveService) -> Re
+     );
+     let mut payload = local_agreement(state, service.revision)?;
+     payload["users"] = json!(&start.users);
++    log::info!("Online lifecycle: stage=start_submitted");
+     start.submitted_request = Some(service.command_with_id("start", payload));
+     start.deadline = Instant::now() + RELAY_TIMEOUT;
+     if let Some(protocol) = state.frontend.network_setup_protocol.as_mut() {
+@@ -1233,7 +1272,7 @@ fn request_setup(
+             service.pending_choices = (!service
+                 .accepted_options
+                 .as_ref()
+-                .is_some_and(|accepted| accepted_human_matches(accepted, &expected_human)))
++                .is_some_and(|accepted| accepted_human_matches(accepted, &expected_human, false)))
+             .then_some(PendingChoices {
+                 request_id,
+                 expected_human,
+@@ -1488,6 +1527,7 @@ fn apply_response(state: &mut AppState, service: &mut LiveService, response: htt
+         },
+         http::Response::Failure(message) => notice(state, message),
+         http::Response::Offline => {
++            log::warn!("Online lifecycle: stage=session_offline");
+             crate::app::loading::pump::cancel_network_loading(
+                 state,
+                 "The online session ended while the map was loading.",
+@@ -1589,8 +1629,8 @@ fn poll_renewal(state: &AppState, service: &mut LiveService) {
+     let Some(expires) = crate::app::lan_service::online_relay_expires(state) else {
+         return;
+     };
+-    let unix_now = std::time::SystemTime::now()
+-        .duration_since(std::time::UNIX_EPOCH)
++    let unix_now = web_time::SystemTime::now()
++        .duration_since(web_time::UNIX_EPOCH)
+         .map(|duration| duration.as_secs())
+         .unwrap_or(0);
+     let now = Instant::now();
+@@ -1737,7 +1777,9 @@ fn apply_event(
+                 return Ok(());
+             }
+             let changed = p.revision != service.revision || service.accepted_options.is_none();
+-            let canonical = canonical_options(&p.options)?;
++            let canonical = canonical_options(&p.options).inspect_err(|_| {
++                log::warn!("Online options rejected: stage=canonicalize");
++            })?;
+             if let Some(start) = service.start_preparation.as_mut()
+                 && !start.accept_options(p.revision, &canonical)
+                 && start.revision.is_some()
+@@ -1749,17 +1791,19 @@ fn apply_event(
+                 );
+             }
+             service.revision = p.revision;
+-            if service
+-                .pending_choices
+-                .as_ref()
+-                .is_some_and(|choices| accepted_human_matches(&canonical, &choices.expected_human))
+-            {
++            if service.pending_choices.as_ref().is_some_and(|choices| {
++                accepted_human_matches(&canonical, &choices.expected_human, false)
++            }) {
+                 service.pending_choices = None;
+             }
+             service.accepted_options = Some(canonical);
+             if changed {
+                 service.last_ready_request = None;
+-                crate::app::shell_network_setup::invalidate_network_agreement(state)?;
++                crate::app::shell_network_setup::invalidate_network_agreement(state).inspect_err(
++                    |_| {
++                        log::warn!("Online options rejected: stage=invalidate_agreement");
++                    },
++                )?;
+             }
+             let generated = p.options.random_map.clone();
+             if !state.match_state.session.host() {
+@@ -1788,12 +1832,17 @@ fn apply_event(
+                     log::warn!("Online host setup was not admitted");
+                 })?;
+             }
+-            maps::received_options(state, service, generated)?;
++            maps::received_options(state, service, generated).inspect_err(|_| {
++                log::warn!("Online options rejected: stage=map_manifest");
++            })?;
+             // The owner is ready without a guest Accept button, but still proves its
+             // own local map and rules to the same server admission gate.
+-            let mut agreement = local_agreement(state, service.revision)?;
+-            agreement["status"] = json!(local_map_status(state, service));
+-            service.command("map_status", agreement.clone());
++            let mut agreement = local_agreement(state, service.revision).inspect_err(|_| {
++                log::warn!("Online options rejected: stage=local_agreement");
++            })?;
++            let mut map_status = agreement.clone();
++            map_status["status"] = json!(local_map_status(state, service));
++            service.command("map_status", map_status);
+             if state.match_state.session.host() {
+                 agreement["ready"] = json!(true);
+                 service.command("ready", agreement);
+@@ -1938,10 +1987,14 @@ fn apply_event(
+             );
+         }
+         "game_started" => {
+-            begin_start(state, service, decode(payload)?)?;
++            log::info!("Online lifecycle: stage=game_started_received");
++            begin_start(state, service, decode(payload)?).inspect_err(|_| {
++                log::warn!("Online lifecycle: stage=game_started_admission_failed");
++            })?;
+             service.start_preparation = None;
+         }
+         "start_confirmed" => {
++            log::info!("Online lifecycle: stage=start_confirmed_received");
+             let id = payload["match_id"]
+                 .as_str()
+                 .ok_or_else(|| anyhow!("missing match"))?;
+@@ -1960,6 +2013,7 @@ fn apply_event(
+             }
+         }
+         "timing_confirmed" => {
++            log::info!("Online lifecycle: stage=timing_confirmed_received");
+             #[derive(Deserialize)]
+             struct TimingConfirmed {
+                 match_id: String,
+@@ -2005,6 +2059,7 @@ fn apply_event(
+             service.pending = None;
+         }
+         "start_rejected" => {
++            log::warn!("Online lifecycle: stage=server_start_rejected");
+             cancel_pending(state, service);
+             fail_start(
+                 state,
+@@ -2096,7 +2151,12 @@ fn begin_start(state: &mut AppState, service: &mut LiveService, start: wire::Sta
+             "setup source order differs"
+         );
+     }
+-    let grant = decode_relay_grant(&start.relay, &start.match_id, &service.player_id)?;
++    log::info!("Online lifecycle: stage=start_identity_admitted");
++    let grant = decode_relay_grant(&start.relay, &start.match_id, &service.player_id).inspect_err(
++        |_| {
++            log::warn!("Online lifecycle: stage=relay_grant_rejected");
++        },
++    )?;
+     let connections = LanConnections::new(
+         LanConnectionConfig {
+             max_peers: 29,
+@@ -2115,14 +2175,35 @@ fn begin_start(state: &mut AppState, service: &mut LiveService, start: wire::Sta
+             alternate: any,
+         },
+         connections,
+-    )?;
+-    transport.enable_relay(
+-        start.relay.address,
+-        &grant.ticket,
+-        grant.key,
+-        grant.payload_key,
+-    )?;
+-    transport.start_io_pump(crate::app::match_runtime::frame_pacer::wall_clock_bucket)?;
++    )
++    .inspect_err(|error| {
++        log::warn!(
++            "Online lifecycle: stage=relay_bind_failed kind={:?}",
++            error.kind()
++        );
++    })?;
++    transport
++        .enable_relay(
++            start.relay.address,
++            &grant.ticket,
++            grant.key,
++            grant.payload_key,
++        )
++        .inspect_err(|error| {
++            log::warn!(
++                "Online lifecycle: stage=relay_enable_failed kind={:?}",
++                error.kind()
++            );
++        })?;
++    transport
++        .start_io_pump(crate::app::match_runtime::frame_pacer::wall_clock_bucket)
++        .inspect_err(|error| {
++            log::warn!(
++                "Online lifecycle: stage=relay_pump_failed kind={:?}",
++                error.kind()
++            );
++        })?;
++    log::info!("Online lifecycle: stage=relay_transport_created");
+     for user in &start.users {
+         state.match_state.session.bind_network_endpoint(
+             &user.name,
+@@ -2154,6 +2235,7 @@ fn begin_start(state: &mut AppState, service: &mut LiveService, start: wire::Sta
+         state,
+         NetworkSetupEvent::VerifyStarted { pairs: true },
+     )?;
++    log::info!("Online lifecycle: stage=verify_started");
+     service.pending = Some(PendingStart {
+         match_id: start.match_id,
+         host_name,
+@@ -2171,23 +2253,38 @@ fn poll_relay(state: &mut AppState, service: &mut LiveService) -> Result<()> {
+     let Some(pending) = service.pending.as_mut() else {
+         return Ok(());
+     };
+-    ensure!(
+-        Instant::now() < pending.deadline,
+-        "relay admission timed out"
+-    );
++    if Instant::now() >= pending.deadline {
++        log::warn!(
++            "Online lifecycle: stage=relay_timeout acknowledged={} probes_started={} latencies_reported={}",
++            pending.relay_acknowledged,
++            pending.probes_started,
++            pending.latencies_reported
++        );
++        anyhow::bail!("relay admission timed out");
++    }
+     if let Some(transport) = pending.transport.as_mut() {
+         let now = crate::app::match_runtime::frame_pacer::frame_bucket(
+             crate::app::match_runtime::frame_pacer::wall_clock_ms(),
+         );
+         let report = transport.service(now);
+-        ensure!(report.first_io_error.is_none(), "relay IO failed");
++        if let Some(failure) = report.first_io_error.as_ref() {
++            // ErrorKind and these enums are fixed classifications; never emit
++            // arbitrary io::Error text, endpoints, packets or relay credentials.
++            log::warn!(
++                "Online lifecycle: stage=relay_io_failed channel={:?} operation={:?} kind={:?}",
++                failure.channel,
++                failure.operation,
++                failure.error.kind()
++            );
++            anyhow::bail!("relay IO failed");
++        }
+         if transport.relay_ready() {
++            log::info!("Online lifecycle: stage=relay_ready");
+             let transport = pending.transport.take().expect("ready pending relay");
+-            crate::app::lan_service::install_online_transport(
+-                state,
+-                transport,
+-                &pending.host_name,
+-            )?;
++            crate::app::lan_service::install_online_transport(state, transport, &pending.host_name)
++                .inspect_err(|_| {
++                    log::warn!("Online lifecycle: stage=relay_install_failed");
++                })?;
+             pending.relay_acknowledged = true;
+             let match_id = pending.match_id.clone();
+             commands.push(("relay_ready", json!({"match_id":match_id})));
+@@ -2199,6 +2296,7 @@ fn poll_relay(state: &mut AppState, service: &mut LiveService) -> Result<()> {
+                 json!({"source_index":source_index,"round_trip_ms":round_trip_ms})).collect();
+             let match_id = pending.match_id.clone();
+             pending.latencies_reported = true;
++            log::info!("Online lifecycle: stage=peer_latencies_measured");
+             commands.push(("latency_ready", json!({"match_id":match_id,"pings":pings})));
+         }
+     }
+@@ -2349,12 +2447,32 @@ mod completion_tests {
+         let expected =
+             serde_json::to_value(session.network_setup().unwrap().local_player()).unwrap();
+         assert!(
+-            !accepted_human_matches(&accepted, &expected),
++            !accepted_human_matches(&accepted, &expected, false),
+             "an unrelated old echo does not acknowledge the outgoing request"
+         );
+         let echoed = json!({"launch":session.network_setup()});
+         assert!(local_choices_match(&session, &echoed));
+-        assert!(accepted_human_matches(&echoed, &expected));
++        assert!(accepted_human_matches(&echoed, &expected, false));
++    }
++
++    #[test]
++    fn guest_choices_acknowledges_host_assigned_row_but_preserves_identity_and_choices() {
++        let session = setup_session();
++        let accepted = json!({"launch":session.network_setup()});
++        let mut expected =
++            serde_json::to_value(&session.network_setup().unwrap().humans[1]).unwrap();
++        expected["raw_slot_index"] = json!(0);
++        assert!(accepted_human_matches(&accepted, &expected, false));
++        assert!(!accepted_human_matches(&accepted, &expected, true));
++        let mut wrong = expected.clone();
++        wrong["name"] = json!("UnadmittedGuest");
++        assert!(!accepted_human_matches(&accepted, &wrong, false));
++        wrong = expected.clone();
++        wrong["slot"]["color_random"] = json!(!expected["slot"]["color_random"].as_bool().unwrap());
++        assert!(!accepted_human_matches(&accepted, &wrong, false));
++        wrong = expected;
++        wrong["role"] = json!("Observer");
++        assert!(!accepted_human_matches(&accepted, &wrong, false));
+     }
+ 
+     #[test]
+diff --git a/src/app/shell_wol/live_service/http.rs b/src/app/shell_wol/live_service/http.rs
+index 7b936e5de..b5c46cc9f 100644
+--- a/src/app/shell_wol/live_service/http.rs
++++ b/src/app/shell_wol/live_service/http.rs
+@@ -1,15 +1,22 @@
+-//! Blocking HTTPS is confined to this worker. Passwords and bearer tokens never
++//! HTTPS is confined to this serial worker (blocking native I/O, browser fetch).
++//! Passwords and bearer tokens never
+ //! enter Debug output, file storage, error strings, or the gameplay client state.
+ 
+ use base64::Engine;
++#[cfg(not(target_arch = "wasm32"))]
+ use std::io::Read;
+ use std::path::PathBuf;
+-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
++#[cfg(not(target_arch = "wasm32"))]
++use std::sync::mpsc::RecvTimeoutError;
++use std::sync::mpsc::{Receiver, Sender};
+ use std::sync::{
+     Arc,
+     atomic::{AtomicBool, Ordering},
+ };
+-use std::time::{Duration, Instant};
++use web_time::{Duration, Instant};
++
++#[cfg(target_arch = "wasm32")]
++mod browser;
+ 
+ use super::wire::{ChannelList, Envelope, EventBatch, Session};
+ use serde_json::{Value, json};
+@@ -201,6 +208,7 @@ impl RequestFailure {
+ 
+ struct Client {
+     stopping: Arc<AtomicBool>,
++    #[cfg(not(target_arch = "wasm32"))]
+     agent: ureq::Agent,
+     base: String,
+     token: Option<String>,
+@@ -214,8 +222,8 @@ fn decode_session(value: Value, requested_nickname: &str) -> Result<Session, Req
+     // A successful response may preserve the account's original casing, but
+     // cannot replace the account the player asked to sign into. Credentials
+     // remain private; validation errors never contain response field values.
+-    let now = std::time::SystemTime::now()
+-        .duration_since(std::time::UNIX_EPOCH)
++    let now = web_time::SystemTime::now()
++        .duration_since(web_time::UNIX_EPOCH)
+         .map_err(|_| RequestFailure::Status(0))?
+         .as_secs();
+     if !session.nickname.eq_ignore_ascii_case(requested_nickname)
+@@ -240,6 +248,11 @@ impl Client {
+             // it stops refreshing the broken server session and use the WOL
+             // disconnect/re-login path. Repeated queued failures emit once.
+             if self.token.take().is_some() {
++                log::warn!(
++                    "Online session retired: status={}, cursor_lost={}",
++                    error.status(),
++                    matches!(error, RequestFailure::LostCursor)
++                );
+                 let _ = output.send(Response::Offline);
+             }
+             true
+@@ -267,7 +280,26 @@ impl Client {
+         }
+     }
+ 
+-    fn request(&self, path: &str, body: Option<&Value>) -> Result<Value, RequestFailure> {
++    async fn request(&self, path: &str, body: Option<&Value>) -> Result<Value, RequestFailure> {
++        #[cfg(target_arch = "wasm32")]
++        {
++            if self.stopping.load(Ordering::Acquire) {
++                return Err(RequestFailure::Status(0));
++            }
++            let result = browser::request(path, self.token.as_deref(), body).await;
++            if self.stopping.load(Ordering::Acquire) {
++                return Err(RequestFailure::Status(0));
++            }
++            result
++        }
++        #[cfg(not(target_arch = "wasm32"))]
++        {
++            self.request_native(path, body)
++        }
++    }
++
++    #[cfg(not(target_arch = "wasm32"))]
++    fn request_native(&self, path: &str, body: Option<&Value>) -> Result<Value, RequestFailure> {
+         if self.stopping.load(Ordering::Acquire) {
+             return Err(RequestFailure::Status(0));
+         }
+@@ -336,9 +368,11 @@ impl Client {
+         Ok(())
+     }
+ 
+-    fn drain_events(&mut self, output: &Sender<Response>) -> Result<(), RequestFailure> {
++    async fn drain_events(&mut self, output: &Sender<Response>) -> Result<(), RequestFailure> {
+         for _ in 0..MAX_CLEANUP_DRAIN_BATCHES {
+-            let value = self.request(&format!("/v1/events?after={}", self.cursor), None)?;
++            let value = self
++                .request(&format!("/v1/events?after={}", self.cursor), None)
++                .await?;
+             let empty = value
+                 .get("events")
+                 .and_then(Value::as_array)
+@@ -354,12 +388,23 @@ impl Client {
+     }
+ }
+ 
++#[cfg(not(target_arch = "wasm32"))]
+ pub(super) fn run(
+     base: String,
+     input: Receiver<Request>,
+     output: Sender<Response>,
+     stopping: Arc<AtomicBool>,
+ ) {
++    crate::render::gpu::block_on(run_async(base, input, output, stopping));
++}
++
++pub(super) async fn run_async(
++    base: String,
++    input: Receiver<Request>,
++    output: Sender<Response>,
++    stopping: Arc<AtomicBool>,
++) {
++    #[cfg(not(target_arch = "wasm32"))]
+     let config = ureq::Agent::config_builder()
+         .https_only(true)
+         .max_redirects(0)
+@@ -368,6 +413,7 @@ pub(super) fn run(
+         .build();
+     let mut client = Client {
+         stopping: Arc::clone(&stopping),
++        #[cfg(not(target_arch = "wasm32"))]
+         agent: config.into(),
+         base,
+         token: None,
+@@ -379,11 +425,21 @@ pub(super) fn run(
+         if stopping.load(Ordering::Acquire) {
+             break;
+         }
++        #[cfg(not(target_arch = "wasm32"))]
+         let request = match input.recv_timeout(Duration::from_secs(1)) {
+             Ok(request) => Some(request),
+             Err(RecvTimeoutError::Timeout) => None,
+             Err(RecvTimeoutError::Disconnected) => break,
+         };
++        #[cfg(target_arch = "wasm32")]
++        let request = match input.try_recv() {
++            Ok(request) => Some(request),
++            Err(std::sync::mpsc::TryRecvError::Empty) => {
++                browser::delay(50).await;
++                None
++            }
++            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
++        };
+         if stopping.load(Ordering::Acquire) {
+             break;
+         }
+@@ -443,17 +499,19 @@ pub(super) fn run(
+                 offset,
+             }) => {
+                 let result = if crate::map::source::valid_source_sha256(&digest) {
+-                    client.request(
+-                        &format!(
+-                            "/v1/maps/{seed_digest}?offset={offset}&resource={}",
+-                            if resource == crate::map::source::TransferResource::Preview {
+-                                "preview"
+-                            } else {
+-                                "map"
+-                            }
+-                        ),
+-                        None,
+-                    )
++                    client
++                        .request(
++                            &format!(
++                                "/v1/maps/{seed_digest}?offset={offset}&resource={}",
++                                if resource == crate::map::source::TransferResource::Preview {
++                                    "preview"
++                                } else {
++                                    "map"
++                                }
++                            ),
++                            None,
++                        )
++                        .await
+                 } else {
+                     Err(RequestFailure::Status(400))
+                 };
+@@ -516,6 +574,7 @@ pub(super) fn run(
+                     "data":base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)}});
+                 let result = client
+                     .request("/v1/commands", Some(&body))
++                    .await
+                     .and_then(|value| client.batch(value, &output));
+                 if let Err(error) = result.as_ref() {
+                     client.session_failed(*error, &output);
+@@ -553,6 +612,7 @@ pub(super) fn run(
+                         path,
+                         Some(&json!({"nickname": nickname, "password": password, "protocol": 3})),
+                     )
++                    .await
+                     .and_then(|value| decode_session(value, &nickname));
+                 match result {
+                     Ok(session) => {
+@@ -595,6 +655,7 @@ pub(super) fn run(
+             Some(Request::Channels(kind)) => {
+                 match client
+                     .request(&format!("/v1/channels?kind={kind}"), None)
++                    .await
+                     .and_then(|value| {
+                         serde_json::from_value(value).map_err(|_| RequestFailure::Status(0))
+                     }) {
+@@ -622,28 +683,23 @@ pub(super) fn run(
+                     continue;
+                 }
+                 let body = json!({"request_id":id.to_string(),"after":client.cursor,"operation":operation,"payload":payload});
+-                let result = client
+-                    .request("/v1/commands", Some(&body))
+-                    .or_else(|error| {
+-                        if error == RequestFailure::Status(0) {
+-                            client.request("/v1/commands", Some(&body))
+-                        } else {
+-                            Err(error)
+-                        }
+-                    })
+-                    .and_then(|value| {
+-                        // Logout removes its event stream and returns cursor0.
+-                        // Its successful HTTP response is the completion receipt.
+-                        if operation == "logout" {
+-                            Ok(())
+-                        } else {
+-                            client.batch(value, &output)
+-                        }
+-                    });
++                let mut response = client.request("/v1/commands", Some(&body)).await;
++                if response == Err(RequestFailure::Status(0)) {
++                    response = client.request("/v1/commands", Some(&body)).await;
++                }
++                let result = response.and_then(|value| {
++                    // Logout removes its event stream and returns cursor0.
++                    // Its successful HTTP response is the completion receipt.
++                    if operation == "logout" {
++                        Ok(())
++                    } else {
++                        client.batch(value, &output)
++                    }
++                });
+                 let result = if result.is_ok() && matches!(operation, "finish" | "leave") {
+                     // The server may return events pending before the mutation.
+                     // Drain its committed tail before releasing the next room.
+-                    client.drain_events(&output)
++                    client.drain_events(&output).await
+                 } else {
+                     result
+                 };
+@@ -684,13 +740,14 @@ pub(super) fn run(
+         if client.token.is_some() && Instant::now() >= next_poll {
+             let result = client
+                 .request(&format!("/v1/events?after={}", client.cursor), None)
++                .await
+                 .and_then(|value| client.batch(value, &output));
+             next_poll = Instant::now() + client.poll_finished(result, &mut failed_polls, &output);
+         }
+     }
+ }
+ 
+-#[cfg(test)]
++#[cfg(all(test, not(target_arch = "wasm32")))]
+ mod tests {
+     use super::*;
+ 
+diff --git a/src/app/shell_wol/live_service/maps.rs b/src/app/shell_wol/live_service/maps.rs
+index 3467db5ce..6064782ad 100644
+--- a/src/app/shell_wol/live_service/maps.rs
++++ b/src/app/shell_wol/live_service/maps.rs
+@@ -7,7 +7,7 @@ use crate::app::shell_network_setup::{accept_network_map_source, set_network_map
+ use crate::map::source::{LoadedTransferAsset, TransferResource};
+ use anyhow::{Result, anyhow, ensure};
+ use std::path::PathBuf;
+-use std::time::{Duration, Instant};
++use web_time::{Duration, Instant};
+ const CHUNK: usize = 32768;
+ 
+ #[derive(PartialEq, Eq)]
 diff --git a/src/app/shell_wol/lobby.rs b/src/app/shell_wol/lobby.rs
-index 626f36725..00749219c 100644
+index c718a5003..e70075cec 100644
 --- a/src/app/shell_wol/lobby.rs
 +++ b/src/app/shell_wol/lobby.rs
 @@ -23,7 +23,7 @@
@@ -4012,7 +5013,7 @@ index 626f36725..00749219c 100644
  use super::WolPage;
  use super::service::{self, WolServiceEvent, WolServiceRequest};
 diff --git a/src/app/shell_wol/login.rs b/src/app/shell_wol/login.rs
-index 81212caf4..28e0fbf20 100644
+index 4e9e97849..832ea3861 100644
 --- a/src/app/shell_wol/login.rs
 +++ b/src/app/shell_wol/login.rs
 @@ -1,7 +1,7 @@
@@ -4051,7 +5052,7 @@ index a07afacdf..7b1cc56fd 100644
  use winit::keyboard::KeyCode;
  
 diff --git a/src/app/shell_wol/persona.rs b/src/app/shell_wol/persona.rs
-index 8958a7d37..500ab6577 100644
+index 096a7445d..bce381f1c 100644
 --- a/src/app/shell_wol/persona.rs
 +++ b/src/app/shell_wol/persona.rs
 @@ -3,7 +3,7 @@
@@ -4103,7 +5104,7 @@ index 7d4da3b55..1106a5a97 100644
  
  /// `[0xA8B244] == 2`: Quick Co-op.
 diff --git a/src/app/shell_wol/service.rs b/src/app/shell_wol/service.rs
-index b6069ea32..7418e4dc2 100644
+index c955817ab..9999d7b43 100644
 --- a/src/app/shell_wol/service.rs
 +++ b/src/app/shell_wol/service.rs
 @@ -7,7 +7,7 @@
@@ -4114,9 +5115,9 @@ index b6069ea32..7418e4dc2 100644
 +use web_time::{Duration, Instant};
  
  use super::{WolBoxThen, WolPage, WolVisit};
- use crate::app::persistence::wol_profile::WolPersona;
+ use crate::app::persistence::wol_profile::{WolInfoFile, WolPersona};
 diff --git a/src/app/shell_wol/test_service.rs b/src/app/shell_wol/test_service.rs
-index 48963069f..82589d94c 100644
+index 2e86e63df..21ebddd00 100644
 --- a/src/app/shell_wol/test_service.rs
 +++ b/src/app/shell_wol/test_service.rs
 @@ -36,7 +36,7 @@ use crate::ui::wol_lobby::{
@@ -4129,7 +5130,7 @@ index 48963069f..82589d94c 100644
  /// Event 9's status that completes the server-list wait.
  const SERVER_STATUS_READY: u32 = 0x0004_012F;
 diff --git a/src/app/telemetry_capture.rs b/src/app/telemetry_capture.rs
-index 246af7a2b..a49217648 100644
+index 5b387e3fe..39629189e 100644
 --- a/src/app/telemetry_capture.rs
 +++ b/src/app/telemetry_capture.rs
 @@ -22,7 +22,7 @@ const MAX_SELECTED: usize = 32;
@@ -4141,7 +5142,7 @@ index 246af7a2b..a49217648 100644
  
  /// World replacement starts a new observation window without touching the world.
  pub(crate) fn reset_observation(state: &mut AppState) {
-@@ -120,7 +120,7 @@ pub fn capture_snapshot(state: &AppState) -> Option<TelemetrySnapshot> {
+@@ -124,7 +124,7 @@ pub fn capture_snapshot(state: &AppState) -> Option<TelemetrySnapshot> {
      timing.tick_hz = state
          .match_state
          .telemetry_tick_rate
@@ -4150,7 +5151,7 @@ index 246af7a2b..a49217648 100644
      snapshot.timing = Some(timing);
      let sim = &runtime.simulation;
      snapshot.session = Some(SessionContext {
-@@ -257,7 +257,7 @@ pub fn publish_if_due(state: &mut AppState) {
+@@ -261,7 +261,7 @@ pub fn publish_if_due(state: &mut AppState) {
      if !state.diag.telemetry_observer.active() {
          return;
      }
@@ -4199,42 +5200,57 @@ index ae6be5fb8..6871618a7 100644
                  .and_then(|exe| executable_icon(&exe))
              else {
 diff --git a/src/assets/asset_manager.rs b/src/assets/asset_manager.rs
-index dbcf60e61..568abb97e 100644
+index 473ff0178..781228768 100644
 --- a/src/assets/asset_manager.rs
 +++ b/src/assets/asset_manager.rs
-@@ -50,13 +50,14 @@ impl LooseAsset {
-     /// only requested payloads; root indexing must not copy entire MIX archives.
-     /// This is Rust storage policy, not native raw-file cache equivalence.
-     fn snapshot(&self) -> &Option<Arc<[u8]>> {
--        self.bytes.get_or_init(|| match std::fs::read(&self.path) {
--            Ok(bytes) => Some(bytes.into()),
--            Err(err) => {
--                log::debug!("Skipping loose {}: {}", self.path.display(), err);
--                None
--            }
--        })
-+        self.bytes
-+            .get_or_init(|| match crate::util::file_system::read(&self.path) {
-+                Ok(bytes) => Some(bytes.into()),
-+                Err(err) => {
-+                    log::debug!("Skipping loose {}: {}", self.path.display(), err);
-+                    None
-+                }
-+            })
-     }
- 
-     fn bytes(&self) -> Option<&[u8]> {
-@@ -476,6 +477,9 @@ impl AssetManager {
+@@ -63,18 +63,27 @@ impl LooseAsset {
+     fn read_snapshot(&self, maximum: Option<usize>) -> Result<Option<Arc<[u8]>>, AssetError> {
+         let read = || -> Result<Vec<u8>, AssetError> {
+             let Some(maximum) = maximum else {
+-                return Ok(std::fs::read(&self.path)?);
++                return Ok(crate::util::file_system::read(&self.path)?);
+             };
+-            use std::io::Read;
+-            let file = std::fs::File::open(&self.path)?;
+-            check_asset_read_limit(file.metadata()?.len(), maximum)?;
+-            let mut bytes = Vec::new();
+-            // A file can grow after metadata inspection. Never allocate or
+-            // read the rest of that growth before refusing the source.
+-            file.take((maximum as u64).saturating_add(1))
+-                .read_to_end(&mut bytes)?;
+-            check_asset_read_limit(bytes.len() as u64, maximum)?;
+-            Ok(bytes)
++            #[cfg(target_arch = "wasm32")]
++            {
++                let bytes = crate::util::file_system::read_shared(&self.path)?;
++                check_asset_read_limit(bytes.len() as u64, maximum)?;
++                Ok(bytes.to_vec())
++            }
++            #[cfg(not(target_arch = "wasm32"))]
++            {
++                use std::io::Read;
++                let file = std::fs::File::open(&self.path)?;
++                check_asset_read_limit(file.metadata()?.len(), maximum)?;
++                let mut bytes = Vec::new();
++                // A file can grow after metadata inspection. Never allocate or
++                // read the rest of that growth before refusing the source.
++                file.take((maximum as u64).saturating_add(1))
++                    .read_to_end(&mut bytes)?;
++                check_asset_read_limit(bytes.len() as u64, maximum)?;
++                Ok(bytes)
++            }
+         };
+         match read() {
+             Ok(bytes) => Ok(Some(bytes.into())),
+@@ -559,6 +568,7 @@ impl AssetManager {
          // Preserve this user-requested parity exception during future parity
          // work unless the user explicitly asks to change the music catalog.
-         manager.mount_named_archive("theme.mix", false)?;
-+        // Browser preview deliberately does not import movie archives. Keep
-+        // required gameplay archives and their retail precedence unchanged.
+         manager.mount_startup_archive("theme.mix", false, &mut policy)?;
 +        #[cfg(not(target_arch = "wasm32"))]
-         manager.mount_native_movie_media(media_mode)?;
+         manager.mount_startup_movie_media(media_mode, &mut policy)?;
  
          // Loose YRO archives are deliberately absent here. Retail registers
-@@ -954,10 +958,10 @@ impl AssetManager {
+@@ -1068,10 +1078,10 @@ impl AssetManager {
      ///
      /// This is meant for tooling. Runtime code does not call it.
      pub fn load_all_disk_mixes(&mut self) -> Result<usize, AssetError> {
@@ -4247,7 +5263,7 @@ index dbcf60e61..568abb97e 100644
                      && path
                          .extension()
                          .and_then(OsStr::to_str)
-@@ -1075,10 +1079,10 @@ impl AssetManager {
+@@ -1189,10 +1199,10 @@ impl AssetManager {
          let mut path = self.ra2_dir.clone();
          for component in relative.split(['\\', '/']).filter(|part| !part.is_empty()) {
              let exact = path.join(component);
@@ -4260,7 +5276,7 @@ index dbcf60e61..568abb97e 100644
                      .ok()?
                      .filter_map(Result::ok)
                      .map(|entry| entry.path())
-@@ -1090,7 +1094,7 @@ impl AssetManager {
+@@ -1204,7 +1214,7 @@ impl AssetManager {
                      })?
              };
          }
@@ -4269,7 +5285,7 @@ index dbcf60e61..568abb97e 100644
      }
  
      fn lookup_asset_entry(&self, name: &str) -> Option<(&NamedArchive, i32)> {
-@@ -1200,7 +1204,7 @@ impl AssetManager {
+@@ -1345,7 +1355,7 @@ impl AssetManager {
          let directory = relative_directory
              .map(|relative| self.ra2_dir.join(relative))
              .unwrap_or_else(|| self.ra2_dir.clone());
@@ -4278,7 +5294,7 @@ index dbcf60e61..568abb97e 100644
              Ok(entries) => entries,
              Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                  return Ok(WildcardMount::default());
-@@ -1397,10 +1401,10 @@ impl AssetManager {
+@@ -1582,10 +1592,10 @@ impl AssetManager {
      fn open_loose_root(ra2_dir: &Path) -> Result<HashMap<String, LooseAsset>, AssetError> {
          let mut files = HashMap::new();
  
@@ -4291,7 +5307,7 @@ index dbcf60e61..568abb97e 100644
                  continue;
              }
              let Some(file_name) = path.file_name().and_then(OsStr::to_str) else {
-@@ -1476,7 +1480,7 @@ fn loose_lookup_key(name: &str) -> Option<String> {
+@@ -1661,7 +1671,7 @@ fn loose_lookup_key(name: &str) -> Option<String> {
  /// hidden, system, directory or temporary attribute (`0x116`). The asset search
  /// and the scenario listings share it.
  pub(crate) fn retail_enumerated_file(path: &Path) -> bool {
@@ -4300,7 +5316,7 @@ index dbcf60e61..568abb97e 100644
          return false;
      };
      if !metadata.is_file() {
-@@ -1815,7 +1819,10 @@ mod tests {
+@@ -2079,7 +2089,10 @@ mod tests {
              let borrowed = manager.get_ref(name).expect("loose payload");
              assert_eq!(borrowed, b"first lookup");
              std::fs::write(&path, b"new").expect("truncate while borrowed payload lives");
@@ -4312,7 +5328,7 @@ index dbcf60e61..568abb97e 100644
              assert_eq!(borrowed, b"first lookup", "owned borrow remains stable");
              assert_eq!(manager.get_ref(name), Some(borrowed));
          }
-@@ -1890,7 +1897,7 @@ mod tests {
+@@ -2154,7 +2167,7 @@ mod tests {
          directory.write_mix("mapsmd03.mix", "three.bin", b"three");
          directory.write_mix("MAPS01.MIX", "base.bin", b"base");
  
@@ -4321,7 +5337,7 @@ index dbcf60e61..568abb97e 100644
              .expect("enumerate expected order")
              .filter_map(Result::ok)
              .filter_map(|entry| {
-@@ -1920,7 +1927,7 @@ mod tests {
+@@ -2184,7 +2197,7 @@ mod tests {
          directory.write_mix("MOVMD03.MIX", "md-three.bin", b"three");
          directory.write_mix("MOVMD04.MIX", "md-four.bin", b"four");
  
@@ -4331,7 +5347,7 @@ index dbcf60e61..568abb97e 100644
              .filter_map(Result::ok)
              .filter_map(|entry| {
 diff --git a/src/assets/mix_archive.rs b/src/assets/mix_archive.rs
-index 439ea6b33..440b94701 100644
+index 7e8ef0d59..8c87df33c 100644
 --- a/src/assets/mix_archive.rs
 +++ b/src/assets/mix_archive.rs
 @@ -39,6 +39,7 @@
@@ -4342,7 +5358,7 @@ index 439ea6b33..440b94701 100644
  use std::fs::File;
  use std::path::Path;
  use std::sync::Arc;
-@@ -94,6 +95,7 @@ pub struct MixArchive {
+@@ -98,6 +99,7 @@ pub struct MixArchive {
  #[derive(Clone)]
  enum MixBytes {
      Owned(Arc<[u8]>),
@@ -4350,7 +5366,7 @@ index 439ea6b33..440b94701 100644
      Mapped(Arc<memmap2::Mmap>),
  }
  
-@@ -115,6 +117,7 @@ impl MixData {
+@@ -119,6 +121,7 @@ impl MixData {
          }
      }
  
@@ -4358,7 +5374,7 @@ index 439ea6b33..440b94701 100644
      fn from_mapped(map: memmap2::Mmap) -> Self {
          let bytes = Arc::new(map);
          let len = bytes.len();
-@@ -128,6 +131,7 @@ impl MixData {
+@@ -132,6 +135,7 @@ impl MixData {
      fn as_slice(&self) -> &[u8] {
          let bytes = match &self.bytes {
              MixBytes::Owned(data) => &data[..],
@@ -4366,7 +5382,7 @@ index 439ea6b33..440b94701 100644
              MixBytes::Mapped(map) => &map[..],
          };
          &bytes[self.start..self.start + self.len]
-@@ -172,18 +176,21 @@ impl SharedBytes {
+@@ -176,18 +180,21 @@ impl SharedBytes {
      /// disk mid-play. `StreamPlayer__PlayFile @ 0x00407B60` likewise buffers
      /// seconds of file ahead of its decoder. Owned bytes are already in memory.
      pub fn read_ahead(&self) {
@@ -4399,7 +5415,7 @@ index 439ea6b33..440b94701 100644
      }
  }
  
-@@ -287,9 +294,22 @@ impl MixArchive {
+@@ -296,9 +303,22 @@ impl MixArchive {
  
      /// Load a MIX archive from a file path.
      pub fn load(path: &Path) -> Result<Self, AssetError> {
@@ -4465,10 +5481,10 @@ index 5c6dda9ba..edef1af54 100644
  use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player, Source};
  
 diff --git a/src/audio/sfx.rs b/src/audio/sfx.rs
-index a937e1f3e..382c80b1e 100644
+index 7b61550bd..ebb6a5a73 100644
 --- a/src/audio/sfx.rs
 +++ b/src/audio/sfx.rs
-@@ -4149,7 +4149,7 @@ mod tests {
+@@ -4184,7 +4184,7 @@ mod tests {
      fn retail_squid_one_shot_device_release_detach_and_hard_stop() {
          let mut service = TestAudioService::default();
          use std::io::Write;
@@ -4477,7 +5493,7 @@ index a937e1f3e..382c80b1e 100644
  
          // Original gattling_loop shared one-shot controls establish Release
          // 406060 finishing the current buffer, while generic405FD0 requests
-@@ -4308,7 +4308,7 @@ mod tests {
+@@ -4343,7 +4343,7 @@ mod tests {
      #[test]
      #[ignore = "requires active-retail RA2_DIR and an audio output device"]
      fn retail_above_floor_gap_parks_the_record_until_the_next_start_pass() {
@@ -4487,7 +5503,7 @@ index a937e1f3e..382c80b1e 100644
          let (_root, assets) = crate::rules::retail_ini_fixture::retail_assets()
              .expect("explicit device witness requires active-retail assets");
 diff --git a/src/audio/sfx/observation.rs b/src/audio/sfx/observation.rs
-index d0cfc33a4..d39e558de 100644
+index 774316832..6074fe391 100644
 --- a/src/audio/sfx/observation.rs
 +++ b/src/audio/sfx/observation.rs
 @@ -10,7 +10,7 @@
@@ -4524,10 +5540,10 @@ index f459a9a0f..fa564ce0f 100644
 +#[cfg(target_arch = "wasm32")]
 +pub mod web;
 diff --git a/src/map/map_file.rs b/src/map/map_file.rs
-index dba5a7353..9f3c5e2f2 100644
+index cbb692acf..dacd14d06 100644
 --- a/src/map/map_file.rs
 +++ b/src/map/map_file.rs
-@@ -430,7 +430,7 @@ pub struct OverlayPacksAlreadyConsumed;
+@@ -477,7 +477,7 @@ pub struct OverlayPacksAlreadyConsumed;
  /// new-format MIX marker; anything else is treated as INI text.
  #[cfg(any(test, feature = "test-support"))]
  pub fn load_from_path(path: &Path) -> Result<MapFile, MapError> {
@@ -4715,10 +5731,10 @@ index 7a9b69bc6..8a3f37d44 100644
          .and_then(|bytes| IniFile::from_bytes(&bytes).ok())
  }
 diff --git a/src/map/source.rs b/src/map/source.rs
-index 763bd72d8..f1c58f693 100644
+index bb413580f..c59d624a9 100644
 --- a/src/map/source.rs
 +++ b/src/map/source.rs
-@@ -71,7 +71,7 @@ pub struct LoadedMap {
+@@ -126,7 +126,7 @@ pub struct LoadedMap {
  }
  
  pub fn read_map_ini_for_metadata(path: &Path) -> Option<IniFile> {
@@ -4727,7 +5743,7 @@ index 763bd72d8..f1c58f693 100644
  }
  
  /// Physical INI plus the exact source bytes used by shell map verification.
-@@ -89,16 +89,16 @@ struct MapInput<'a> {
+@@ -144,16 +144,16 @@ struct MapInput<'a> {
  
  fn local_map_path(ra2_dir: &Path, map_name: &str) -> Result<PathBuf> {
      let direct = PathBuf::from(map_name);
@@ -4747,16 +5763,59 @@ index 763bd72d8..f1c58f693 100644
              return Ok(candidate);
          }
      }
-@@ -109,7 +109,7 @@ fn local_map_path(ra2_dir: &Path, map_name: &str) -> Result<PathBuf> {
+@@ -168,11 +168,24 @@ fn read_loose_map_input(path: &Path) -> Result<MapInput<'static>> {
  }
  
- fn read_loose_map_input(path: &Path) -> Result<MapInput<'static>> {
--    let bytes = std::fs::read(path)?;
-+    let bytes = crate::util::file_system::read(path)?;
-     let source = LoadedMapSource::Loose {
-         path: path.to_path_buf(),
-         payload_len: bytes.len(),
-@@ -260,7 +260,7 @@ fn load_map_from_path_with_source(path: &Path) -> Result<LoadedMap> {
+ fn read_loose_map_input_bounded(path: &Path, limit: Option<usize>) -> Result<MapInput<'static>> {
+-    use std::io::Read;
+-    let mut bytes = Vec::new();
+-    let file = std::fs::File::open(path)?;
+-    file.take(limit.map_or(u64::MAX, |limit| limit as u64 + 1))
+-        .read_to_end(&mut bytes)?;
++    #[cfg(not(target_arch = "wasm32"))]
++    let bytes = {
++        use std::io::Read;
++        let mut bytes = Vec::new();
++        let file = std::fs::File::open(path)?;
++        file.take(limit.map_or(u64::MAX, |limit| limit as u64 + 1))
++            .read_to_end(&mut bytes)?;
++        bytes
++    };
++    #[cfg(target_arch = "wasm32")]
++    let bytes = {
++        let shared = crate::util::file_system::read_shared(path)?;
++        anyhow::ensure!(
++            limit.is_none_or(|limit| shared.len() <= limit),
++            "map exceeds transfer size limit"
++        );
++        shared.to_vec()
++    };
+     anyhow::ensure!(
+         limit.is_none_or(|limit| bytes.len() <= limit),
+         "map exceeds transfer size limit"
+@@ -564,7 +577,9 @@ fn install_received_asset_with_limits(
+     resource: TransferResource,
+     limits: cache::Limits,
+ ) -> Result<LoadedTransferAsset> {
++    #[cfg(not(target_arch = "wasm32"))]
+     use std::io::Write;
++    #[cfg(not(target_arch = "wasm32"))]
+     use std::sync::atomic::{AtomicU64, Ordering};
+     anyhow::ensure!(valid_source_sha256(digest), "invalid map source identity");
+     anyhow::ensure!(
+@@ -581,6 +596,11 @@ fn install_received_asset_with_limits(
+     let already_cached = read_loose_map_input_bounded(&path, Some(resource.limit()))
+         .is_ok_and(|previous| previous.bytes.as_ref() == bytes.as_slice());
+     cache.make_room(&path, if already_cached { 0 } else { length })?;
++    #[cfg(target_arch = "wasm32")]
++    if !already_cached {
++        crate::util::file_system::write(&path, &bytes)?;
++    }
++    #[cfg(not(target_arch = "wasm32"))]
+     if !already_cached {
+         static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
+         let (stage, mut file) = loop {
+@@ -694,7 +714,7 @@ fn load_map_from_path_with_source(path: &Path) -> Result<LoadedMap> {
  pub fn try_load_mmx(ra2_dir: &Path, names: &[&str]) -> Result<LoadedMap> {
      for &name in names {
          let path: PathBuf = ra2_dir.join(name);
@@ -4765,6 +5824,311 @@ index 763bd72d8..f1c58f693 100644
              match load_map_from_path_with_source(&path) {
                  Ok(loaded) => {
                      log::info!("Loaded map from {}", name);
+diff --git a/src/map/source/cache.rs b/src/map/source/cache.rs
+index 88105d4af..b9d567bf1 100644
+--- a/src/map/source/cache.rs
++++ b/src/map/source/cache.rs
+@@ -5,13 +5,20 @@
+ //! eviction requires the exclusive lock, so another VERA instance cannot remove
+ //! a map still needed by a loader. The final source clone releases the pin.
+ 
++#[cfg(not(target_arch = "wasm32"))]
+ use std::fs::{self, File, OpenOptions};
++#[cfg(not(target_arch = "wasm32"))]
+ use std::io::Read;
+ use std::path::{Path, PathBuf};
+ use std::sync::Arc;
++#[cfg(not(target_arch = "wasm32"))]
+ use std::time::SystemTime;
++#[cfg(target_arch = "wasm32")]
++use web_time::SystemTime;
+ 
+-use anyhow::{Context, Result, ensure};
++#[cfg(not(target_arch = "wasm32"))]
++use anyhow::Context;
++use anyhow::{Result, ensure};
+ 
+ use super::{TransferResource, valid_source_sha256};
+ 
+@@ -32,6 +39,7 @@ impl Default for Limits {
+ 
+ pub(super) struct Cache {
+     directory: PathBuf,
++    #[cfg(not(target_arch = "wasm32"))]
+     _lock: File,
+     limits: Limits,
+ }
+@@ -48,7 +56,20 @@ struct Entry {
+ /// is process metadata: it does not change a source's serialized identity or
+ /// equality, and an ordinary loose source has the empty default lease.
+ #[derive(Clone, Default)]
+-pub struct CacheLease(Option<Arc<File>>);
++pub struct CacheLease(Option<Arc<Pin>>);
++
++#[cfg(not(target_arch = "wasm32"))]
++type Pin = File;
++#[cfg(target_arch = "wasm32")]
++type Pin = PathBuf;
++
++#[cfg(target_arch = "wasm32")]
++fn pins() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, std::sync::Weak<Pin>>> {
++    static PINS: std::sync::OnceLock<
++        std::sync::Mutex<std::collections::HashMap<PathBuf, std::sync::Weak<Pin>>>,
++    > = std::sync::OnceLock::new();
++    PINS.get_or_init(Default::default)
++}
+ 
+ impl PartialEq for CacheLease {
+     fn eq(&self, _other: &Self) -> bool {
+@@ -66,6 +87,7 @@ impl std::fmt::Debug for CacheLease {
+     }
+ }
+ 
++#[cfg(not(target_arch = "wasm32"))]
+ fn open_regular(path: &Path, create: bool, writable: bool) -> Result<File> {
+     let mut options = OpenOptions::new();
+     options.read(true).write(writable).create(create);
+@@ -88,6 +110,7 @@ fn open_regular(path: &Path, create: bool, writable: bool) -> Result<File> {
+     Ok(file)
+ }
+ 
++#[cfg(not(target_arch = "wasm32"))]
+ fn pin_path(path: &Path) -> PathBuf {
+     path.with_file_name(format!(
+         ".{}.pin",
+@@ -109,6 +132,7 @@ fn entry_name(name: &str) -> Option<(&str, TransferResource)> {
+     Some((digest, resource))
+ }
+ 
++#[cfg(not(target_arch = "wasm32"))]
+ impl Cache {
+     pub fn open(directory: &Path, create: bool, limits: Limits) -> Result<Self> {
+         if create {
+@@ -243,3 +267,117 @@ impl Cache {
+         Ok(())
+     }
+ }
++
++// Browser files live in one synchronous VFS. Shared leases replace process file
++// locks: no JS callback can interleave eviction and publication within a call.
++#[cfg(target_arch = "wasm32")]
++impl Cache {
++    pub fn open(directory: &Path, _create: bool, limits: Limits) -> Result<Self> {
++        Ok(Self {
++            directory: directory.to_path_buf(),
++            limits,
++        })
++    }
++
++    pub fn path(&self, digest: &str, resource: TransferResource) -> Result<PathBuf> {
++        let path = self
++            .directory
++            .join(format!("{digest}.{}", resource.extension()));
++        match crate::util::file_system::metadata(&path) {
++            Ok(metadata) => ensure!(
++                metadata.is_file(),
++                "network cache destination is not a regular file"
++            ),
++            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
++            Err(error) => return Err(error.into()),
++        }
++        Ok(path)
++    }
++
++    pub fn pin(&self, path: &Path) -> Result<CacheLease> {
++        let mut pins = pins().lock().unwrap();
++        pins.retain(|_, weak| weak.strong_count() != 0);
++        let pin = pins
++            .get(path)
++            .and_then(std::sync::Weak::upgrade)
++            .unwrap_or_else(|| {
++                let pin = Arc::new(path.to_path_buf());
++                pins.insert(path.to_path_buf(), Arc::downgrade(&pin));
++                pin
++            });
++        Ok(CacheLease(Some(pin)))
++    }
++
++    pub fn directory(&self) -> &Path {
++        &self.directory
++    }
++
++    pub fn make_room(&self, destination: &Path, incoming: usize) -> Result<()> {
++        use crate::util::file_system as fs;
++        ensure!(
++            incoming as u64 <= self.limits.bytes,
++            "network map exceeds cache quota"
++        );
++        let mut files = usize::from(incoming != 0);
++        let mut bytes = incoming as u64;
++        let mut entries = Vec::new();
++        let listing = match fs::read_dir(&self.directory) {
++            Ok(entries) => Some(entries),
++            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
++            Err(error) => return Err(error.into()),
++        };
++        for item in listing.into_iter().flatten() {
++            let item = item?;
++            let metadata = item.metadata()?;
++            if !metadata.is_file() {
++                continue;
++            }
++            files += 1;
++            bytes = bytes
++                .checked_add(metadata.len())
++                .ok_or_else(|| anyhow::anyhow!("network cache size overflow"))?;
++            let name = item.file_name();
++            let Some((digest, resource)) = entry_name(name.to_str().unwrap_or("")) else {
++                continue;
++            };
++            entries.push(Entry {
++                path: item.path(),
++                digest: digest.to_owned(),
++                length: metadata.len(),
++                modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
++                resource,
++            });
++        }
++        entries.sort_by(|a, b| (a.modified, &a.path).cmp(&(b.modified, &b.path)));
++        for entry in entries {
++            if files <= self.limits.files && bytes <= self.limits.bytes {
++                break;
++            }
++            if entry.path == destination || entry.length > entry.resource.limit() as u64 {
++                continue;
++            }
++            if pins()
++                .lock()
++                .unwrap()
++                .get(&entry.path)
++                .is_some_and(|pin| pin.strong_count() != 0)
++            {
++                continue;
++            }
++            let contents = fs::read_shared(&entry.path)?;
++            if contents.len() as u64 != entry.length
++                || crate::util::sha256::sha256_hex(&contents) != entry.digest
++            {
++                continue;
++            }
++            fs::remove_file(&entry.path)?;
++            bytes -= entry.length;
++            files -= 1;
++        }
++        ensure!(
++            files <= self.limits.files && bytes <= self.limits.bytes,
++            "network map cache is full; active or unrecognized files are retained"
++        );
++        Ok(())
++    }
++}
+diff --git a/src/net/udp.rs b/src/net/udp.rs
+index 3a5ee3410..af724eae3 100644
+--- a/src/net/udp.rs
++++ b/src/net/udp.rs
+@@ -9,12 +9,19 @@
+ 
+ use std::collections::VecDeque;
+ use std::io;
+-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
++#[cfg(not(target_arch = "wasm32"))]
++use std::net::UdpSocket;
++use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
++#[cfg(target_arch = "wasm32")]
++#[path = "web_socket.rs"]
++mod web_socket;
+ use std::ops::{Deref, DerefMut};
+ use std::sync::atomic::{AtomicBool, Ordering};
+ use std::sync::{Arc, Mutex, MutexGuard};
+ use std::thread::{self, JoinHandle, Thread};
+ use std::time::Duration;
++#[cfg(target_arch = "wasm32")]
++use web_socket::UdpSocket;
+ 
+ use vera20k_relay_protocol::{ClientSession, RelayError, ServerEvent};
+ pub use vera20k_relay_protocol::{
+@@ -359,6 +366,12 @@ impl LanUdpTransport {
+     /// Logic/render/capture work. The App injects its existing native wall
+     /// bucket function, and only this worker samples it after taking the lock.
+     /// Thread creation is fallible; failure leaves a synchronous transport.
++    #[cfg(target_arch = "wasm32")]
++    pub fn start_io_pump(&mut self, _: fn() -> u32) -> io::Result<()> {
++        Ok(())
++    }
++
++    #[cfg(not(target_arch = "wasm32"))]
+     pub fn start_io_pump(&mut self, wall_bucket: fn() -> u32) -> io::Result<()> {
+         if self.pump.is_some() {
+             self.check_worker();
+@@ -660,9 +673,15 @@ impl UdpIo {
+     /// interfaces or ephemeral ports. A failure drops any socket already
+     /// opened by this call; no partially open transport escapes.
+     fn bind(config: UdpBindConfig, connections: LanConnections) -> io::Result<Self> {
++        #[cfg(not(target_arch = "wasm32"))]
+         let primary = UdpSocket::bind(config.primary)?;
++        #[cfg(target_arch = "wasm32")]
++        let primary = UdpSocket::bind(config.primary, "primary")?;
+         primary.set_nonblocking(true)?;
++        #[cfg(not(target_arch = "wasm32"))]
+         let alternate = UdpSocket::bind(config.alternate)?;
++        #[cfg(target_arch = "wasm32")]
++        let alternate = UdpSocket::bind(config.alternate, "alternate")?;
+         alternate.set_nonblocking(true)?;
+         let global = GlobalChannel::new(
+             GlobalConfig {
+@@ -1475,6 +1494,16 @@ fn record_io_error(
+     operation: UdpIoOperation,
+     error: io::Error,
+ ) {
++    // Relay probes and both admission/renewal challenge responses send
++    // directly rather than through UdpSendQueue. A nonblocking socket (or a
++    // connecting Web gateway) can defer them too; the relay's next periodic
++    // probe retries admission. Only actual I/O failures may abort that owner.
++    if error.kind() == io::ErrorKind::WouldBlock {
++        if operation == UdpIoOperation::Send {
++            report.send_would_block += 1;
++        }
++        return;
++    }
+     if report.first_io_error.is_none() {
+         report.first_io_error = Some(UdpIoFailure {
+             channel,
+diff --git a/src/net/udp_tests.rs b/src/net/udp_tests.rs
+index 0cd8da99e..0a80d472b 100644
+--- a/src/net/udp_tests.rs
++++ b/src/net/udp_tests.rs
+@@ -3,6 +3,31 @@ use crate::net::global::GlobalDestination;
+ use crate::net::reliable::{Delivery, LanConnectionConfig, RetryTiming};
+ use std::time::{Duration, Instant};
+ 
++#[test]
++fn relay_direct_send_backpressure_is_not_a_fatal_service_error() {
++    let mut report = UdpServiceReport::default();
++    record_io_error(
++        &mut report,
++        UdpChannel::Primary,
++        UdpIoOperation::Send,
++        io::ErrorKind::WouldBlock.into(),
++    );
++    assert_eq!(report.send_would_block, 1);
++    assert!(report.first_io_error.is_none());
++    assert!(!report.delivery_failed());
++
++    record_io_error(
++        &mut report,
++        UdpChannel::Primary,
++        UdpIoOperation::Send,
++        io::ErrorKind::ConnectionAborted.into(),
++    );
++    let failure = report.first_io_error.as_ref().unwrap();
++    assert_eq!(failure.channel, UdpChannel::Primary);
++    assert_eq!(failure.operation, UdpIoOperation::Send);
++    assert_eq!(failure.error.kind(), io::ErrorKind::ConnectionAborted);
++}
++
+ fn loopback_config() -> UdpBindConfig {
+     UdpBindConfig {
+         primary: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
 diff --git a/src/render/frame_readback.rs b/src/render/frame_readback.rs
 index c3694af57..170fa0946 100644
 --- a/src/render/frame_readback.rs
@@ -4838,11 +6202,11 @@ index c3694af57..170fa0946 100644
  }
  
 diff --git a/src/render/gpu.rs b/src/render/gpu.rs
-index abe250792..3cb4736d8 100644
+index 16c0fa3fe..84a574012 100644
 --- a/src/render/gpu.rs
 +++ b/src/render/gpu.rs
-@@ -21,6 +21,10 @@ use std::task::{Context as TaskContext, Poll, Wake, Waker};
- use anyhow::{Context, Result, bail};
+@@ -22,6 +22,10 @@ use anyhow::{Context, Result, bail};
+ use winit::event_loop::OwnedDisplayHandle;
  use winit::window::Window;
  
 +#[cfg(target_arch = "wasm32")]
@@ -4852,27 +6216,39 @@ index abe250792..3cb4736d8 100644
  /// Largest 2D texture edge the renderer will ask for.
  ///
  /// Atlases are packed against the requested limit, so this is the real ceiling on how
-@@ -74,6 +78,8 @@ pub struct GpuContext {
-     pub surface_format: wgpu::TextureFormat,
+@@ -138,6 +142,8 @@ pub struct GpuContext {
      /// Exact identity returned by the adapter that backs this context.
      adapter_info: wgpu::AdapterInfo,
+     capture_target: Option<CaptureTarget>,
 +    #[cfg(target_arch = "wasm32")]
 +    web_present: web_present::WebPresent,
  }
  
  impl GpuContext {
-@@ -86,7 +92,7 @@ impl GpuContext {
+@@ -156,7 +162,7 @@ impl GpuContext {
      }
  
      /// Async initialization — called by new() via block_on().
--    async fn new_async(window: Arc<Window>) -> Result<Self> {
-+    pub(crate) async fn new_async(window: Arc<Window>) -> Result<Self> {
-         // wgpu 27's standard override selects a backend for reproducible
-         // shroud GPU comparisons while retaining primary backends by default.
-         // https://docs.rs/wgpu-types/27.0.1/wgpu_types/struct.Backends.html#method.with_env
-@@ -155,6 +161,9 @@ impl GpuContext {
+-    async fn new_async(
++    pub(crate) async fn new_async(
+         window: Arc<Window>,
+         display: OwnedDisplayHandle,
+         hidden_capture: bool,
+@@ -229,7 +235,21 @@ impl GpuContext {
+ 
          // Pick the best texture format for the surface.
          // This is usually Bgra8UnormSrgb on Windows, Bgra8Unorm on some other platforms.
++        #[cfg(target_arch = "wasm32")]
++        {
++            device.set_device_lost_callback(|reason, message| {
++                crate::web::set_status(&format!(
++                    "运行错误：图形设备已断开（{reason:?}）：{message}"
++                ));
++            });
++            device.on_uncaptured_error(Arc::new(|error: wgpu::Error| {
++                crate::web::set_status(&format!("运行错误：图形接口错误：{error}"));
++            }));
++        }
          let surface_caps: wgpu::SurfaceCapabilities = surface.get_capabilities(&adapter);
 +        #[cfg(target_arch = "wasm32")]
 +        let required_surface_usages = wgpu::TextureUsages::RENDER_ATTACHMENT;
@@ -4880,7 +6256,7 @@ index abe250792..3cb4736d8 100644
          let required_surface_usages = wgpu::TextureUsages::RENDER_ATTACHMENT
              | wgpu::TextureUsages::COPY_SRC
              | wgpu::TextureUsages::COPY_DST;
-@@ -186,7 +195,7 @@ impl GpuContext {
+@@ -261,7 +281,7 @@ impl GpuContext {
                  downlevel.flags
              );
          }
@@ -4889,7 +6265,7 @@ index abe250792..3cb4736d8 100644
              .formats
              .iter()
              .find(|f| f.is_srgb())
-@@ -197,7 +206,7 @@ impl GpuContext {
+@@ -272,7 +292,7 @@ impl GpuContext {
          let window_size: winit::dpi::PhysicalSize<u32> = window.inner_size();
          let config: wgpu::SurfaceConfiguration = wgpu::SurfaceConfiguration {
              usage: required_surface_usages,
@@ -4898,7 +6274,7 @@ index abe250792..3cb4736d8 100644
              width: window_size.width.max(1), // wgpu panics on 0-sized surfaces
              height: window_size.height.max(1),
              present_mode: wgpu::PresentMode::Fifo,
-@@ -206,6 +215,12 @@ impl GpuContext {
+@@ -281,6 +301,12 @@ impl GpuContext {
              desired_maximum_frame_latency: 2,
          };
          surface.configure(&device, &config);
@@ -4908,37 +6284,27 @@ index abe250792..3cb4736d8 100644
 +        let surface_format = canvas_format.add_srgb_suffix();
 +        #[cfg(not(target_arch = "wasm32"))]
 +        let surface_format = canvas_format;
- 
-         log::info!(
-             "GPU initialized: {}x{}, format={:?}",
-@@ -221,9 +236,34 @@ impl GpuContext {
-             config,
+         // wgpu-hal 29.0.4 Metal acquire_texture refuses any macOS NSWindow
+         // without NSWindowOcclusionStateVisible, including deliberately hidden
+         // captures. Render those frames offscreen with the same format/usages;
+@@ -306,9 +332,24 @@ impl GpuContext {
              surface_format,
              adapter_info,
+             capture_target,
 +            #[cfg(target_arch = "wasm32")]
 +            web_present,
          })
      }
  
-+    pub(crate) fn frame_texture(&self, output: &wgpu::SurfaceTexture) -> wgpu::Texture {
-+        #[cfg(target_arch = "wasm32")]
-+        {
-+            let _ = output;
-+            self.web_present.texture.clone()
-+        }
-+        #[cfg(not(target_arch = "wasm32"))]
-+        {
-+            output.texture.clone()
-+        }
++    pub(crate) fn frame_texture(&self, output: &GpuFrame) -> wgpu::Texture {
++        output.texture.clone()
 +    }
 +
-+    pub(crate) fn encode_web_present(
-+        &self,
-+        encoder: &mut wgpu::CommandEncoder,
-+        output: &wgpu::SurfaceTexture,
-+    ) {
++    pub(crate) fn encode_web_present(&self, encoder: &mut wgpu::CommandEncoder, output: &GpuFrame) {
 +        #[cfg(target_arch = "wasm32")]
-+        self.web_present.encode(encoder, output);
++        if let Some(surface) = &output.surface {
++            self.web_present.encode(encoder, surface);
++        }
 +        #[cfg(not(target_arch = "wasm32"))]
 +        let _ = (encoder, output);
 +    }
@@ -4946,10 +6312,10 @@ index abe250792..3cb4736d8 100644
      /// Return a borrowed capture-only view of the selected adapter identity.
      pub(crate) fn capture_adapter_observation(&self) -> GpuAdapterObservation<'_> {
          GpuAdapterObservation::from(&self.adapter_info)
-@@ -240,6 +280,10 @@ impl GpuContext {
-         self.config.width = width;
-         self.config.height = height;
-         self.surface.configure(&self.device, &self.config);
+@@ -331,6 +372,10 @@ impl GpuContext {
+         if let Some(target) = &mut self.capture_target {
+             target.resize(&self.device, &self.config);
+         }
 +        #[cfg(target_arch = "wasm32")]
 +        {
 +            self.web_present = web_present::WebPresent::new(&self.device, &self.config);
@@ -4957,6 +6323,25 @@ index abe250792..3cb4736d8 100644
          log::debug!("Surface resized to {}x{}", width, height);
      }
  
+@@ -363,7 +408,17 @@ impl GpuContext {
+             }
+             Ok(surface.get_current_texture())
+         })
+-        .map(|frame| frame.map(GpuFrame::from_surface))
++        .map(|frame| {
++            frame.map(|surface| {
++                let frame = GpuFrame::from_surface(surface);
++                #[cfg(target_arch = "wasm32")]
++                let frame = GpuFrame {
++                    texture: self.web_present.texture.clone(),
++                    ..frame
++                };
++                frame
++            })
++        })
+     }
+ 
+     /// Create a depth texture matching the current surface dimensions.
 diff --git a/src/render/radar/events.rs b/src/render/radar/events.rs
 index a546fea81..da319712e 100644
 --- a/src/render/radar/events.rs
@@ -4971,7 +6356,7 @@ index a546fea81..da319712e 100644
  use crate::rules::radar_event_config::RadarEventConfig;
  use crate::sim::radar::RadarEventType;
 diff --git a/src/render/radar/minimap.rs b/src/render/radar/minimap.rs
-index 73631a4a1..8ef9438d1 100644
+index 5e0d6d7f4..aae383a28 100644
 --- a/src/render/radar/minimap.rs
 +++ b/src/render/radar/minimap.rs
 @@ -773,7 +773,7 @@ impl MinimapRenderer {
@@ -4984,7 +6369,7 @@ index 73631a4a1..8ef9438d1 100644
      }
  
 diff --git a/src/render/shell_paint.rs b/src/render/shell_paint.rs
-index ee7a7f901..d23645589 100644
+index 98d75c8c9..5ff233977 100644
 --- a/src/render/shell_paint.rs
 +++ b/src/render/shell_paint.rs
 @@ -22,7 +22,7 @@
@@ -4996,11 +6381,33 @@ index ee7a7f901..d23645589 100644
  
  use crate::render::batch::SpriteInstance;
  use crate::render::bit_font::BitFont;
+diff --git a/src/render/shell_text.rs b/src/render/shell_text.rs
+index 4b3291585..df1bbb8d8 100644
+--- a/src/render/shell_text.rs
++++ b/src/render/shell_text.rs
+@@ -30,14 +30,9 @@ impl std::ops::BitOr for ShellAlign {
+     }
+ }
+ 
+-/// Pixel-coordinate scissor rect. Apply via `wgpu::RenderPass::set_scissor_rect`.
+-#[derive(Copy, Clone, Debug, Default)]
+-pub struct ScissorRect {
+-    pub x: u32,
+-    pub y: u32,
+-    pub w: u32,
+-    pub h: u32,
+-}
++#[path = "shell_scissor.rs"]
++mod shell_scissor;
++pub use shell_scissor::ScissorRect;
+ 
+ /// Output of `draw_in_rect`: sprite instances plus the scissor the caller
+ /// must set on its render pass before drawing them.
 diff --git a/src/render/sprite_atlas.rs b/src/render/sprite_atlas.rs
-index 10bf5b593..4b44c9db6 100644
+index e532c57a3..16ea66c86 100644
 --- a/src/render/sprite_atlas.rs
 +++ b/src/render/sprite_atlas.rs
-@@ -20,7 +20,7 @@
+@@ -22,7 +22,7 @@
  //! - Reads from sim/ via EntityStore iteration (GameEntity fields).
  
  use std::collections::{HashMap, HashSet};
@@ -5009,7 +6416,7 @@ index 10bf5b593..4b44c9db6 100644
  
  use crate::assets::asset_manager::AssetManager;
  use crate::assets::pal_file::Palette;
-@@ -2939,6 +2939,7 @@ pub(crate) use tests::{native_palette_probe_page, native_probe_rgb, palette_prob
+@@ -3121,6 +3121,7 @@ pub(crate) use tests::{native_palette_probe_page, native_probe_rgb, palette_prob
  const PACK_BAND_BYTES: u64 = 64 << 20;
  
  /// How long a map-load upload band waits for the GPU to retire its staging copy.
@@ -5017,7 +6424,7 @@ index 10bf5b593..4b44c9db6 100644
  const PACK_BAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
  
  /// Shelf-pack rendered SHP sprites into a multi-page GPU texture atlas.
-@@ -3089,7 +3090,7 @@ fn pack_sprites(
+@@ -3277,7 +3278,7 @@ fn pack_sprites(
  /// sprites' frames as it is gathered, and its staging copy is retired before
  /// the next band is gathered, so the upload holds one band of pixels at a time.
  fn upload_shelves(
@@ -5026,7 +6433,7 @@ index 10bf5b593..4b44c9db6 100644
      queue: &wgpu::Queue,
      indices: &wgpu::Texture,
      sprites: &[RenderedShpSprite<'_>],
-@@ -3122,7 +3123,13 @@ fn upload_shelves(
+@@ -3310,7 +3311,13 @@ fn upload_shelves(
              indices,
              band.iter().map(|&(idx, origin)| (origin, &sprites[idx])),
          );
@@ -5041,7 +6448,7 @@ index 10bf5b593..4b44c9db6 100644
              submission_index: Some(submission_index),
              timeout: Some(PACK_BAND_TIMEOUT),
 diff --git a/src/render/unit_atlas.rs b/src/render/unit_atlas.rs
-index db6c4efbe..7f8f9ca81 100644
+index ad30213bd..a19e5b383 100644
 --- a/src/render/unit_atlas.rs
 +++ b/src/render/unit_atlas.rs
 @@ -17,7 +17,7 @@
@@ -5053,7 +6460,7 @@ index db6c4efbe..7f8f9ca81 100644
  
  #[path = "unit_shadow_cache.rs"]
  mod shadow_cache;
-@@ -944,6 +944,7 @@ pub fn build_unit_atlas(
+@@ -945,6 +945,7 @@ pub fn build_unit_atlas(
          // One model at a time, its poses spread over the cores. Each worker
          // takes whole poses, so a pose's parts still share one render, and
          // results are merged back in key order.
@@ -5061,7 +6468,7 @@ index db6c4efbe..7f8f9ca81 100644
          let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
          for type_keys in new_keys.chunk_by(|a, b| a.type_id == b.type_id) {
              let type_id = type_keys[0].type_id.as_str();
-@@ -957,6 +958,16 @@ pub fn build_unit_atlas(
+@@ -958,6 +959,16 @@ pub fn build_unit_atlas(
                  })
                  .collect();
              let (model, vpl) = (&model, vpl.as_ref());
@@ -5096,7 +6503,7 @@ index b911cbe88..084a2bdbf 100644
  /// A local, enabled-only observer; never held by or serialized with the world.
  pub(crate) struct FrameClock {
 diff --git a/src/sim/movement/path_batch.rs b/src/sim/movement/path_batch.rs
-index 9a06a9141..1fcb5edec 100644
+index f90cf66da..31f9384d8 100644
 --- a/src/sim/movement/path_batch.rs
 +++ b/src/sim/movement/path_batch.rs
 @@ -133,7 +133,11 @@
@@ -5432,7 +6839,7 @@ index 0f706fe9c..eca50a736 100644
  pub const MOVIE_LIST_DIALOG: DialogId = DialogId(0x0129);
  
 diff --git a/src/ui/multiplayer_setup.rs b/src/ui/multiplayer_setup.rs
-index f0e394929..57e927fc9 100644
+index 96a0f6554..116d7ab85 100644
 --- a/src/ui/multiplayer_setup.rs
 +++ b/src/ui/multiplayer_setup.rs
 @@ -4,7 +4,7 @@
@@ -5444,7 +6851,7 @@ index f0e394929..57e927fc9 100644
  
  use crate::ui::lan_shell::LanChatState;
  use crate::ui::shell::button::ShellButtonInteraction;
-@@ -749,10 +749,10 @@ mod tests {
+@@ -838,10 +838,10 @@ mod tests {
          let mut ui = MultiplayerSetupState::default();
          let now = Instant::now();
          assert!(!ui.accept_highlight(true, now));
@@ -5500,7 +6907,7 @@ index a4eba5732..12d929020 100644
              .as_secs()
              % 2
 diff --git a/src/ui/score_shell.rs b/src/ui/score_shell.rs
-index 92bc25c0b..4986f45c3 100644
+index 450d9f937..b2f8ea532 100644
 --- a/src/ui/score_shell.rs
 +++ b/src/ui/score_shell.rs
 @@ -17,7 +17,7 @@
@@ -5739,7 +7146,7 @@ index e0185f238..9de1a6245 100644
              .as_secs()
              % 2
 diff --git a/src/ui/wol_login.rs b/src/ui/wol_login.rs
-index a21a1e06f..03c46b5f6 100644
+index e70d70a1b..b63a455b9 100644
 --- a/src/ui/wol_login.rs
 +++ b/src/ui/wol_login.rs
 @@ -7,7 +7,7 @@
@@ -5847,6 +7254,36 @@ index f941b437e..556949883 100644
          assert!(wait.poll(opened_at + WAIT_REVEAL));
          assert!(wait.shown);
          assert!(!wait.poll(opened_at + WAIT_REVEAL * 2));
+diff --git a/src/ui/wol_verify.rs b/src/ui/wol_verify.rs
+index 30e4378b8..77bb0ad9b 100644
+--- a/src/ui/wol_verify.rs
++++ b/src/ui/wol_verify.rs
+@@ -11,7 +11,7 @@ use crate::ui::shell::list::{ListMetrics, ListScrollInteraction, ShellListGeomet
+ use crate::ui::shell::modal::WolVerifyLayout;
+ use crate::ui::wol_shell::WolMessageBox;
+ use std::ops::Range;
+-use std::time::Instant;
++use web_time::Instant;
+ 
+ /// `0x0084A1F0`: node `i`'s checkbox, stacked by `i` in the template.
+ pub const BOXES: [u16; 8] = [0x769, 0x761, 0x764, 0x762, 0x765, 0x768, 0x766, 0x767];
+@@ -231,14 +231,14 @@ mod tests {
+             &layout,
+             up.0,
+             up.1,
+-            now + std::time::Duration::from_millis(500),
++            now + web_time::Duration::from_millis(500),
+         );
+         assert!(changed && deadline.is_some());
+         assert!(dialog.visible_nodes(&layout).start < first);
+         dialog.pointer_button(&layout, up.0, up.1, false, now);
+         assert_eq!(
+             dialog
+-                .poll_scroll(&layout, up.0, up.1, now + std::time::Duration::from_secs(1))
++                .poll_scroll(&layout, up.0, up.1, now + web_time::Duration::from_secs(1))
+                 .1,
+             None
+         );
 diff --git a/src/util/case_insensitive_path.rs b/src/util/case_insensitive_path.rs
 index 493d20d0e..dc11ae416 100644
 --- a/src/util/case_insensitive_path.rs
@@ -5861,10 +7298,25 @@ index 493d20d0e..dc11ae416 100644
          .filter_map(Result::ok)
          .find(|entry| {
 diff --git a/src/util/config.rs b/src/util/config.rs
-index 56d0e3be8..3a9981f79 100644
+index 97dc9d869..fdde6abae 100644
 --- a/src/util/config.rs
 +++ b/src/util/config.rs
-@@ -141,6 +141,7 @@ impl GameConfig {
+@@ -94,6 +94,14 @@ impl PathsConfig {
+ 
+ /// Shared by packaged and direct launches. No writable setting defaults to
+ /// the retail installation, even when VERA's executable is installed there.
++#[cfg(target_arch = "wasm32")]
++pub fn default_settings_dir() -> Result<PathBuf> {
++    // Browser VFS: keep the profile outside imported retail assets, within the
++    // launcher's existing persisted user-data namespace.
++    Ok(PathBuf::from("/saves/profile"))
++}
++
++#[cfg(not(target_arch = "wasm32"))]
+ pub fn default_settings_dir() -> Result<PathBuf> {
+     if cfg!(target_os = "windows") {
+         if let Some(path) = std::env::var_os("LOCALAPPDATA")
+@@ -200,6 +208,7 @@ impl GameConfig {
      /// `SetCurrentDirectoryA` before opening `RA2MD.INI` or any MIX archive.
      /// Rust keeps the resolved directory explicit instead of mutating the
      /// process-wide current directory.
@@ -5872,7 +7324,7 @@ index 56d0e3be8..3a9981f79 100644
      pub fn load() -> Result<Self> {
          let working_dir =
              std::env::current_dir().context("Failed to locate the working directory")?;
-@@ -149,6 +150,12 @@ impl GameConfig {
+@@ -208,6 +217,12 @@ impl GameConfig {
          Self::load_from(&working_dir, &executable)
      }
  

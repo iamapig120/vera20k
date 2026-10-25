@@ -5,7 +5,7 @@ SOURCE_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TEMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/vera20k-web-tests.XXXXXX")
 trap 'rm -rf "$TEMP_ROOT"' EXIT
 WRAPPER="$TEMP_ROOT/wrapper"
-UPSTREAM="$TEMP_ROOT/upstream"
+UPSTREAM="$WRAPPER/vera20k"
 mkdir -p "$WRAPPER/patches" "$WRAPPER/overlays/src" "$UPSTREAM/src"
 cp "$SOURCE_ROOT/web.sh" "$WRAPPER/web.sh"
 
@@ -20,7 +20,7 @@ expect_failure() {
     fi
 }
 prepare() {
-    bash "$WRAPPER/web.sh" --upstream "$UPSTREAM" --ref "$1" prepare
+    bash "$WRAPPER/web.sh" --ref "$1" prepare
 }
 
 printf '[package]\nname = "fixture"\nversion = "0.1.0"\nedition = "2024"\n' > "$UPSTREAM/Cargo.toml"
@@ -66,8 +66,18 @@ cmp "$ENGINE/src/lib.rs" "$TEMP_ROOT/patched.rs"
 [[ -z $(git_fixture status --porcelain) ]] || fail 'conflict dirtied upstream'
 printf 'PASS: conflicting upstream preserves last good engine\n'
 
-mkdir -p "$WRAPPER/dist/pkg" "$WRAPPER/dist/local-assets" "$WRAPPER/local-assets"
-for path in index.html standalone.html build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm; do
+# An empty submodule must never fall back to an enclosing repository.
+mv "$UPSTREAM" "$TEMP_ROOT/saved-upstream"
+mkdir -p "$UPSTREAM"
+expect_failure bash "$WRAPPER/web.sh" prepare
+grep -F 'git submodule update --init --recursive' "$TEMP_ROOT/expected-error.log" >/dev/null
+rmdir "$UPSTREAM"
+mv "$TEMP_ROOT/saved-upstream" "$UPSTREAM"
+printf 'PASS: missing submodule reports initialization command\n'
+
+
+mkdir -p "$WRAPPER/dist/pkg" "$WRAPPER/dist/assets" "$WRAPPER/dist/local-assets" "$WRAPPER/local-assets"
+for path in index.html standalone.html launcher.css launcher.js storage.js lobby.js network.js assets/RA2MD.png build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm; do
     printf 'public\n' > "$WRAPPER/dist/$path"
 done
 printf 'private\n' > "$WRAPPER/dist/local-assets/retail.mix"
@@ -76,26 +86,53 @@ printf 'private\n' > "$WRAPPER/dist/private.txt"
 ARCHIVE="$WRAPPER/preview.zip"
 bash "$WRAPPER/web.sh" --upstream "$UPSTREAM" --ref "$BASE" package --output "$ARCHIVE"
 unzip -Z1 "$ARCHIVE" | sort > "$TEMP_ROOT/actual-archive.txt"
-printf '%s\n' build-info.txt index.html pkg/vera20k.js pkg/vera20k_bg.wasm standalone.html \
+printf '%s\n' build-info.txt index.html launcher.css launcher.js storage.js lobby.js network.js assets/RA2MD.png pkg/vera20k.js pkg/vera20k_bg.wasm standalone.html \
     | sort > "$TEMP_ROOT/expected-archive.txt"
 cmp "$TEMP_ROOT/actual-archive.txt" "$TEMP_ROOT/expected-archive.txt"
 printf 'PASS: static package excludes local assets and private files\n'
 
 mkdir -p "$WRAPPER/templates"
+cp "$SOURCE_ROOT/templates/.assetsignore" "$WRAPPER/templates/.assetsignore"
+printf '// storage fixture\n' > "$WRAPPER/templates/storage.js"
+printf '// lobby fixture\n' > "$WRAPPER/templates/lobby.js"
+printf '// network fixture\n' > "$WRAPPER/templates/network.js"
+mkdir -p "$WRAPPER/assets"
+printf 'icon' > "$WRAPPER/assets/RA2MD.png"
 cat > "$WRAPPER/templates/index.html" <<'HTML'
 <!doctype html>
-<script type="module">
-import init, {start_game} from './pkg/vera20k.js';
-await init();
-start_game();
-</script>
+<link rel="icon" href="./assets/RA2MD.png">
+<link rel="stylesheet" href="./launcher.css">
+<script src="./lobby.js"></script>
+<script src="./network.js"></script>
+<script src="./storage.js"></script>
+<script type="module" src="./launcher.js"></script>
 HTML
+printf 'body{background:#000}\n' > "$WRAPPER/templates/launcher.css"
+cat > "$WRAPPER/templates/launcher.js" <<'JS'
+import init, {start_game} from './pkg/vera20k.js';
+async function engineBytes(){return fetch(new URL('./pkg/vera20k_bg.wasm',import.meta.url));}
+const bytes=await engineBytes();
+await init({module_or_path:bytes});
+start_game();
+JS
 printf 'async function __wbg_init() {}\nexport function start_game() {}\nexport { __wbg_init as default };\n' > "$WRAPPER/dist/pkg/vera20k.js"
 printf '\000asm' > "$WRAPPER/dist/pkg/vera20k_bg.wasm"
 bash "$WRAPPER/web.sh" bundle
+grep -E 'lobby.js\?v=[a-f0-9]{40}' "$WRAPPER/dist/index.html" >/dev/null
+grep -E 'network.js\?v=[a-f0-9]{40}' "$WRAPPER/dist/index.html" >/dev/null
+grep -E 'launcher.js\?v=[a-f0-9]{40}' "$WRAPPER/dist/index.html" >/dev/null
+grep -E 'vera20k.js\?v=[a-f0-9]{40}' "$WRAPPER/dist/launcher.js" >/dev/null
+grep -E 'vera20k_bg.wasm\?v=[a-f0-9]{40}' "$WRAPPER/dist/launcher.js" >/dev/null
+grep -F 'data:image/png;base64,aWNvbg==' "$WRAPPER/dist/standalone.html" >/dev/null
+grep -F '// lobby fixture' "$WRAPPER/dist/standalone.html" >/dev/null
+grep -F '// network fixture' "$WRAPPER/dist/standalone.html" >/dev/null
+grep -F 'body{background:#000}' "$WRAPPER/dist/standalone.html" >/dev/null
 grep -F 'atob("AGFzbQ==")' "$WRAPPER/dist/standalone.html" >/dev/null
-grep -F 'await init({module_or_path: bundledWasm});' "$WRAPPER/dist/standalone.html" >/dev/null
-if grep -E '^(import |export )' "$WRAPPER/dist/standalone.html"; then
+grep -F 'const bytes=bundledWasm;' "$WRAPPER/dist/standalone.html" >/dev/null
+if grep -E '^(import |export )|src="\./|href="\./' "$WRAPPER/dist/standalone.html"; then
     fail 'standalone output retained module dependencies'
 fi
 printf 'PASS: standalone HTML embeds Wasm and bindings without module imports\n'
+head -c 10000 /dev/zero | tr '\000' 'x' > "$WRAPPER/templates/index.html"
+expect_failure bash "$WRAPPER/web.sh" bundle
+printf 'PASS: index.html enforces the 10,000-byte limit\n'

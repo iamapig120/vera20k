@@ -1,4 +1,4 @@
-//! Browser canvas presentation. wgpu 27's `backend/webgpu.rs::surface_get_capabilities`
+//! Browser canvas presentation. wgpu's `backend/webgpu.rs::surface_get_capabilities`
 //! exposes RENDER_ATTACHMENT only and unorm canvas formats. Render the existing
 //! sRGB frame offscreen, then load its encoded bytes through an unorm view so
 //! presenting to an unorm canvas does not apply a second color conversion.
@@ -66,7 +66,7 @@ impl WebPresent {
             primitive: Default::default(),
             depth_stencil: None,
             multisample: Default::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
@@ -104,6 +104,7 @@ impl WebPresent {
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.group, &[]);
