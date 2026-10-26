@@ -1,0 +1,10 @@
+EA has not endorsed and does not support this product.
+
+VERA20K browser preview based on PR 3139 by GitHub contributor libi.
+Engine commit: 41f7ff9446a15c9812ea4ff7678458c2003abb1d
+Copyright © 2026 Halvor Nikolai Rusten and VERA20K contributors.
+Engine source is licensed under GNU GPL version 3; see LICENSE-GPL.
+The pr-3139-wasm branch preserves the original PR commit unchanged.
+
+This preview distributes the engine only. Retail game resources, music,
+Chinese voice/movie packages, private local files and build logs are not included.
