@@ -1,29 +1,26 @@
 <!doctype html>
 <html lang="zh-CN">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VERA20K 中文测试预览</title>
-<style>
-  body { margin: 0; color: #ddd; background: #181818; font: 16px system-ui, sans-serif; }
-  header { padding: 16px 24px; }
-  h1 { font-size: 22px; }
-  button, input { font: inherit; margin: 4px 12px 4px 0; }
-  canvas { display: block; width: 100%; height: calc(100vh - 220px); min-height: 480px; outline: none; }
-  [hidden] { display: none; }
-  #storage { font-size: 14px; }
-  a { color: #b8d9ff; }
-  .notice { font-size: 13px; color: #bbb; }
-</style>
-<header>
-  <p class="notice">EA has not endorsed and does not support this product.</p>
-  <h1>VERA20K 中文测试预览</h1>
-  <p>单人模式。选择你自己的尤里的复仇资源目录，文件只在本机浏览器内读取。此站不附带游戏资源。</p>
-  <input id="files" type="file" webkitdirectory multiple aria-label="Game resource folder">
-  <button id="start" disabled>开始游戏</button>
-  <p id="status" role="status">Loading engine…</p>
-  <p id="storage" role="status">Settings and saves are stored in this browser for this site.</p>
-  <p class="notice"><a href="https://github.com/iamapig120/vera20k/tree/pr-3139-wasm">引擎源码 · PR 3139</a> · <a href="./LICENSE-GPL">GPLv3</a> · <a href="./README.md">版本与构建方法</a></p>
-</header>
-<canvas id="game" width="1024" height="768" tabindex="0" aria-label="Game"></canvas>
-<script type="module" src="./host.js"></script>
-</html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VERA20K 中文测试平台</title><link rel="stylesheet" href="./styles.css">
+<header><p class="notice">EA has not endorsed and does not support this product.</p>
+<h1>VERA20K <span>中文测试平台</span></h1><p>单人游戏 · 使用你自己的尤里的复仇资源</p></header>
+<main><section id="launcher" aria-label="游戏资源导入">
+<div id="drop-zone" tabindex="0" aria-label="拖入游戏文件夹或 ZIP" class="drop-zone">
+<h2>选择或拖入游戏资源</h2><p>完整游戏文件夹，或包含资源的 ZIP。不会上传你的文件。</p>
+<div class="actions"><button id="choose-folder">选择文件夹</button><button id="choose-zip">选择 ZIP</button></div></div>
+<input id="folder" type="file" webkitdirectory multiple hidden aria-label="游戏资源文件夹">
+<input id="zip" type="file" accept=".zip,application/zip" hidden aria-label="游戏资源 ZIP">
+<form id="url-form"><label for="zip-url">从 HTTPS ZIP 地址下载</label>
+<div class="url-row"><input id="zip-url" type="url" placeholder="https://example.com/game.zip" autocomplete="off" spellcheck="false"><button id="download">下载并导入</button></div>
+<small>资源站需要允许跨域读取；无法下载时，可先保存 ZIP，再从本机导入。</small></form>
+<label class="cache-choice"><input id="cache" type="checkbox" checked> 在此浏览器缓存资源，下次直接开始</label>
+<p id="library" role="status">正在检查已有缓存…</p>
+<div class="progress-row"><progress id="progress" max="1" value="0" hidden></progress><button id="cancel" hidden>取消</button><button id="retry" hidden>重试导入</button></div>
+<p id="feedback" role="status" aria-live="polite">请选择资源。</p><p id="cache-status" role="status"></p><button id="retry-cache" hidden>重试缓存当前资源</button>
+<button id="start" class="primary" disabled>开始游戏</button><p id="engine-status" class="muted">正在准备已验证引擎…</p>
+<p class="muted">支持普通 Store / Deflate ZIP；最多 12,000 项、解压总量 2 GiB。加密、分卷和 ZIP64 请先在本机解压。此版本需要原始 YR 电影归档。</p></section>
+<section class="user-data" aria-label="设置与存档"><span id="user-status" role="status">正在读取设置与存档…</span><button id="retry-user" hidden>重试用户数据</button></section>
+<p id="game-status" role="status"></p><button id="reload" hidden>重新加载以更换资源</button>
+<canvas id="game" width="1024" height="768" tabindex="0" aria-label="游戏画面" hidden></canvas></main>
+<footer><a href="./README.md">版本和使用说明</a> · <a href="./LICENSE-GPL">GPLv3</a> · <a href="https://github.com/iamapig120/vera20k/tree/gh-pages">启动器源码</a></footer>
+<script type="module" src="./launcher.mjs"></script></html>
