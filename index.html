@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VERA20K 中文测试预览</title>
+<style>
+  body { margin: 0; color: #ddd; background: #181818; font: 16px system-ui, sans-serif; }
+  header { padding: 16px 24px; }
+  h1 { font-size: 22px; }
+  button, input { font: inherit; margin: 4px 12px 4px 0; }
+  canvas { display: block; width: 100%; height: calc(100vh - 220px); min-height: 480px; outline: none; }
+  [hidden] { display: none; }
+  #storage { font-size: 14px; }
+  a { color: #b8d9ff; }
+  .notice { font-size: 13px; color: #bbb; }
+</style>
+<header>
+  <p class="notice">EA has not endorsed and does not support this product.</p>
+  <h1>VERA20K 中文测试预览</h1>
+  <p>单人模式。选择你自己的尤里的复仇资源目录，文件只在本机浏览器内读取。此站不附带游戏资源。</p>
+  <input id="files" type="file" webkitdirectory multiple aria-label="Game resource folder">
+  <button id="start" disabled>开始游戏</button>
+  <p id="status" role="status">Loading engine…</p>
+  <p id="storage" role="status">Settings and saves are stored in this browser for this site.</p>
+  <p class="notice"><a href="https://github.com/iamapig120/vera20k/tree/pr-3139-wasm">引擎源码 · PR 3139</a> · <a href="./LICENSE-GPL">GPLv3</a> · <a href="./README.md">版本与构建方法</a></p>
+</header>
+<canvas id="game" width="1024" height="768" tabindex="0" aria-label="Game"></canvas>
+<script type="module" src="./host.js"></script>
+</html>
