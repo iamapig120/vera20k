@@ -158,7 +158,9 @@ build() {
   stage=$(mktemp -d "$BUILD/dist.XXXXXX")
   local cargo_target
   cargo_target=$(cd "$ENGINE" && python3 -c 'from pathlib import Path; from tools.cargo_run import build_store, owned_target; root=Path.cwd(); print(owned_target(root, build_store(root)[1]))')
-  wasm-bindgen --target web --out-dir "$stage/pkg" "$cargo_target/wasm32-unknown-unknown/fast/vera20k.wasm"
+  # Strip diagnostic metadata before both static outputs and their cache key are generated.
+  wasm-bindgen --target web --remove-name-section --remove-producers-section \
+    --out-dir "$stage/pkg" "$cargo_target/wasm32-unknown-unknown/fast/vera20k.wasm"
   bundle_static "$stage"
   printf 'Upstream: %s\nRevision: %s\nwasm-bindgen: %s\n' "$UPSTREAM_URL" "$REVISION" "$expected" > "$stage/build-info.txt"
   if [[ -d "$DIST" ]]; then rm -rf "$DIST"; fi
