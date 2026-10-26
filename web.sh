@@ -88,46 +88,16 @@ prepare() {
   printf '%s\n' "$REVISION" > "$BUILD/revision"
   printf '%s\n' "$ENGINE"
 }
-# One HTML file also works on file://: no fetch, module imports or backend.
+# Assemble the static site and version its external assets.
 bundle_static() {
-  local directory=$1 line
+  local directory=$1
   cp "$ROOT/templates/index.html" "$directory/index.html"
   [[ $(wc -c < "$directory/index.html") -lt 10000 ]] || fail 'index.html must be smaller than 10,000 bytes'
   cp "$ROOT/templates/.assetsignore" "$directory/.assetsignore"
   cp "$ROOT/templates/lobby.js" "$ROOT/templates/network.js" "$ROOT/templates/storage.js" "$ROOT/templates/launcher.css" "$ROOT/templates/launcher.js" "$directory/"
   mkdir -p "$directory/assets"
   cp "$ROOT/assets/RA2MD.png" "$directory/assets/RA2MD.png"
-  {
-   while IFS= read -r line || [[ -n "$line" ]]; do
-    line=${line#"${line%%[![:space:]]*}"}
-    if [[ "$line" == '<link rel="stylesheet" href="./launcher.css">' ]]; then
-      printf '<style>\n'; cat "$directory/launcher.css"; printf '</style>\n'
-    elif [[ "$line" == '<script src="./lobby.js"></script>' || "$line" == '<script src="./network.js"></script>' ]]; then
-      local script=${line#*./}; script=${script%%\"*}
-      printf '<script>\n'; cat "$directory/$script"; printf '\n</script>\n'
-    elif [[ "$line" == '<script src="./storage.js"></script>' ]]; then
-      printf '<script>\n'; cat "$directory/storage.js"; printf '\n</script>\n'
-    elif [[ "$line" == '<script type="module" src="./launcher.js"></script>' ]]; then
-      printf '%s\n' '<script type="module">'
-    sed -E \
-      -e 's/^export (const|class|function) /\1 /' \
-      -e '/^export \{.*\};$/d' \
-      -e 's@</script@<\\/script@g' "$directory/pkg/vera20k.js"
-    printf '\nconst init=__wbg_init;\nconst bundledWasm=Uint8Array.from(atob("'
-    base64 < "$directory/pkg/vera20k_bg.wasm" | tr -d '\r\n'
-    printf '"), c=>c.charCodeAt(0));\n'
-      sed -e '/^import init, /d' -e 's/await engineBytes()/bundledWasm/' "$directory/launcher.js"
-      printf '\n</script>\n'
-    else
-      while [[ "$line" == *./assets/RA2MD.png* ]]; do
-        printf '%sdata:image/png;base64,' "${line%%./assets/RA2MD.png*}"
-        base64 < "$directory/assets/RA2MD.png" | tr -d '\r\n'
-        line=${line#*./assets/RA2MD.png}
-      done
-      printf '%s\n' "$line"
-    fi
-   done < "$directory/index.html"
-  } > "$directory/standalone.html"
+  rm -f "$directory/standalone.html"
   # HTML and modules must never mix across releases. Python's static server
   # and regular static hosts can otherwise reuse old module/Wasm responses.
   local version
@@ -158,23 +128,23 @@ build() {
   stage=$(mktemp -d "$BUILD/dist.XXXXXX")
   local cargo_target
   cargo_target=$(cd "$ENGINE" && python3 -c 'from pathlib import Path; from tools.cargo_run import build_store, owned_target; root=Path.cwd(); print(owned_target(root, build_store(root)[1]))')
-  # Strip diagnostic metadata before both static outputs and their cache key are generated.
+  # Strip diagnostic metadata before the static site and its cache key are generated.
   wasm-bindgen --target web --remove-name-section --remove-producers-section \
     --out-dir "$stage/pkg" "$cargo_target/wasm32-unknown-unknown/fast/vera20k.wasm"
   bundle_static "$stage"
   printf 'Upstream: %s\nRevision: %s\nwasm-bindgen: %s\n' "$UPSTREAM_URL" "$REVISION" "$expected" > "$stage/build-info.txt"
   if [[ -d "$DIST" ]]; then rm -rf "$DIST"; fi
   mv "$stage" "$DIST"
-  printf 'Ready: %s\n' "$DIST/standalone.html"
+  printf 'Ready: %s\n' "$DIST/index.html"
 }
 package() {
   local output=${1:-"$ROOT/vera20k-web.zip"}
-  [[ -f "$DIST/index.html" && -f "$DIST/standalone.html" && -f "$DIST/build-info.txt" ]] || fail 'Run build before packaging'
+  [[ -f "$DIST/index.html" && -f "$DIST/build-info.txt" ]] || fail 'Run build before packaging'
   [[ -f "$DIST/pkg/vera20k.js" && -f "$DIST/pkg/vera20k_bg.wasm" ]] || fail 'Missing compiled bindings'
   mkdir -p "$(dirname "$output")"
   output=$(cd "$(dirname "$output")" && pwd)/$(basename "$output")
   case "$output" in "$DIST/"*) fail 'ZIP must be outside dist/';; esac
-  local files=(index.html standalone.html launcher.css launcher.js storage.js lobby.js network.js assets/RA2MD.png build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm)
+  local files=(index.html launcher.css launcher.js storage.js lobby.js network.js assets/RA2MD.png build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm)
   for file in pkg/vera20k.d.ts pkg/vera20k_bg.wasm.d.ts; do
     if [[ -f "$DIST/$file" ]]; then files+=("$file"); fi
   done
@@ -212,7 +182,7 @@ usage() {
   cat <<'EOF'
 Usage: bash web.sh [--upstream PATH] [--ref REF] COMMAND
   prepare                         Export upstream and apply Web compatibility
-  build                           Compile and emit static dist/ + standalone.html
+  build                           Compile and emit the static site in dist/
   bundle                          Rebuild HTML from existing dist/pkg (no Cargo)
   package [--output PATH]          ZIP the fixed public-file allowlist
   refresh-patch --adapted PATH --base REF

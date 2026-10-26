@@ -86,7 +86,7 @@ printf 'private\n' > "$WRAPPER/dist/private.txt"
 ARCHIVE="$WRAPPER/preview.zip"
 bash "$WRAPPER/web.sh" --upstream "$UPSTREAM" --ref "$BASE" package --output "$ARCHIVE"
 unzip -Z1 "$ARCHIVE" | sort > "$TEMP_ROOT/actual-archive.txt"
-printf '%s\n' build-info.txt index.html launcher.css launcher.js storage.js lobby.js network.js assets/RA2MD.png pkg/vera20k.js pkg/vera20k_bg.wasm standalone.html \
+printf '%s\n' build-info.txt index.html launcher.css launcher.js storage.js lobby.js network.js assets/RA2MD.png pkg/vera20k.js pkg/vera20k_bg.wasm \
     | sort > "$TEMP_ROOT/expected-archive.txt"
 cmp "$TEMP_ROOT/actual-archive.txt" "$TEMP_ROOT/expected-archive.txt"
 printf 'PASS: static package excludes local assets and private files\n'
@@ -123,16 +123,15 @@ grep -E 'network.js\?v=[a-f0-9]{40}' "$WRAPPER/dist/index.html" >/dev/null
 grep -E 'launcher.js\?v=[a-f0-9]{40}' "$WRAPPER/dist/index.html" >/dev/null
 grep -E 'vera20k.js\?v=[a-f0-9]{40}' "$WRAPPER/dist/launcher.js" >/dev/null
 grep -E 'vera20k_bg.wasm\?v=[a-f0-9]{40}' "$WRAPPER/dist/launcher.js" >/dev/null
-grep -F 'data:image/png;base64,aWNvbg==' "$WRAPPER/dist/standalone.html" >/dev/null
-grep -F '// lobby fixture' "$WRAPPER/dist/standalone.html" >/dev/null
-grep -F '// network fixture' "$WRAPPER/dist/standalone.html" >/dev/null
-grep -F 'body{background:#000}' "$WRAPPER/dist/standalone.html" >/dev/null
-grep -F 'atob("AGFzbQ==")' "$WRAPPER/dist/standalone.html" >/dev/null
-grep -F 'const bytes=bundledWasm;' "$WRAPPER/dist/standalone.html" >/dev/null
-if grep -E '^(import |export )|src="\./|href="\./' "$WRAPPER/dist/standalone.html"; then
-    fail 'standalone output retained module dependencies'
-fi
-printf 'PASS: standalone HTML embeds Wasm and bindings without module imports\n'
+[[ ! -e "$WRAPPER/dist/standalone.html" ]] || fail 'bundle retained the retired standalone page'
+grep -F 'href="./assets/RA2MD.png"' "$WRAPPER/dist/index.html" >/dev/null
+cmp "$WRAPPER/templates/storage.js" "$WRAPPER/dist/storage.js"
+cmp "$WRAPPER/templates/launcher.css" "$WRAPPER/dist/launcher.css"
+printf 'PASS: static site keeps external assets and removes the retired standalone page\n'
+bash "$WRAPPER/web.sh" package --output "$ARCHIVE"
+unzip -Z1 "$ARCHIVE" | sort > "$TEMP_ROOT/actual-archive.txt"
+cmp "$TEMP_ROOT/actual-archive.txt" "$TEMP_ROOT/expected-archive.txt"
+printf 'PASS: packaging works without a standalone page\n'
 head -c 10000 /dev/zero | tr '\000' 'x' > "$WRAPPER/templates/index.html"
 expect_failure bash "$WRAPPER/web.sh" bundle
 printf 'PASS: index.html enforces the 10,000-byte limit\n'
