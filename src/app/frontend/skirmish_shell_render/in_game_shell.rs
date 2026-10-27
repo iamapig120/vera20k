@@ -147,11 +147,14 @@ pub(super) fn background_instances(
 ) -> Vec<SpriteInstance> {
     let mut out = Vec::new();
     let screen = RectPx::new(0, 0, width, height);
-    let background = match width {
-        640 => atlas.background_small,
-        800 => atlas.background_medium,
-        _ => atlas.background_large,
-    };
+    let background = [
+        atlas.background_large,
+        atlas.background_medium,
+        atlas.background_small,
+    ]
+    .into_iter()
+    .flatten()
+    .find(|entry| entry.pixel_size == [layout.background.w as f32, layout.background.h as f32]);
     // Original 72F540 order; the background clear is performed by the render pass.
     for (entry, rect) in [
         (background, layout.background),
