@@ -2,15 +2,15 @@
 
 EA has not endorsed and does not support this product.
 
-公开入口：https://github.bysb.net/vera20k/
+入口：https://github.bysb.net/vera20k/
 
-基于 [libi/vera20k-web 5afb0d2](https://github.com/libi/vera20k-web/commit/5afb0d2166f3d6d2bb95e265982838feba116f3f)，保留其 UI、引导及备份入口。
-[本站集成源码](https://github.com/iamapig120/vera20k/tree/d687e0bbc306c1fe3bd4b66abefa7c81ece253b6)按 GPLv3 提供；引擎固定为 `4f925c266afabb6d28a4de6971f5e2af0bd67625`，应用 Web 兼容层与[最小背景修复](https://github.com/iamapig120/vera20k/commit/672f6543a54f2bab6b7aa983ea53c35d325c8b71)。
+保留 [libi/vera20k-web 5afb0d2](https://github.com/libi/vera20k-web/commit/5afb0d2166f3d6d2bb95e265982838feba116f3f) 的 UI 与引导。
+[当前 GPLv3 集成源码](https://github.com/iamapig120/vera20k/tree/e4b04a157cb2e552bdc9e23f70acd226e9fd0e80)；引擎固定为 `4f925c266afabb6d28a4de6971f5e2af0bd67625`，含背景尺寸修正、可选影片包挂载及固定 CPAL 0.17.3 的 WebAudio 时钟修正。
 
-选择/拖入本机资源文件夹或普通 ZIP，也可输入允许 CORS 的 HTTPS ZIP 地址。下载支持取消、重试，校验与缓存失败保留旧资源；资源缓存与设置/存档分开保存。旧数据库复制迁移后仍保留。本次未部署联机网关。
+支持本地文件夹/ZIP、允许 CORS 的 HTTPS ZIP 地址、取消和重试、资源原子缓存与独立设置/存档。保留目录文件及 MOD 覆盖语义，不执行导入的 EXE。资源总量仍受 2 GiB 保护限制；这不是浏览器统一上限。更大资源的存储与内存方案仍待单独验证。
 
-已验证：34 项自动测试、4 组原生 IndexedDB 迁移、缓存事务回归、构建/打包隔离、3 项背景回归及全部 9 个既有标准布局；实际中文目录导入 607 文件约 882 MiB，菜单/遭遇战地图/保存、刷新及读档通过。760×600 背景选择已核对修复前后；标准三档布局保持一致。
+本次验证：33 项 JS 自动测试、4 组启动器 VM 测试、6 项实际 CPAL 排程分支回归、构建隔离与打包回归通过。相同本地影片可从 MIX 中播放，缺少影片包仍能进入中文菜单；最终干净 WASM 载入“火线冲突”地图成功。源路径扫描无本机路径。音频冷启动与 500 ms 主线程阻塞后的集中追排明显改善；测试静音，尚未试听，长测仍有极少量不足 7 ms 的音效迟排。
 
-尚未实测：原生操作系统拖拽、真实外部跨域 HTTPS 游戏 ZIP、大资源完整缓存压力、旧 41f7ff9 引擎存档的跨版本读取、长战局及联机。音频设备初始化通过，未做人耳全量试听。验证资源不含中配电影；本仓库和站点不分发游戏资源或音乐。
+未完成验收：所有战役/影片、音画同步、用户报告的所有载入流程、原生拖拽、真实外部游戏 HTTPS ZIP、完整大资源缓存压力、最终候选刷新后读档。F11、tooltip、超级武器图标及主线迁移另行处理。本仓库和站点不包含零售资源、电影、音乐或测试游戏文件，访客自行导入合法资源。
 
-当前入口的运行资源位于 `releases/d687e0bbc306/`，WASM SHA256 为 `0c6c3e8edf605faad4c69cf03244293dba81eee137dcac1800dd23b9e3e0e938`。旧资源保留以兼容已有页面缓存；旧完整发布由 `release-before-upstream-web-20261026` 指向 `de80125b29595a0948a8c6d931b0597f1ba0f590`，可恢复。
+发布资源前缀：`releases/e4b04a157cb2/`。WASM SHA256：`ebe562fc34cccb8bc8d996030df57eeb3cb3e9d2142bb73847ed7018efa56137`。旧发布资源保留；`release-before-bik-audio-20261027` 保留前一版 `41a16df2a2cde1b8405a0a2fe0b9930157b12ff4`，更早回滚引用仍保留。
