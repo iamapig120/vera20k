@@ -32,6 +32,7 @@ identity() {
   {
     printf '%s\n%s\n' "$UPSTREAM" "$REVISION"
     cat "$ROOT/web.config" "$ROOT/$PATCH_FILE"
+    if [[ -n "${CPAL_CLOCK_FIX:-}" ]]; then cat "$ROOT/$CPAL_CLOCK_FIX"; fi
     for file in "${OVERLAYS[@]}"; do
       safe_relative "$file"
       printf '%s\n' "$file"
@@ -75,6 +76,10 @@ prepare() {
     mkdir -p "$stage/$(dirname "$file")"
     cp "$ROOT/overlays/$file" "$stage/$file"
   done
+  if [[ -n "${CPAL_CLOCK_FIX:-}" ]]; then
+    safe_relative "$CPAL_CLOCK_FIX"
+    python3 "$ROOT/$CPAL_CLOCK_FIX" "$stage" "$BUILD"
+  fi
   git -C "$stage" add -f --all
   git -C "$stage" -c user.name='VERA20k Web Builder' -c user.email=build@localhost \
     -c commit.gpgsign=false commit -qm "Generated Web source from $REVISION"
@@ -125,7 +130,7 @@ build() {
   [[ "$actual" == "wasm-bindgen $expected" ]] || fail "CLI version must match Cargo.lock: expected $expected, got $actual"
   (
     cd "$ENGINE"
-    CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}" python3 -m tools.cargo_run -- build -p vera20k --lib --locked \
+    CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}" python3 "$ROOT/tools/build-remapped.py" "$ROOT" -m tools.cargo_run -- build -p vera20k --lib --locked \
       --target wasm32-unknown-unknown --no-default-features --profile fast
   )
   stage=$(mktemp -d "$BUILD/dist.XXXXXX")

@@ -7493,3 +7493,24 @@ index 41e25a1..bac0084 100644
          let background = RectPx::new(0, 0, background_size[0], background_size[1]);
          // 0x0072FCC2..0x0072FE33: all column rectangles use CREDITS width.
          let column_x = width - sizes.credits[0];
+diff --git a/src/app/diagnostics/shell_capture/movies.rs b/src/app/diagnostics/shell_capture/movies.rs
+--- a/src/app/diagnostics/shell_capture/movies.rs
++++ b/src/app/diagnostics/shell_capture/movies.rs
+@@ -23,11 +23,17 @@
+ /// Native control corpus read from this checkout's `tools/` at capture time.
+ /// Diagnostics run from a development checkout, so the release binary does
+ /// not embed the corpus (`architecture_guards` keeps fixtures out of builds).
++#[cfg(not(target_arch = "wasm32"))]
+ fn native_corpus(path: &str) -> Result<Value> {
+     let full = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+     let text = std::fs::read_to_string(&full)
+         .with_context(|| format!("cannot read native corpus {}", full.display()))?;
+     Ok(serde_json::from_str(&text)?)
++}
++
++#[cfg(target_arch = "wasm32")]
++fn native_corpus(_path: &str) -> Result<Value> {
++    anyhow::bail!("Native control corpus capture is unavailable in Web builds")
+ }
+ 
+ /// Row-0 press point for the selected-list checkpoint (inside `0x744`).

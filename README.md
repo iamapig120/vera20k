@@ -72,6 +72,10 @@ bash server.sh
 
 Windows 可使用已有工具执行 `./tools/build-windows.ps1 -Python <python.exe绝对路径>`。临时目录位于项目 `.build` 内，Cargo 并发为 2；可用 `CARGO_HOME`、`RUSTUP_HOME`、`CARGO_TARGET_DIR` 指定缓存位置。
 
+构建会校验 `Cargo.lock` 指定的 CPAL 0.17.3 原始包，复制到 `.build/cpal-clock-*` 后只修正 WebAudio 过期排程游标；不修改 Cargo 原始缓存，也不升级依赖版本。首次缺少源码包时通过 `cargo fetch --locked` 获取固定依赖。这个调整防止主线程卡顿后集中追赶旧缓冲，不能消除浏览器阻塞造成的音频缺口；测试未包含主观试听。
+
+编译使用通用源码路径前缀，避免把本机工程、Cargo 和工具链目录写入发布产物。Web 构建的原生控制语料诊断入口直接报告不支持，避免嵌入开发机的 `CARGO_MANIFEST_DIR`；游戏仍从导入资源中读取数据。
+
 需要 Git、Bash 3.2+、Python 3.11+、Rust、`wasm-bindgen-cli`；打包还需要 `zip`。
 macOS、Linux 可直接使用 Bash，Windows 可使用 Git Bash。编译通过引擎的 Python 构建器串行管理；联机服务另外需要支持 `node:sqlite` 的 Node.js（已测试 25.2.1）。
 
@@ -205,7 +209,8 @@ bash web.sh build
 node tests/audio.mjs
 ```
 
-它检查音频初始化、资源筛选、缓存恢复以及用户数据在引擎启动前的恢复顺序。
+它检查音频初始化、完整资源保留、缓存恢复以及用户数据在引擎启动前的恢复顺序。
+`python3 tests/cpal-clock.py <生成的CPAL src/host/webaudio/mod.rs路径>` 直接提取实际排程分支，检查首次预填、过期游标、双缓冲连续性和正常节奏；第二个可选参数为原版源码，用于证明两项回归在修复前失败。
 `tests/storage.html` 在浏览器中直接运行真实 IndexedDB 回归；通过静态服务打开本项目目录后访问该页面。
 它使用独立临时数据库，检查关闭重开、资源 Blob、删除记录和失败事务回滚。
 
