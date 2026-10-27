@@ -13,12 +13,12 @@ function launcher(audioError=false,library=null,users=[],initPromise=null){
  const context={...resourceApi,File,Blob,URL:class extends URL{static createObjectURL(blob){downloads.push(blob);return 'blob:fixture';}static revokeObjectURL(){}},window:{addEventListener(){}},VeraStorage:{open:async()=>{},library:async()=>library,users:async()=>users,write:async row=>{writes.push(row);users.push(row);},remove:async()=>{},saveLibrary:async()=>{}},restore_user_file(path){calls.push(`restore:${path}`);},document:{createElement(){return {click(){}};},getElementById:element,addEventListener(){},body:element('body')},navigator:{gpu:{}},MutationObserver:class{observe(){}},init:async()=>{await initPromise;},prepare_audio(){calls.push('audio');if(audioError)throw Error('blocked');},import_file(name){calls.push(name);},start_game(){calls.push('start');},setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),location:{reload(){}}};
  return {context,elements,calls,writes,downloads,run:async()=>{const api=await runInNewContext(`(async()=>{${source}\nreturn {selectResources};})()`,context);await initPromise;await new Promise(setImmediate);return api;}};
 }
-const resources=['ra2.mix','ra2md.mix','mapsmd03.mix','theme.mix','thememd.mix','audio.bag','audio.idx','voice.wav','sound.aud','movies01.mix','movmd03.mix','gamemd.exe'].map(name=>new File([new Uint8Array([0])],name));
+const resources=['ra2.mix','ra2md.mix','mapsmd03.mix','theme.mix','thememd.mix','audio.bag','audio.idx','voice.wav','sound.aud','movies01.mix','movmd03.mix','intro.bik','gamemd.exe','mod.custom','nested/override.bin'].map(name=>new File([new Uint8Array([0])],name));
 {
  const fixture=launcher(), api=await fixture.run();
  api.selectResources(resources,'retail');
  await fixture.elements.get('start').onclick();
- assert.deepEqual(fixture.calls,['audio','ra2.mix','ra2md.mix','mapsmd03.mix','theme.mix','thememd.mix','audio.bag','audio.idx','voice.wav','sound.aud','start']);
+ assert.deepEqual(fixture.calls,['audio',...resources.map(file=>file.name),'start']);
 }
 {
  const fixture=launcher(true), api=await fixture.run();
@@ -36,6 +36,7 @@ console.log('PASS: audio opens before resource reads; audio resources retained; 
  assert.equal(fixture.elements.get('start').disabled,false,'cached resources are ready without a folder picker');
  await fixture.elements.get('start').onclick();
  assert.equal(fixture.calls[0],'audio');
+ for(const file of resources)assert.ok(fixture.calls.includes(file.name),`cached root file retained: ${file.name}`);
  assert.deepEqual(fixture.calls.slice(-2),['restore:/retail/RA2MD.INI','start'],'user settings override imported settings before engine startup');
 }
 console.log('PASS: cached resources skip folder selection; user data restores before startup');

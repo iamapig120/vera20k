@@ -10,9 +10,25 @@ test('deflated nested UTF-8 ZIP and empty directories import exact bytes', async
   assert.deepEqual(result.files.map(f => f.path), gameNames);
   assert.equal(await result.files[0].blob.text(), gameEntries[0].text);
 });
-test('stored ZIP imports and excludes executables from the library', async () => {
+test('stored ZIP preserves arbitrary root files as inert resource bytes', async () => {
   const result = libraryFromEntries(await entriesFromZip(blob([...gameEntries.map(e => ({...e,method:0})),{name:'演示资源/setup.exe',text:'not run'}])), 'sample');
-  assert.equal(result.files.length, 4);
+  assert.equal(result.files.length, 5);
+  assert.equal(await result.files.find(file => file.path === 'setup.exe').blob.text(), 'not run');
+});
+
+test('root movies, loose MOD files and nested overrides survive import unchanged', async () => {
+  const extra = ['intro.bik','movies01.mix','movmd02.mix','mod.custom','nested/override.bin','__MACOSX/local.data'];
+  const result = libraryFromEntries(await entriesFromZip(blob([...gameEntries,
+    ...extra.map(name => ({name:`演示资源/${name}`,text:`bytes:${name}`}))])), 'root');
+  for (const path of extra) assert.equal(await result.files.find(file => file.path === path).blob.text(), `bytes:${path}`);
+});
+
+test('preserving all root files does not remove total-size protection', () => {
+  const entries = gameEntries.map(entry => ({path:entry.name,blob:new Blob([entry.text])}));
+  const large = new Blob(['metadata-only size fixture']);
+  Object.defineProperty(large,'size',{value:LIMITS.entry});
+  assert.throws(() => libraryFromEntries([...entries,
+    {path:'演示资源/first.custom',blob:large},{path:'演示资源/second.custom',blob:large}], 'large'), /2 GiB/);
 });
 for (const path of ['../x.mix','C:/x.mix','/x.mix','a/../x.mix','a\\..\\x.mix','//server/x.mix','a/./x.mix','a\0.mix']) {
   test(`unsafe path is rejected: ${JSON.stringify(path)}`, () => assert.throws(() => safePath(path)));

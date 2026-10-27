@@ -81,8 +81,6 @@ $('backup-file').onchange=async()=>{
  }catch(error){storageStatus(`导入失败：${error.message}`,true);}
 };
 const droppedPaths=new WeakMap();
-const allowed=/\.(mix|mmx|yro|ini|pkt|map|mpr|yrm|csf|fnt|pal|shp|vxl|hva|tmp|vpl|pcx|bag|idx|wav|aud)$/i;
-const excluded=/^(movies\d*|movmd\d*)\.mix$/i;
 const relativePath=file=>droppedPaths.get(file) ?? (file.webkitRelativePath ? file.webkitRelativePath.split('/').slice(1).join('/') : file.name);
 const sizeLabel=bytes=>bytes>=1024**3 ? `${(bytes/1024**3).toFixed(1)} GB` : `${Math.max(1,Math.round(bytes/1024**2))} MB`;
 function syncButton(){
@@ -121,7 +119,7 @@ window.addEventListener('unhandledrejection',event=>{if(busy||document.body.clas
 $('retry').onclick=()=>{if(!ready){failed=false;$('retry').hidden=true;$('error-details').hidden=true;void prepareEngine();}else location.reload();};
 function selectResources(chosen,folderName){
  selectionRevision++;
- const keep=chosen.filter(file=>allowed.test(file.name)&&!excluded.test(file.name));
+ const keep=chosen;
  const rootNames=new Set(keep.filter(file=>!relativePath(file).includes('/')).map(file=>file.name.toLowerCase()));
  if(!rootNames.has('ra2.mix')||!rootNames.has('ra2md.mix'))throw Error('请选择完整尤里的复仇资源；旧选择保留');
  selected=keep;cachedSelection=false;
@@ -132,7 +130,7 @@ function selectResources(chosen,folderName){
  feedback(ready?'资源已就绪，点击「开始游戏」。':'游戏目录已选好，正在准备网页引擎，请稍候…');syncButton();
 }
 function resourceFiles(library){
- return library.files.filter(entry=>allowed.test(entry.path)&&!excluded.test(entry.path.split('/').at(-1))).map(entry=>{
+ return library.files.map(entry=>{
   const file=entry.blob instanceof File?entry.blob:new File([entry.blob],entry.path.split('/').at(-1),{type:entry.blob.type,lastModified:0});
   droppedPaths.set(file,entry.path);return file;
  });

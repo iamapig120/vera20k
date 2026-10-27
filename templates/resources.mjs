@@ -1,7 +1,6 @@
 // ZIP32 layout: PKWARE APPNOTE 4.3.7, 4.3.12 and 4.3.16. No scripts are executed.
 export const LIMITS = Object.freeze({ archive: 2 * 1024 ** 3, total: 2 * 1024 ** 3,
   entry: 1024 ** 3, entries: 12000, directory: 32 * 1024 ** 2, depth: 32 });
-const allowed = /\.(mix|mmx|yro|map|mpr|yrm|ini|pkt|csf|fnt|wav|aud|shp|pal|vxl|hva|tmp|vpl|pcx|bik|bag|idx)$/i;
 export const REQUIRED = ['ra2.mix', 'ra2md.mix', 'mapsmd03.mix'];
 const crcTable = Uint32Array.from({length: 256}, (_, n) => {
   for (let i = 0; i < 8; i++) n = n & 1 ? (n >>> 1) ^ 0xedb88320 : n >>> 1;
@@ -31,7 +30,7 @@ export function libraryFromEntries(entries, label, limits = LIMITS) {
     total += entry.blob.size;
     if (total > limits.total) throw Error('资源总大小超过 2 GiB 限制');
     return {path, blob: entry.blob};
-  }).filter(entry => allowed.test(entry.path) && !entry.path.split('/').includes('__MACOSX'));
+  });
   const roots = valid.filter(e => /(^|\/)ra2\.mix$/i.test(e.path)).map(e => e.path.slice(0, -7))
     .filter(root => valid.some(e => e.path.toLowerCase() === `${root}ra2md.mix`.toLowerCase()));
   if (roots.length !== 1) throw Error(roots.length ? '包含多个游戏目录，请只导入一个完整目录' : '缺少 ra2.mix 或 ra2md.mix，请选择完整尤里的复仇资源');
