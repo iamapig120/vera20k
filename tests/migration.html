@@ -1,0 +1,66 @@
+<!doctype html><meta charset="utf-8"><title>Legacy migration regressions</title><pre id="result">RUNNING</pre>
+<script src="../templates/storage.js"></script><script>
+(async()=>{
+ const prefix='vera20k-migration-test-'+crypto.randomUUID(),owned=new Set(),stores=[],passed=[];
+ const assert=(value,message)=>{if(!value)throw Error(message);};
+ const names=label=>({users:`${prefix}-${label}-old-users`,library:`${prefix}-${label}-old-library`,upstream:`${prefix}-${label}-old-web`});
+ function storage(label,options={}){
+  const name=`${prefix}-${label}`;owned.add(name+'-users');owned.add(name+'-library');
+  const store=createVeraStorage(name,options);stores.push(store);return store;
+ }
+ async function seed(name,definitions,write){
+  owned.add(name);
+  const db=await new Promise((resolve,reject)=>{const req=indexedDB.open(name,1);req.onerror=()=>reject(req.error);req.onupgradeneeded=()=>{for(const [key,options] of definitions)req.result.createObjectStore(key,options);};req.onsuccess=()=>resolve(req.result);});
+  try{await new Promise((resolve,reject)=>{const tx=db.transaction(definitions.map(([key])=>key),'readwrite');tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);tx.onerror=()=>{};write(tx);});}finally{db.close();}
+ }
+ async function read(name,kind,key){
+  const db=await new Promise((resolve,reject)=>{const req=indexedDB.open(name);req.onerror=()=>reject(req.error);req.onsuccess=()=>resolve(req.result);});
+  try{return await new Promise((resolve,reject)=>{const req=db.transaction(kind).objectStore(kind).get(key);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}finally{db.close();}
+ }
+ const fixtures=['ra2.mix','ra2md.mix','mapsmd03.mix'].map(path=>({path,blob:new File(['synthetic fixture'],path)}));
+ try{
+  const legacyNames=names('copy');
+  await seed(legacyNames.users,[['files',{keyPath:'path'}]],tx=>{
+   tx.objectStore('files').put({path:'/saves/profile/RA2MD.INI',bytes:new Uint8Array([10]),modified:10});
+   tx.objectStore('files').put({path:'/saves/current.sav',bytes:new Uint8Array([11]),modified:11});
+  });
+  await seed(legacyNames.upstream,[['users'],['library']],tx=>{
+   tx.objectStore('users').put({path:'/saves/profile/RA2MD.INI',bytes:new Uint8Array(),modified_ms:20,deleted:true},'/saves/profile/RA2MD.INI');
+   tx.objectStore('users').put({path:'/config.toml',bytes:new Uint8Array([21]),modified_ms:21},'/config.toml');
+  });
+  await seed(legacyNames.library,[['library']],tx=>tx.objectStore('library').put({label:'legacy library',files:fixtures},'current'));
+  const current=storage('copied',{migrateLegacy:false});
+  await current.write({path:'/saves/current.sav',bytes:new Uint8Array([99]),modified_ms:1});current.close();
+  const migrated=storage('copied',{migrateLegacy:true,legacyNames});
+  const copied=await migrated.users(),byPath=new Map(copied.map(row=>[row.path,row]));
+  assert(copied.length===3&&byPath.get('/saves/current.sav').bytes[0]===99,'existing target row must win');
+  assert(byPath.get('/saves/profile/RA2MD.INI').deleted&&byPath.get('/saves/profile/RA2MD.INI').modified_ms===20,'newest legacy timestamp and tombstone must survive');
+  assert((await migrated.library()).folder==='legacy library','old blob/label schema must migrate');
+  passed.push('legacy schemas, timestamps and tombstones migrate; existing target rows win');
+  assert((await read(legacyNames.users,'files','/saves/current.sav')).modified===11,'source user database changed');
+  assert((await read(legacyNames.library,'library','current')).label==='legacy library','source resource database changed');
+  passed.push('both original databases remain unchanged');
+  migrated.close();
+  await seed(legacyNames.users,[['files',{keyPath:'path'}]],tx=>tx.objectStore('files').put({path:'/saves/late.sav',bytes:new Uint8Array([12]),modified:12}));
+  const reopened=storage('copied',{migrateLegacy:true,legacyNames});
+  assert((await reopened.users()).length===3,'migration marker must prevent repeat import');
+  await reopened.clearLibrary();reopened.close();
+  assert(!(await storage('copied',{migrateLegacy:true,legacyNames}).library()),'cleared cache must not resurrect from old DB');
+  passed.push('migration markers survive reopen and intentional cache clearing');
+  const repairNames=names('repair');
+  await seed(repairNames.users,[['files',{keyPath:'path'}]],tx=>{
+   tx.objectStore('files').put({path:'/saves/good.sav',bytes:new Uint8Array([1]),modified:1});
+   tx.objectStore('files').put({path:'/saves/bad.sav',bytes:new Uint8Array([2]),modified:-1});
+  });
+  const repair=storage('repair',{migrateLegacy:true,legacyNames:repairNames});
+  let failed=false;try{await repair.users();}catch{failed=true;}
+  assert(failed&&!(await read(`${prefix}-repair-users`,'users','/saves/good.sav')),'invalid legacy rows must not partially migrate');
+  assert(!(await read(`${prefix}-repair-users`,'meta','legacy-copy-v1')),'failure must not set completion marker');
+  await seed(repairNames.users,[['files',{keyPath:'path'}]],tx=>tx.objectStore('files').put({path:'/saves/bad.sav',bytes:new Uint8Array([2]),modified:2}));
+  assert((await repair.users()).length===2,'migration must retry after source repair');
+  passed.push('migration failure rolls back all rows and marker; retry succeeds');
+  document.getElementById('result').textContent=`PASS ${passed.length}/${passed.length}\n`+passed.join('\n');
+ }catch(error){document.getElementById('result').textContent='FAIL: '+error.stack+'\nPassed: '+passed.join('; ');}
+ finally{for(const store of stores)store.close();for(const name of owned)if(name.startsWith(prefix+'-'))indexedDB.deleteDatabase(name);}
+})();
+</script>

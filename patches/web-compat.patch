@@ -7362,3 +7362,127 @@ index 06b336d0c..e0818c312 100644
  pub mod native_affine;
 +
 +pub mod file_system;
+diff --git a/src/app/frontend/skirmish_shell_render/in_game_shell.rs b/src/app/frontend/skirmish_shell_render/in_game_shell.rs
+index f19379f..5ebcb56 100644
+--- a/src/app/frontend/skirmish_shell_render/in_game_shell.rs
++++ b/src/app/frontend/skirmish_shell_render/in_game_shell.rs
+@@ -147,11 +147,14 @@ pub(super) fn background_instances(
+ ) -> Vec<SpriteInstance> {
+     let mut out = Vec::new();
+     let screen = RectPx::new(0, 0, width, height);
+-    let background = match width {
+-        640 => atlas.background_small,
+-        800 => atlas.background_medium,
+-        _ => atlas.background_large,
+-    };
++    let background = [
++        atlas.background_large,
++        atlas.background_medium,
++        atlas.background_small,
++    ]
++    .into_iter()
++    .flatten()
++    .find(|entry| entry.pixel_size == [layout.background.w as f32, layout.background.h as f32]);
+     // Original 72F540 order; the background clear is performed by the render pass.
+     for (entry, rect) in [
+         (background, layout.background),
+diff --git a/src/ui/shell/in_game_shell.rs b/src/ui/shell/in_game_shell.rs
+index 41e25a1..bac0084 100644
+--- a/src/ui/shell/in_game_shell.rs
++++ b/src/ui/shell/in_game_shell.rs
+@@ -7,6 +7,72 @@
+ 
+ use super::geom::RectPx;
+ 
++#[cfg(test)]
++mod background_size_tests {
++    use super::{InGameShellLayout, InGameShellSizes};
++
++    fn sizes() -> InGameShellSizes {
++        InGameShellSizes {
++            background_small: [472, 448],
++            background_medium: [632, 568],
++            background_large: [856, 736],
++            credits: [168, 24],
++            top: [168, 8],
++            radar: [168, 112],
++            side1: [168, 8],
++            side2: [168, 8],
++            side3: [168, 8],
++            addon: [168, 8],
++            bottom_spacer: [8, 32],
++            left_cap: [8, 32],
++            button_background: [8, 32],
++            right_cap: [8, 32],
++        }
++    }
++
++    #[test]
++    fn stock_background_sizes_are_preserved() {
++        for (width, height, expected) in [
++            (640, 480, [472, 448]),
++            (800, 600, [632, 568]),
++            (1024, 768, [856, 736]),
++        ] {
++            let rect = InGameShellLayout::new(width, height, sizes())
++                .unwrap()
++                .background;
++            assert_eq!([rect.w, rect.h], expected);
++        }
++    }
++
++    #[test]
++    fn resizing_does_not_jump_to_an_oversized_background() {
++        for (width, height, expected) in [
++            (639, 480, [472, 448]),
++            (641, 600, [472, 448]),
++            (760, 600, [472, 448]),
++            (799, 600, [472, 448]),
++            (800, 599, [472, 448]),
++            (801, 600, [632, 568]),
++            (1023, 768, [632, 568]),
++            (1024, 767, [632, 568]),
++            (1025, 768, [856, 736]),
++        ] {
++            let rect = InGameShellLayout::new(width, height, sizes())
++                .unwrap()
++                .background;
++            assert_eq!([rect.w, rect.h], expected, "{width}x{height}");
++        }
++    }
++
++    #[test]
++    fn background_fit_uses_loaded_theme_dimensions() {
++        let mut art = sizes();
++        art.background_medium = [590, 560];
++        let rect = InGameShellLayout::new(760, 600, art).unwrap().background;
++        assert_eq!([rect.w, rect.h], [590, 560]);
++    }
++}
++
+ /// Canvas dimensions supplied by the active side's loaded art. SIDE2, rather
+ /// than the separately painted SIDE2B, controls column repetition (0x0072FD96).
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+@@ -59,11 +125,17 @@ impl InGameShellLayout {
+         if sizes.side2[1] <= 0 || sizes.button_background[0] <= 0 {
+             return None;
+         }
+-        let background_size = match width {
+-            640 => sizes.background_small,
+-            800 => sizes.background_medium,
+-            _ => sizes.background_large,
+-        };
++        // Original 0x0072FC60 selects the three stock resolutions. A resizable
++        // window needs the largest native bitmap that fits left of the column
++        // and above the 32-pixel bar, rather than defaulting to the large art.
++        let background_size = [
++            sizes.background_large,
++            sizes.background_medium,
++            sizes.background_small,
++        ]
++        .into_iter()
++        .find(|[w, h]| *w <= width - sizes.credits[0] && *h <= height - 32)
++        .unwrap_or(sizes.background_small);
+         let background = RectPx::new(0, 0, background_size[0], background_size[1]);
+         // 0x0072FCC2..0x0072FE33: all column rectangles use CREDITS width.
+         let column_x = width - sizes.credits[0];

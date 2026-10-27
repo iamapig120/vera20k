@@ -77,7 +77,7 @@ printf 'PASS: missing submodule reports initialization command\n'
 
 
 mkdir -p "$WRAPPER/dist/pkg" "$WRAPPER/dist/assets" "$WRAPPER/dist/local-assets" "$WRAPPER/local-assets"
-for path in index.html standalone.html launcher.css launcher.js storage.js lobby.js network.js assets/RA2MD.png build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm; do
+for path in index.html standalone.html launcher.css launcher.js storage.js resources.mjs lobby.js network.js LICENSE-GPL assets/RA2MD.png build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm; do
     printf 'public\n' > "$WRAPPER/dist/$path"
 done
 printf 'private\n' > "$WRAPPER/dist/local-assets/retail.mix"
@@ -86,13 +86,15 @@ printf 'private\n' > "$WRAPPER/dist/private.txt"
 ARCHIVE="$WRAPPER/preview.zip"
 bash "$WRAPPER/web.sh" --upstream "$UPSTREAM" --ref "$BASE" package --output "$ARCHIVE"
 unzip -Z1 "$ARCHIVE" | sort > "$TEMP_ROOT/actual-archive.txt"
-printf '%s\n' build-info.txt index.html launcher.css launcher.js storage.js lobby.js network.js assets/RA2MD.png pkg/vera20k.js pkg/vera20k_bg.wasm \
+printf '%s\n' build-info.txt index.html launcher.css launcher.js storage.js resources.mjs lobby.js network.js LICENSE-GPL assets/RA2MD.png pkg/vera20k.js pkg/vera20k_bg.wasm \
     | sort > "$TEMP_ROOT/expected-archive.txt"
 cmp "$TEMP_ROOT/actual-archive.txt" "$TEMP_ROOT/expected-archive.txt"
 printf 'PASS: static package excludes local assets and private files\n'
 
 mkdir -p "$WRAPPER/templates"
 cp "$SOURCE_ROOT/templates/.assetsignore" "$WRAPPER/templates/.assetsignore"
+printf '// resource fixture\n' > "$WRAPPER/templates/resources.mjs"
+printf 'license fixture\n' > "$WRAPPER/LICENSE-GPL"
 printf '// storage fixture\n' > "$WRAPPER/templates/storage.js"
 printf '// lobby fixture\n' > "$WRAPPER/templates/lobby.js"
 printf '// network fixture\n' > "$WRAPPER/templates/network.js"

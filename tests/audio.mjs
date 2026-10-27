@@ -1,23 +1,24 @@
 // Launcher regressions without a browser, retail files, or Wasm compilation.
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
+import * as resourceApi from '../templates/resources.mjs';
 import assert from 'node:assert/strict';
-const source=readFileSync(new URL('../templates/launcher.js',import.meta.url),'utf8').replace(/^import .*;\n/,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js'));
+const source=readFileSync(new URL('../templates/launcher.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js'));
 function launcher(audioError=false,library=null,users=[],initPromise=null){
  const elements=new Map(), calls=[],writes=[],downloads=[];
  const element=id=>{
   if(!elements.has(id))elements.set(id,{disabled:false,hidden:false,textContent:'',style:{},classList:{add(){},remove(){},toggle(){},contains(){return false;}},setAttribute(){},addEventListener(){}});
   return elements.get(id);
  };
- const context={Blob,URL:class extends URL{static createObjectURL(blob){downloads.push(blob);return 'blob:fixture';}static revokeObjectURL(){}},window:{addEventListener(){}},VeraStorage:{open:async()=>{},library:async()=>library,users:async()=>users,write:async row=>{writes.push(row);users.push(row);},remove:async()=>{},saveLibrary:async()=>{}},restore_user_file(path){calls.push(`restore:${path}`);},document:{createElement(){return {click(){}};},getElementById:element,addEventListener(){},body:element('body')},navigator:{gpu:{}},MutationObserver:class{observe(){}},init:async()=>{await initPromise;},prepare_audio(){calls.push('audio');if(audioError)throw Error('blocked');},import_file(name){calls.push(name);},start_game(){calls.push('start');},setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),location:{reload(){}}};
+ const context={...resourceApi,File,Blob,URL:class extends URL{static createObjectURL(blob){downloads.push(blob);return 'blob:fixture';}static revokeObjectURL(){}},window:{addEventListener(){}},VeraStorage:{open:async()=>{},library:async()=>library,users:async()=>users,write:async row=>{writes.push(row);users.push(row);},remove:async()=>{},saveLibrary:async()=>{}},restore_user_file(path){calls.push(`restore:${path}`);},document:{createElement(){return {click(){}};},getElementById:element,addEventListener(){},body:element('body')},navigator:{gpu:{}},MutationObserver:class{observe(){}},init:async()=>{await initPromise;},prepare_audio(){calls.push('audio');if(audioError)throw Error('blocked');},import_file(name){calls.push(name);},start_game(){calls.push('start');},setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),location:{reload(){}}};
  return {context,elements,calls,writes,downloads,run:async()=>{const api=await runInNewContext(`(async()=>{${source}\nreturn {selectResources};})()`,context);await initPromise;await new Promise(setImmediate);return api;}};
 }
-const resources=['ra2.mix','ra2md.mix','theme.mix','thememd.mix','audio.bag','audio.idx','voice.wav','sound.aud','movies01.mix','movmd03.mix','gamemd.exe'].map(name=>({name,size:1,arrayBuffer:async()=>new ArrayBuffer(1)}));
+const resources=['ra2.mix','ra2md.mix','mapsmd03.mix','theme.mix','thememd.mix','audio.bag','audio.idx','voice.wav','sound.aud','movies01.mix','movmd03.mix','gamemd.exe'].map(name=>new File([new Uint8Array([0])],name));
 {
  const fixture=launcher(), api=await fixture.run();
  api.selectResources(resources,'retail');
  await fixture.elements.get('start').onclick();
- assert.deepEqual(fixture.calls,['audio','ra2.mix','ra2md.mix','theme.mix','thememd.mix','audio.bag','audio.idx','voice.wav','sound.aud','start']);
+ assert.deepEqual(fixture.calls,['audio','ra2.mix','ra2md.mix','mapsmd03.mix','theme.mix','thememd.mix','audio.bag','audio.idx','voice.wav','sound.aud','start']);
 }
 {
  const fixture=launcher(true), api=await fixture.run();
@@ -55,7 +56,7 @@ console.log('PASS: settings queue copies Wasm memory; user backup contains persi
 {
  let finishInit;const initialization=new Promise(resolve=>{finishInit=resolve;});
  const fixture=launcher(false,null,[],initialization),running=fixture.run();
- fixture.elements.get('files').files=resources.map(file=>({...file,webkitRelativePath:`retail/${file.name}`}));
+ fixture.elements.get('files').files=resources.map(file=>{Object.defineProperty(file,'webkitRelativePath',{value:`retail/${file.name}`});return file;});
  fixture.elements.get('files').onchange();
  assert.equal(fixture.elements.get('start').disabled,true);
  assert.equal(fixture.elements.get('start-label').textContent,'正在准备游戏…');

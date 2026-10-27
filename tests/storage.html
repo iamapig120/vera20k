@@ -13,11 +13,17 @@
   assert(rows.length===1&&rows[0].bytes[1]===2&&rows[0].modified_ms===123,'user bytes/timestamp survive reopening');
   assert(library.folder==='fixture'&&await library.files[0].file.text()==='retail fixture','resource File survives reopening');
   // A failed multi-entry backup must roll back all preceding writes.
-  try{await restored.importUsers([{path:'/saves/new.sav',bytes:new Uint8Array([3])},{path:'/bad',bytes:()=>{}}]);throw Error('expected clone failure');}catch(error){assert(error.name==='DataCloneError','expected data clone error');}
+  let failed=false;
+  try{await restored.importUsers([{path:'/saves/new.sav',bytes:new Uint8Array([3]),modified_ms:1},{path:'/bad',bytes:new Uint8Array([4]),modified_ms:1}]);}catch{failed=true;}
+  assert(failed,'invalid backup must reject');
   assert((await restored.users()).length===1,'failed backup import is atomic');
   await restored.remove('/retail/RA2MD.INI');assert((await restored.users())[0].deleted===true,'deletion tombstone survives reload and overrides original resource imports');
   assert((await restored.library()).files.length===1,'user deletion preserves cached resources');
-  restored.close();indexedDB.deleteDatabase(name);
+  failed=false;
+  try{await restored.saveLibrary('broken',[{path:'ra2.mix',file,uncloneable:()=>{}}]);}catch(error){failed=error.name==='DataCloneError';}
+  assert(failed&&(await restored.library()).folder==='fixture','failed cache transaction preserves old resource library');
+  await restored.clearLibrary();assert(!(await restored.library())&&(await restored.users()).length===1,'clearing resource library preserves user data');
+  restored.close();indexedDB.deleteDatabase(name+'-users');indexedDB.deleteDatabase(name+'-library');
   document.getElementById('result').textContent='PASS: settings and resource blobs survive reopen; failed backup is atomic; deletion preserves library';
  }catch(error){document.getElementById('result').textContent='FAIL: '+error.stack;store.close();}
 })();

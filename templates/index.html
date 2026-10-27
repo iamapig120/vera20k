@@ -12,6 +12,7 @@
 </head>
 
 <body>
+    <p class="ea-notice">EA has not endorsed and does not support this product.</p>
     <main id="launcher">
         <div class="launch-screen">
             <div class="import-panel">
@@ -33,8 +34,8 @@
                             <path d="M13 35h34M13 44h34M13 53h25" stroke="#a7a7a0" stroke-width="3" />
                         </svg></div>
                     <div class="drop-arrow" aria-hidden="true"></div>
-                    <p class="drop-title">将游戏文件夹拖放到这里</p>
-                    <p class="drop-subtitle">或者点击下方按钮选择安装目录</p>
+                    <p class="drop-title">将游戏文件夹或 ZIP 拖放到这里</p>
+                    <p class="drop-subtitle">也可以选择安装目录、本地 ZIP，或填写 HTTPS ZIP 地址</p>
                     <div class="actions" aria-label="选择资源并开始游戏">
                         <div class="resource-slot"><input id="files" type="file" webkitdirectory multiple hidden
                                 aria-label="选择尤里的复仇安装目录"><button class="menu-button" id="choose-folder" type="button"
@@ -56,7 +57,11 @@
                                 <path d="M2 1v22l18-11z" />
                             </svg><span id="start-label">开始游戏</span></button>
                     </div>
-                    <p class="selection-note">选择包含 ra2.mix 和 ra2md.mix 的文件夹 · 资源仅在本机读取</p>
+                    <div class="zip-actions"><button id="choose-zip" class="retry" type="button">选择 ZIP</button><input id="zip-file" type="file" accept=".zip,application/zip" hidden aria-label="游戏资源 ZIP"></div>
+                    <form id="zip-form" class="zip-form"><label for="zip-url">从 HTTPS ZIP 地址下载</label><div><input id="zip-url" type="url" placeholder="https://example.com/game.zip" autocomplete="off" spellcheck="false"><button id="download-zip" type="submit">下载并导入</button></div></form>
+                    <label class="cache-choice"><input id="cache-resources" type="checkbox" checked> 缓存资源，下次直接开始</label>
+                    <div class="import-controls"><button id="cancel-import" class="retry" type="button" hidden>取消导入</button><button id="retry-import" class="retry" type="button" hidden>重试导入</button><button id="retry-cache" class="retry" type="button" hidden>重试缓存</button></div>
+                    <p class="selection-note">资源仅在本机读取；远程下载需允许 CORS，可改用本地导入。ZIP 支持 UTF-8 Store/Deflate，最多 2 GiB、12,000 项。</p>
                 </section>
                 <div id="button-caption"></div>
                 <div class="progress-area" id="progress-area" hidden>
@@ -79,13 +84,13 @@
                 <details class="help" id="guide">
                     <summary>游戏资源 / 帮助</summary>
                     <div class="help-copy">
-                        <p>选择已解压的《尤里的复仇》安装文件夹，当前不支持直接导入安装程序或压缩包。</p>
+                        <p>选择《尤里的复仇》安装文件夹或 ZIP；不支持安装程序、加密、分卷和 ZIP64。下载失败可保存到本机再导入。</p>
                         <p>资源只在浏览器本机使用，不会上传或修改。</p>
                         <p>需要支持 WebGPU 的桌面浏览器。支持单机、音效和音乐；联机需要可用的联机网关。</p>
                         <p><label for="gateway-address">联机网关地址（可选）</label><br>
                             <input id="gateway-address" type="url" placeholder="https://gateway.example.com"
                                 autocomplete="off" spellcheck="false" aria-describedby="gateway-status"></p>
-                        <p id="gateway-status" role="status">留空使用本站网关；网关不可用时仍可单机。</p>
+                        <p id="gateway-status" role="status">本站未部署联机网关；单机不受影响。可另行配置已有网关。</p>
                     </div>
                 </details>
             </footer>
@@ -93,7 +98,7 @@
         </div>
         <aside class="disclaimer" aria-label="免责声明"><strong>免责声明：</strong>
             <p>当前红警项目基于 <a href="https://github.com/YuriPlanet/vera20k" target="_blank" rel="noopener noreferrer">VERA20k</a> 开源项目实现，与 Electronic Arts Inc. 没有任何关联。所有权利均归其各自所有者所有。</p>
-            <p>项目源码：<a href="https://github.com/libi/vera20k-web" target="_blank" rel="noopener noreferrer">VERA20k 网页版</a></p>
+            <p>项目源码：<a href="https://github.com/libi/vera20k-web" target="_blank" rel="noopener noreferrer">VERA20k 网页版</a> · <a href="https://github.com/iamapig120/vera20k/tree/web-preview-source" target="_blank" rel="noopener noreferrer">本站集成源码</a></p>
         </aside>
     </main>
     <div id="game" aria-label="尤里的复仇游戏画面"></div>

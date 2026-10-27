@@ -42,7 +42,8 @@ identity() {
 prepare() {
   [[ -e "$UPSTREAM/.git" ]] || fail 'Upstream is not initialized. Run: git submodule update --init --recursive (or use --upstream PATH).'
   UPSTREAM=$(cd "$UPSTREAM" && pwd -P)
-  [[ "$(git -C "$UPSTREAM" rev-parse --show-toplevel)" == "$UPSTREAM" ]] || fail 'Upstream must be a Git repository root'
+  git_root=$(git -C "$UPSTREAM" rev-parse --show-toplevel)
+  [[ -d "$git_root" && "$(cd "$git_root" && pwd -P)" == "$UPSTREAM" ]] || fail 'Upstream must be a Git repository root'
   case "$UPSTREAM/" in "$ROOT/"|"$BUILD/"*) fail 'Upstream must not be the Web repository or generated source';; esac
   REVISION=$(git -C "$UPSTREAM" rev-parse --verify "$REF^{commit}")
   IDENTITY=$(identity)
@@ -94,14 +95,15 @@ bundle_static() {
   cp "$ROOT/templates/index.html" "$directory/index.html"
   [[ $(wc -c < "$directory/index.html") -lt 10000 ]] || fail 'index.html must be smaller than 10,000 bytes'
   cp "$ROOT/templates/.assetsignore" "$directory/.assetsignore"
-  cp "$ROOT/templates/lobby.js" "$ROOT/templates/network.js" "$ROOT/templates/storage.js" "$ROOT/templates/launcher.css" "$ROOT/templates/launcher.js" "$directory/"
+  cp "$ROOT/templates/lobby.js" "$ROOT/templates/network.js" "$ROOT/templates/storage.js" "$ROOT/templates/resources.mjs" "$ROOT/templates/launcher.css" "$ROOT/templates/launcher.js" "$directory/"
+  cp "$ROOT/LICENSE-GPL" "$directory/LICENSE-GPL"
   mkdir -p "$directory/assets"
   cp "$ROOT/assets/RA2MD.png" "$directory/assets/RA2MD.png"
   rm -f "$directory/standalone.html"
   # HTML and modules must never mix across releases. Python's static server
   # and regular static hosts can otherwise reuse old module/Wasm responses.
   local version
-  version=$(cat "$directory/lobby.js" "$directory/network.js" "$directory/launcher.js" "$directory/storage.js" "$directory/launcher.css" "$directory/pkg/vera20k.js" "$directory/pkg/vera20k_bg.wasm" | git hash-object --stdin)
+  version=$(cat "$directory/lobby.js" "$directory/network.js" "$directory/launcher.js" "$directory/storage.js" "$directory/resources.mjs" "$directory/launcher.css" "$directory/pkg/vera20k.js" "$directory/pkg/vera20k_bg.wasm" | git hash-object --stdin)
   sed -e "s@./launcher.css@./launcher.css?v=$version@g" \
       -e "s@./lobby.js@./lobby.js?v=$version@g" \
       -e "s@./network.js@./network.js?v=$version@g" \
@@ -110,6 +112,7 @@ bundle_static() {
   mv "$directory/index.versioned" "$directory/index.html"
   sed -e "s@./pkg/vera20k.js'@./pkg/vera20k.js?v=$version'@g" \
       -e "s@./pkg/vera20k_bg.wasm'@./pkg/vera20k_bg.wasm?v=$version'@g" \
+      -e "s@./resources.mjs'@./resources.mjs?v=$version'@g" \
       "$directory/launcher.js" > "$directory/launcher.versioned"
   mv "$directory/launcher.versioned" "$directory/launcher.js"
 }
@@ -144,7 +147,7 @@ package() {
   mkdir -p "$(dirname "$output")"
   output=$(cd "$(dirname "$output")" && pwd)/$(basename "$output")
   case "$output" in "$DIST/"*) fail 'ZIP must be outside dist/';; esac
-  local files=(index.html launcher.css launcher.js storage.js lobby.js network.js assets/RA2MD.png build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm)
+  local files=(index.html launcher.css launcher.js storage.js resources.mjs lobby.js network.js LICENSE-GPL assets/RA2MD.png build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm)
   for file in pkg/vera20k.d.ts pkg/vera20k_bg.wasm.d.ts; do
     if [[ -f "$DIST/$file" ]]; then files+=("$file"); fi
   done
