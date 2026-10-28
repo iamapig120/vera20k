@@ -1,5 +1,5 @@
-import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game} from './pkg/vera20k.js?v=6b94c917c70b7a895b46c9448d145679e1ea7a27';
-import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs?v=6b94c917c70b7a895b46c9448d145679e1ea7a27';
+import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game} from './pkg/vera20k.js?v=2b301ffc16da4182f41fefe19851366a18c5df8b';
+import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs?v=2b301ffc16da4182f41fefe19851366a18c5df8b';
 const $=id=>document.getElementById(id);
 const status=$('status'), button=$('start'), files=$('files');
 const gatewayInput=$('gateway-address'), gatewayStatus=$('gateway-status');
@@ -238,7 +238,7 @@ async function engineBytes(){
  const arm=()=>{clearTimeout(timer);timer=setTimeout(()=>controller.abort(),30000);};
  arm();
  try{
-  const response=await fetch(new URL('./pkg/vera20k_bg.wasm?v=6b94c917c70b7a895b46c9448d145679e1ea7a27',import.meta.url),{signal:controller.signal});
+  const response=await fetch(new URL('./pkg/vera20k_bg.wasm?v=2b301ffc16da4182f41fefe19851366a18c5df8b',import.meta.url),{signal:controller.signal});
   if(!response.ok)throw Error(`下载引擎失败（HTTP ${response.status}）`);
   const encoding=response.headers.get('Content-Encoding');
   const total=encoding&&encoding!=='identity'?0:Number(response.headers.get('Content-Length'));
