@@ -48,6 +48,8 @@ bash server.sh
 
 ## 本机存储
 
+确认退出游戏后会先完成设置与存档写入并停止音画，再尝试关闭标签页；普通标签页若被浏览器拒绝关闭，会保留已退出提示。保存失败时页面保留重试与导出备份入口。
+
 导入时勾选「缓存资源，下次直接开始」，会尝试将已校验资源缓存到浏览器 IndexedDB。
 下次访问同一网址会自动恢复，点击「开始游戏」即可进入，无需重复选择目录。
 首次缓存需要足够的浏览器存储空间；缓存失败会提示，本次仍可运行。
@@ -69,7 +71,7 @@ bash server.sh
 
 ## 从源码构建
 
-启动器 UI 继续基于 `libi/vera20k-web` 的 `5afb0d2166f3d6d2bb95e265982838feba116f3f`；引擎直接更新到官方 `YuriPlanet/vera20k` 主线 `ab588ea949d3a082b3e7421f1b87eec9b02846c0`。本地兼容补丁仅保留设置/存档持久化、旧资料恢复、背景尺寸选择和发布路径清理；不包含另行验收的 F11 功能。源码按 [GPLv3](LICENSE-GPL) 提供，发布包不包含游戏资源。
+启动器 UI 继续基于 `libi/vera20k-web` 的 `5afb0d2166f3d6d2bb95e265982838feba116f3f`；引擎直接更新到官方 `YuriPlanet/vera20k` 主线 `6d8a81b6a06443056fb79ea3164b71c068a17aab`。本地兼容补丁仅保留设置/存档持久化、旧资料恢复、背景尺寸选择和发布路径清理；不包含另行验收的 F11 功能。源码按 [GPLv3](LICENSE-GPL) 提供，发布包不包含游戏资源。
 
 Windows 可使用已有工具执行 `./tools/build-windows.ps1 -Python <python.exe绝对路径>`。临时目录位于项目 `.build` 内，Cargo 并发为 2；可用 `CARGO_HOME`、`RUSTUP_HOME`、`CARGO_TARGET_DIR` 指定缓存位置。
 
@@ -226,4 +228,6 @@ node tests/audio.mjs
 
 ### Upstream movie subtitles (#3210)
 
-The engine keeps the validated `ab588ea949d3a082b3e7421f1b87eec9b02846c0` base and backports [YuriPlanet/vera20k PR #3210](https://github.com/YuriPlanet/vera20k/pull/3210), commit `5c03777ca391ff2d4fb66a66689e3cc558ef7020` (upstream merge `5e6f7621f36d8b8c4107713463b24708ebf6ae3b`). Fullscreen BIK movies read the player's local `subtitlemd.txt`; no game subtitle text or movie assets are bundled. Radar clips retain the upstream limitation of no subtitle overlay. Existing audio, resource import and persistence adapters remain in place.
+The engine now follows official main `6d8a81b6a06443056fb79ea3164b71c068a17aab`, including fullscreen subtitles (#3210), saved browser exit (#3290), scaled WOL prompts (#3291), and tooltip text/frame metrics (#3306). Already merged fixes are no longer carried as duplicate compatibility patches. Local compatibility retains durable settings/deletions, the fork's YR-style default and fitted shell backgrounds; the launcher retains directory/ZIP/HTTPS import, atomic resource caching, backups and viewport sizing. The separate radar-subtitle and startup-Logo branches are not included. No retail files or translation content are distributed.
+
+This update's automated validation and a resource-free browser smoke test are recorded locally. Real game startup, Chinese playback, game exit and refresh/load were not repeated for this update because the previous test-directory selection was cancelled; previous-version tests do not establish this build's game behavior.

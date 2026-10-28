@@ -3,6 +3,49 @@ const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const fs=require('node:fs');
 const source=name=>fs.readFileSync(`${__dirname}/../templates/${name}`,'utf8');
+async function exitFixture(storage){
+ const resources=await import('../templates/resources.mjs'),elements=new Map();
+ let closeCalls=0;
+ const canvas={hidden:false};
+ const element=id=>{
+  if(!elements.has(id))elements.set(id,{value:'',textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},querySelector(){return canvas;},setAttribute(){},addEventListener(){}});
+  return elements.get(id);
+ };
+ const context=vm.createContext({...resources,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
+  navigator:{gpu:{}},window:{addEventListener(){},close(){closeCalls++;}},document:{createElement(){return {};},getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
+  fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},set_persistence_callbacks(){},
+  VeraStorage:{open:async()=>{},library:async()=>null,users:async()=>[],...storage},import_file(){},prepare_audio(){},restore_user_file(){},start_game(){}
+ });
+ vm.runInContext(source('launcher.js').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js')),context);
+ await new Promise(setImmediate);
+ return {context,element,canvas,get closeCalls(){return closeCalls;}};
+}
+test('exit waits for outstanding writes and deletions before one close attempt',async()=>{
+ let finishWrite;const removed=[];
+ const fixture=await exitFixture({write:()=>new Promise(resolve=>finishWrite=resolve),remove:async path=>removed.push(path)});
+ fixture.context.vera20kPersistWrite('/saves/profile/VERA.INI',new Uint8Array([1]),1);
+ fixture.context.vera20kPersistRemove('/saves/obsolete.sav');
+ const exit=vm.runInContext('finishExit()',fixture.context);
+ assert.equal(fixture.canvas.hidden,true);assert.equal(fixture.closeCalls,0);
+ finishWrite();await exit;
+ assert.deepEqual(removed,['/saves/obsolete.sav']);assert.equal(fixture.closeCalls,1);
+ await vm.runInContext('finishExit()',fixture.context);assert.equal(fixture.closeCalls,1);
+});
+test('failed exit saves retain pending data and never close the page',async()=>{
+ const fixture=await exitFixture({write:async()=>{throw Error('transaction aborted');}});
+ fixture.context.vera20kPersistWrite('/saves/profile/VERA.INI',new Uint8Array([7]),1);
+ await vm.runInContext('finishExit()',fixture.context);
+ assert.equal(fixture.closeCalls,0);assert.match(fixture.element('feedback').textContent,/尚未保存/);
+ assert.equal(vm.runInContext('pending.size',fixture.context),1);
+ assert.equal(fixture.element('retry-storage').hidden,false);
+});
+test('a normal tab refusing close keeps the saved exit message and cannot restart',async()=>{
+ const fixture=await exitFixture({});
+ await vm.runInContext('finishExit()',fixture.context);
+ assert.equal(fixture.closeCalls,1);assert.match(fixture.element('feedback').textContent,/请手动关闭此标签页/);
+ assert.equal(fixture.element('start').disabled,true);
+ assert.equal(fixture.element('choose-folder').disabled,true);
+});
 test('blocked database rejects and closes a late connection',async()=>{
  const req={};let closed=false;
  const context=vm.createContext({indexedDB:{open:()=>req},setTimeout,clearTimeout,Uint8Array,Date});
