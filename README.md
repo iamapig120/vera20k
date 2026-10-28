@@ -71,7 +71,7 @@ bash server.sh
 
 ## 从源码构建
 
-启动器 UI 继续基于 `libi/vera20k-web` 的 `5afb0d2166f3d6d2bb95e265982838feba116f3f`；引擎直接更新到官方 `YuriPlanet/vera20k` 主线 `6d8a81b6a06443056fb79ea3164b71c068a17aab`。本地兼容补丁仅保留设置/存档持久化、旧资料恢复、背景尺寸选择和发布路径清理；不包含另行验收的 F11 功能。源码按 [GPLv3](LICENSE-GPL) 提供，发布包不包含游戏资源。
+启动器 UI 继续基于 `libi/vera20k-web` 的 `5afb0d2166f3d6d2bb95e265982838feba116f3f`；引擎直接更新到官方 `YuriPlanet/vera20k` 主线 `97ed7516cfd1da95d3822283200f04645b34b3a4`。本地兼容补丁仅保留设置/存档持久化、旧资料恢复、背景尺寸选择和发布路径清理；不包含另行验收的 F11 功能。源码按 [GPLv3](LICENSE-GPL) 提供，发布包不包含游戏资源。
 
 Windows 可使用已有工具执行 `./tools/build-windows.ps1 -Python <python.exe绝对路径>`。临时目录位于项目 `.build` 内，Cargo 并发为 2；可用 `CARGO_HOME`、`RUSTUP_HOME`、`CARGO_TARGET_DIR` 指定缓存位置。
 
@@ -228,6 +228,6 @@ node tests/audio.mjs
 
 ### Upstream movie subtitles (#3210)
 
-The engine now follows official main `6d8a81b6a06443056fb79ea3164b71c068a17aab`, including fullscreen subtitles (#3210), saved browser exit (#3290), scaled WOL prompts (#3291), and tooltip text/frame metrics (#3306). Already merged fixes are no longer carried as duplicate compatibility patches. Local compatibility retains durable settings/deletions, the fork's YR-style default and fitted shell backgrounds; the launcher retains directory/ZIP/HTTPS import, atomic resource caching, backups and viewport sizing. The separate radar-subtitle and startup-Logo branches are not included. No retail files or translation content are distributed.
+The engine now follows official main `97ed7516cfd1da95d3822283200f04645b34b3a4`, including fullscreen subtitles (#3210), saved browser exit (#3290), scaled WOL prompts (#3291), and tooltip text/frame metrics (#3306). Already merged fixes are no longer carried as duplicate compatibility patches. Local compatibility retains durable settings/deletions, the fork's YR-style default and fitted shell backgrounds; the launcher retains directory/ZIP/HTTPS import, atomic resource caching, backups and viewport sizing. Radar movie cues additionally follow the retail tactical HUD MessageList callback; the unvalidated startup-Logo branch is not included. No retail files or translation content are distributed.
 
-This update's automated validation and a resource-free browser smoke test are recorded locally. Real game startup, Chinese playback, game exit and refresh/load were not repeated for this update because the previous test-directory selection was cancelled; previous-version tests do not establish this build's game behavior.
+This build passed 39 launcher/import tests, six startup compatibility checks and 24 subtitle logic checks. In an isolated muted browser using local Chinese resources, the first Allied mission displayed its loading art/progress, fullscreen opening subtitles, radar movie and tactical HUD subtitle. The mission was restarted and completed its initial communication again without stale text. A separate timed pause/resume observation was interrupted and remains unverified; full campaign completion, remote multiplayer and native-pixel equivalence are not claimed. No existing player page or saved data was changed.
