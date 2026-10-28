@@ -23,13 +23,13 @@ test('database timeout rejects and permits retry',async()=>{
 test('manual folder wins over late cache restoration and storage does not gate engine',async()=>{
  const resources=await import('../templates/resources.mjs');
  let restore;const elements=new Map();
- const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},setAttribute(){},addEventListener(){}});return elements.get(id);};
+ const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},setAttribute(){},addEventListener(){}});return elements.get(id);};
  const context=vm.createContext({...resources,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,
  setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},
- navigator:{gpu:{}},window:{addEventListener(){}},document:{getElementById:element,body:{classList:element('body').classList},addEventListener(){}},
+ navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,body:{classList:element('body').classList},addEventListener(){}},
  MutationObserver:class{observe(){}},
  fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),
- AbortController,init:async()=>{},VeraStorage:{open:async()=>{},library:()=>new Promise(resolve=>restore=resolve)},
+ AbortController,init:async()=>{},set_persistence_callbacks(){},VeraStorage:{open:async()=>{},library:()=>new Promise(resolve=>restore=resolve)},
  import_file(){},prepare_audio(){},restore_user_file(){},start_game(){}
  });
  vm.runInContext(source('launcher.js').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js')),context);
@@ -44,11 +44,11 @@ test('manual folder wins over late cache restoration and storage does not gate e
 test('startup waits for saved preferences even when storage opens after the engine',async()=>{
  const resources=await import('../templates/resources.mjs');
  let openStorage;const calls=[],elements=new Map();
- const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},setAttribute(){},addEventListener(){}});return elements.get(id);};
+ const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},setAttribute(){},addEventListener(){}});return elements.get(id);};
  const opening=new Promise(resolve=>openStorage=resolve);
  const context=vm.createContext({...resources,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
- navigator:{gpu:{}},window:{addEventListener(){}},document:{getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
- fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},
+ navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
+ fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},set_persistence_callbacks(){},
  VeraStorage:{open:()=>opening,library:async()=>null,users:async()=>[{path:'/retail/RA2MD.INI',bytes:new Uint8Array([89]),modified_ms:1}],saveLibrary:async()=>{}},
  prepare_audio(){},import_file(name){calls.push(name);},restore_user_file(path){calls.push(path);},start_game(){calls.push('start');}
  });
@@ -67,15 +67,15 @@ test('optional gateway restores and validates origins without probing or gating 
  const elements=new Map(),writes=[],requests=[];
  let startCalls=0;
  const element=id=>{
-  if(!elements.has(id))elements.set(id,{value:'',textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},setAttribute(){},addEventListener(){}});
+  if(!elements.has(id))elements.set(id,{value:'',textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},setAttribute(){},addEventListener(){}});
   return elements.get(id);
  };
  const context=vm.createContext({...resources,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,
  setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
  localStorage:{getItem:()=> 'wss://gateway.example:8443/',setItem(key,value){writes.push([key,value]);}},
- navigator:{gpu:{}},window:{addEventListener(){}},document:{getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
+ navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
  fetch:async url=>{requests.push(String(url));return {ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}};},
- init:async()=>{},VeraStorage:{open:async()=>{},library:async()=>null,users:async()=>[],saveLibrary:async()=>{}},
+ init:async()=>{},set_persistence_callbacks(){},VeraStorage:{open:async()=>{},library:async()=>null,users:async()=>[],saveLibrary:async()=>{}},
  import_file(){},prepare_audio(){},restore_user_file(){},start_game(){startCalls++;}
  });
  vm.runInContext(source('launcher.js').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js')),context);

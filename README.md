@@ -25,9 +25,7 @@ EA has not endorsed and does not support this product.
 
 资源地址由使用者填写，不内置资源或代理。远程服务必须允许 CORS，失败可改用本地导入。公开入口仅接受 HTTPS；HTTP 仅在页面与资源均为 loopback 时供开发使用。下载支持进度、取消、重试；失败保留旧缓存。原子缓存提交阶段不可取消。
 
-当前支持单机运行，互联网联机通过可选的 WebSocket 网关接入；随机地图及同步截图尚未适配。
-联机需要通过下述服务器入口访问；固定 relay 网关不提供局域网 UDP 广播发现。
-上游记录了网关和双页面联机验证；本次部署未启动网关，也未复测联机。完整战局、重赛及公网延迟不属于本次验证范围。
+本次构建仅启用 `wasm` 单机功能，不连接联网网关。启动器保留上游界面及已填写的网关地址，供后续启用联网的构建使用；本次不部署网关，也不改变已有网关配置。
 音效、单位语音和背景音乐使用导入的游戏音频资源；请允许浏览器播放声音。
 资源会加载到浏览器内存中，所需内存取决于导入的资源量。
 
@@ -56,6 +54,7 @@ bash server.sh
 「更换文件夹」可更新资源缓存，设置和存档保留。
 
 游戏产生的设置、快捷键和存档与资源缓存分开保存，写入后自动持久化。
+官方主线将设置迁到 `/saves/profile/`；恢复时会复制旧 `/retail/` 下已知的设置文件，新路径的记录（包括删除标记）优先。旧记录和旧数据库保留，不会清除其他根目录资源或 MOD 覆盖。
 旧站与原上游版本的数据会复制到独立的用户数据与资源库；旧库保留，已有新记录不被迁移覆盖。更换资源、清缓存及迁移失败均不删除旧设置或存档。
 首页提供保存状态与重试入口；游戏运行时自动保存，不显示额外网页控件。
 首页可「导出备份」下载用户数据，也可「导入备份」，同名文件会覆盖，其他文件保留。
@@ -68,11 +67,11 @@ bash server.sh
 
 ## 从源码构建
 
-本次基于 `libi/vera20k-web` 的 `5afb0d2166f3d6d2bb95e265982838feba116f3f`，保留上游 UI 与引导；引擎固定为 `YuriPlanet/vera20k` 的 `4f925c266afabb6d28a4de6971f5e2af0bd67625`，应用本仓库补丁和 overlays。源码按 [GPLv3](LICENSE-GPL) 提供，发布包不含游戏资源。
+启动器 UI 继续基于 `libi/vera20k-web` 的 `5afb0d2166f3d6d2bb95e265982838feba116f3f`；引擎直接更新到官方 `YuriPlanet/vera20k` 主线 `ab588ea949d3a082b3e7421f1b87eec9b02846c0`。本地兼容补丁仅保留设置/存档持久化、旧资料恢复、背景尺寸选择和发布路径清理；不包含另行验收的 F11 功能。源码按 [GPLv3](LICENSE-GPL) 提供，发布包不包含游戏资源。
 
 Windows 可使用已有工具执行 `./tools/build-windows.ps1 -Python <python.exe绝对路径>`。临时目录位于项目 `.build` 内，Cargo 并发为 2；可用 `CARGO_HOME`、`RUSTUP_HOME`、`CARGO_TARGET_DIR` 指定缓存位置。
 
-构建会校验 `Cargo.lock` 指定的 CPAL 0.17.3 原始包，复制到 `.build/cpal-clock-*` 后只修正 WebAudio 过期排程游标；不修改 Cargo 原始缓存，也不升级依赖版本。首次缺少源码包时通过 `cargo fetch --locked` 获取固定依赖。这个调整防止主线程卡顿后集中追赶旧缓冲，不能消除浏览器阻塞造成的音频缺口；测试未包含主观试听。
+音频使用主线上游 `c9d6fe2d29f6da244590f60edd61645d3f44b67b`（#3184）的 Web 混音器：音乐和音效共享 AudioContext，预排六个 512 帧缓冲。旧版本的本地 CPAL 时钟补丁已停用。音频生成仍依赖主线程，超过队列时长的卡顿仍可能产生空隙；没有 Worker 或 AudioWorklet 线程解耦。依赖通过 `--locked` 固定，不另外升级依赖版本。
 
 编译使用通用源码路径前缀，避免把本机工程、Cargo 和工具链目录写入发布产物。Web 构建的原生控制语料诊断入口直接报告不支持，避免嵌入开发机的 `CARGO_MANIFEST_DIR`；游戏仍从导入资源中读取数据。
 
@@ -138,7 +137,6 @@ bash web.sh package --output ra2yr-web.zip
 ```text
 vera20k/                 VERA20k 引擎子模块，固定到已适配的提交
 patches/web-compat.patch 引擎已有文件的 Web 兼容补丁
-overlays/                Web 平台新增源码
 templates/               启动页面、样式、交互和 IndexedDB 存储脚本
 assets/                  网页图标等资源
 web.config               上游地址、补丁适配基准和覆盖文件清单
@@ -210,7 +208,7 @@ node tests/audio.mjs
 ```
 
 它检查音频初始化、完整资源保留、缓存恢复以及用户数据在引擎启动前的恢复顺序。
-`python3 tests/cpal-clock.py <生成的CPAL src/host/webaudio/mod.rs路径>` 直接提取实际排程分支，检查首次预填、过期游标、双缓冲连续性和正常节奏；第二个可选参数为原版源码，用于证明两项回归在修复前失败。
+执行 `node --test tests/resources.test.mjs tests/launcher.test.cjs` 检查导入和失败恢复；`node tests/audio.mjs` 检查音频初始化、主线启动 API、持久化回调及旧资料恢复。实际浏览器音频排程、BIK 和读档仍须另做运行验证，单元测试不替代这些验证。
 `tests/storage.html` 在浏览器中直接运行真实 IndexedDB 回归；通过静态服务打开本项目目录后访问该页面。
 它使用独立临时数据库，检查关闭重开、资源 Blob、删除记录和失败事务回滚。
 

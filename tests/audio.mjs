@@ -5,13 +5,13 @@ import * as resourceApi from '../templates/resources.mjs';
 import assert from 'node:assert/strict';
 const source=readFileSync(new URL('../templates/launcher.js',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js'));
 function launcher(audioError=false,library=null,users=[],initPromise=null){
- const elements=new Map(), calls=[],writes=[],downloads=[];
+ const elements=new Map(), calls=[],writes=[],downloads=[],restored=[],bridge={},starts=[];
  const element=id=>{
-  if(!elements.has(id))elements.set(id,{disabled:false,hidden:false,textContent:'',style:{},classList:{add(){},remove(){},toggle(){},contains(){return false;}},setAttribute(){},addEventListener(){}});
+  if(!elements.has(id))elements.set(id,{disabled:false,hidden:false,textContent:'',style:{},classList:{add(){},remove(){},toggle(){},contains(){return false;}},append(){},setAttribute(){},addEventListener(){}});
   return elements.get(id);
  };
- const context={...resourceApi,File,Blob,URL:class extends URL{static createObjectURL(blob){downloads.push(blob);return 'blob:fixture';}static revokeObjectURL(){}},window:{addEventListener(){}},VeraStorage:{open:async()=>{},library:async()=>library,users:async()=>users,write:async row=>{writes.push(row);users.push(row);},remove:async()=>{},saveLibrary:async()=>{}},restore_user_file(path){calls.push(`restore:${path}`);},document:{createElement(){return {click(){}};},getElementById:element,addEventListener(){},body:element('body')},navigator:{gpu:{}},MutationObserver:class{observe(){}},init:async()=>{await initPromise;},prepare_audio(){calls.push('audio');if(audioError)throw Error('blocked');},import_file(name){calls.push(name);},start_game(){calls.push('start');},setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),location:{reload(){}}};
- return {context,elements,calls,writes,downloads,run:async()=>{const api=await runInNewContext(`(async()=>{${source}\nreturn {selectResources};})()`,context);await initPromise;await new Promise(setImmediate);return api;}};
+ const context={...resourceApi,File,Blob,URL:class extends URL{static createObjectURL(blob){downloads.push(blob);return 'blob:fixture';}static revokeObjectURL(){}},window:{addEventListener(){}},VeraStorage:{open:async()=>{},library:async()=>library,users:async()=>users,write:async row=>{writes.push(row);users.push(row);},remove:async()=>{},saveLibrary:async()=>{}},restore_user_file(path,bytes,modified_ms,deleted){restored.push({path,bytes,modified_ms,deleted});calls.push(`restore:${path}`);},document:{createElement(){return {click(){}};},getElementById:element,addEventListener(){},body:element('body')},navigator:{gpu:{}},MutationObserver:class{observe(){}},init:async()=>{await initPromise;},set_persistence_callbacks(write,remove){bridge.write=write;bridge.remove=remove;},prepare_audio(){calls.push('audio');if(audioError)throw Error('blocked');},import_file(name){calls.push(name);},start_game(canvas,status){starts.push({canvas,status});calls.push('start');},setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),location:{reload(){}}};
+ return {context,elements,calls,writes,downloads,restored,bridge,starts,run:async()=>{const api=await runInNewContext(`(async()=>{${source}\nreturn {selectResources,restoredUserRows};})()`,context);await initPromise;await new Promise(setImmediate);return api;}};
 }
 const resources=['ra2.mix','ra2md.mix','mapsmd03.mix','theme.mix','thememd.mix','audio.bag','audio.idx','voice.wav','sound.aud','movies01.mix','movmd03.mix','intro.bik','gamemd.exe','mod.custom','nested/override.bin'].map(name=>new File([new Uint8Array([0])],name));
 {
@@ -66,3 +66,29 @@ console.log('PASS: settings queue copies Wasm memory; user backup contains persi
  assert.equal(fixture.elements.get('start-label').textContent,'开始游戏');
 }
 console.log('PASS: selecting a folder during engine loading shows why start is disabled and enables it after readiness');
+
+{
+ const f=launcher();const api=await f.run();api.selectResources(resources,'retail');
+ await f.elements.get('start').onclick();
+ assert.equal(f.bridge.write,f.context.vera20kPersistWrite);
+ assert.equal(f.bridge.remove,f.context.vera20kPersistRemove);
+ assert.equal(f.starts[0].canvas.tabIndex,0);
+ assert.equal(typeof f.starts[0].status,'function');
+}
+console.log('PASS: official main receives a canvas/status callback and the durable bridge');
+{
+ const f=launcher();const api=await f.run();
+ const rows=[{path:'/retail/VERA.INI',bytes:new Uint8Array([1]),modified_ms:1},
+  {path:'/retail/VERARULES.INI',bytes:new Uint8Array(),modified_ms:2,deleted:true},
+  {path:'/saves/profile/vera.ini',bytes:new Uint8Array(),modified_ms:3,deleted:true},
+  {path:'/retail/mod.ini',bytes:new Uint8Array([2]),modified_ms:4}];
+ const restored=api.restoredUserRows(rows);
+ assert.equal(restored.length,5);
+ assert.equal(restored[0].path,'/saves/profile/VERARULES.INI');
+ assert.equal(restored[0].deleted,true);
+ assert.ok(!restored.some(row=>row.path==='/saves/profile/VERA.INI'));
+ assert.ok(!restored.some(row=>row.path==='/saves/profile/mod.ini'));
+ assert.equal(restored.at(-1),rows.at(-1));
+ assert.equal(rows.length,4);
+}
+console.log('PASS: legacy profile copy preserves deletions, current precedence and arbitrary root resources');

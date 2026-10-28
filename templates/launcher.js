@@ -1,4 +1,4 @@
-import init, {import_file, prepare_audio, restore_user_file, start_game} from './pkg/vera20k.js';
+import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game} from './pkg/vera20k.js';
 import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs';
 const $=id=>document.getElementById(id);
 const status=$('status'), button=$('start'), files=$('files');
@@ -18,7 +18,7 @@ function gatewayBase(){
 function updateGateway(persist=false){
  try{
   const base=gatewayBase();
-  gatewayStatus.textContent=base?`配置使用 ${base}（不影响单机）`:'本站未部署联机网关；单机不受影响。可另行配置已有网关。';
+  gatewayStatus.textContent=base?`本构建仅支持单机；已保留网关地址 ${base}，不会连接。`:'本构建仅支持单机；网关地址可保留供后续联网构建使用。';
   if(persist)try{globalThis.localStorage?.setItem(gatewayKey,base);}catch{}
  }catch(error){gatewayStatus.textContent=error.message;}
 }
@@ -109,11 +109,25 @@ function enterGame(){
  busy=false;document.body.classList.add('playing');
  const canvas=$('game').querySelector('canvas');if(canvas)canvas.focus({preventScroll:true});
 }
-new MutationObserver(()=>{
- const message=status.textContent||'';
- if(message.startsWith('已启动'))enterGame();
- else if(/^(启动失败|资源加载失败|运行错误)/.test(message))fail('游戏未能正常启动，请检查游戏资源后重试。',message);
-}).observe(status,{childList:true,characterData:true,subtree:true});
+function engineStatus(message){
+ status.textContent=message;
+ if(message==='Ready')enterGame();
+ else if(message==='Starting engine')feedback('正在启动引擎…');
+ else fail('游戏未能正常启动，请查看详细信息。',message);
+}
+// Keep every stored row. Copy only legacy player-profile names to the new
+// upstream profile directory; explicit new records (including deletions) win.
+function restoredUserRows(rows){
+ const current=new Set(rows.map(row=>row.path.toLowerCase()));
+ const profiles=new Map(['VERA.INI','VERARULES.INI','RA2MD.INI','KeyboardMD.ini','wolinfoMD.ini','coopsave.ini']
+  .map(name=>[name.toLowerCase(),'/saves/profile/'+name]));
+ const copies=rows.flatMap(row=>{
+  const match=/^\/retail\/([^/]+)$/i.exec(row.path);
+  const path=match&&profiles.get(match[1].toLowerCase());
+  return path&&!current.has(path.toLowerCase())?[{...row,path}]:[];
+ });
+ return [...copies,...rows];
+}
 window.addEventListener('error',event=>{if(busy||document.body.classList.contains('playing'))fail('游戏运行出错，请查看错误详情。',event.message||String(event.error));});
 window.addEventListener('unhandledrejection',event=>{if(busy||document.body.classList.contains('playing'))fail('游戏运行出错，请查看错误详情。',String(event.reason));});
 $('retry').onclick=()=>{if(!ready){failed=false;$('retry').hidden=true;$('error-details').hidden=true;void prepareEngine();}else location.reload();};
@@ -210,9 +224,11 @@ button.onclick=async()=>{
   // start from retail defaults while the durable settings database is opening.
   progress(95,'正在恢复设置与存档…');
   await store.open();storageAvailable=true;
-  for(const row of await store.users())restore_user_file(row.path,row.bytes,row.modified_ms,!!row.deleted);
+  for(const row of restoredUserRows(await store.users()))restore_user_file(row.path,row.bytes,row.modified_ms,!!row.deleted);
   $('import-data').disabled=true;
-  start_game();
+  const canvas=document.createElement('canvas');canvas.tabIndex=0;
+  $('game').append(canvas);
+  start_game(canvas,engineStatus);
  }catch(error){fail('读取或启动失败，请重新加载后再试。',String(error));}
 };
 
@@ -249,6 +265,7 @@ async function prepareEngine(){
   const bytes=await engineBytes();
   compiling=true;feedback('正在准备游戏引擎…');$('progress-area').hidden=true;
   await init({module_or_path:bytes});
+  set_persistence_callbacks(globalThis.vera20kPersistWrite,globalThis.vera20kPersistRemove);
   ready=true;failed=false;
   $('environment').className='environment ready';$('environment-label').textContent='浏览器已就绪';
   if(!selecting)feedback(selected.length?'资源已就绪，点击「开始游戏」。':'请选择游戏目录；如果正在恢复缓存，也可以稍候。');
