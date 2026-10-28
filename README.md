@@ -222,3 +222,7 @@ node tests/audio.mjs
 玩家需自行准备有权使用的《红色警戒 2：尤里的复仇》游戏资源。
 
 启动流程回归：`node --test tests/launcher.test.cjs`，覆盖存储阻塞、超时重试与手动资源选择优先。下载连续 30 秒无响应会报错；本机存储等待上限为 20 秒。资源缓存失败不阻止游戏启动，清除资源缓存保留设置与存档。
+
+### Upstream movie subtitles (#3210)
+
+The engine keeps the validated `ab588ea949d3a082b3e7421f1b87eec9b02846c0` base and backports [YuriPlanet/vera20k PR #3210](https://github.com/YuriPlanet/vera20k/pull/3210), commit `5c03777ca391ff2d4fb66a66689e3cc558ef7020` (upstream merge `5e6f7621f36d8b8c4107713463b24708ebf6ae3b`). Fullscreen BIK movies read the player's local `subtitlemd.txt`; no game subtitle text or movie assets are bundled. Radar clips retain the upstream limitation of no subtitle overlay. Existing audio, resource import and persistence adapters remain in place.
