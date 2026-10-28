@@ -730,9 +730,29 @@ index 0000000..d187f5f
 +    }
 +}
 diff --git a/src/app/persistence/options_profile.rs b/src/app/persistence/options_profile.rs
-index 305d38f..9807a7e 100644
+index 305d38f..b01236e 100644
 --- a/src/app/persistence/options_profile.rs
 +++ b/src/app/persistence/options_profile.rs
+@@ -124,8 +124,8 @@ pub(crate) struct RetailOptionsProfile {
+     /// The Options page's battle sidebar size.
+     pub(crate) sidebar: crate::ui::main_menu_dialogs::options::SidebarSize,
+     /// `[VERA] YROriginalStyle=`: whether the startup splash and the menu
+-    /// movie use Yuri's Revenge's art. Off by default, so new profiles show
+-    /// Red Alert 2's. Only those two read it; see
++    /// movie use Yuri's Revenge's art. This fork defaults to YR; an explicit
++    /// saved choice still wins. Only those two read it; see
+     /// [`LauncherCheckboxId::YrOriginalStyle`](crate::ui::main_menu_dialogs::options::LauncherCheckboxId::YrOriginalStyle).
+     pub(crate) yr_original_style: bool,
+     /// `[VERA] RenderInterpolation=`: client-only motion smoothing. Off by
+@@ -219,7 +219,7 @@ impl Default for RetailOptionsProfile {
+             zoom: crate::ui::main_menu_dialogs::options::Zoom::Auto,
+             original_shape: false,
+             sidebar: crate::ui::main_menu_dialogs::options::SidebarSize::Normal,
+-            yr_original_style: false,
++            yr_original_style: true,
+             render_interpolation: false,
+             mouse_wheel_zoom: false,
+             shift_queue: false,
 @@ -745,35 +745,6 @@ fn flip_net_id_units(units: &[u16]) -> Vec<u16> {
          .collect()
  }
@@ -781,6 +801,67 @@ index 305d38f..9807a7e 100644
          }
      }
      let clamp = |value: i32| if (-1..8).contains(&value) { value } else { -1 };
+@@ -1349,7 +1320,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+         assert_eq!(defaults.retained_profile.zoom, Zoom::Auto);
+         assert!(!defaults.retained_profile.original_shape);
+         assert_eq!(defaults.retained_profile.sidebar, SidebarSize::Normal);
+-        assert!(!defaults.retained_profile.yr_original_style);
++        assert!(defaults.retained_profile.yr_original_style);
+         // Shift + left click queues one copy, as in gamemd, until it is ticked.
+         assert!(!defaults.retained_profile.shift_queue);
+         // Internet shows TXT_APIMISSING, as on retail, until it is ticked.
+@@ -1370,7 +1341,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+         assert_eq!(load.retained_profile.zoom, Zoom::Percent(200));
+         assert!(load.retained_profile.original_shape);
+         assert_eq!(load.retained_profile.sidebar, SidebarSize::Large);
+-        assert!(!load.retained_profile.yr_original_style);
++        assert!(load.retained_profile.yr_original_style);
+         assert!(load.retained_profile.shift_queue);
+         assert!(load.retained_profile.wol_test_service);
+         assert!(load.retained_profile.solo_skirmish);
+@@ -1560,12 +1531,13 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+     }
+ 
+     #[test]
+-    fn yr_original_style_defaults_to_ra2_and_reads_only_its_own_key() {
+-        let defaults = load_snapshot(&RetailStartupOptions::default(), b"[VERA]\n");
+-        assert!(
+-            !defaults.retained_profile.yr_original_style,
+-            "unchecked YR Loading & Menu Movie selects the default RA2 look"
+-        );
++    fn yr_original_style_defaults_to_yr_and_reads_only_its_own_key() {
++        let startup = RetailStartupOptions::default();
++        assert!(RetailOptionsLoad::without_settings(&startup).retained_profile.yr_original_style);
++        assert!(crate::ui::main_menu_dialogs::options::LauncherOptionsValues::default().yr_original_style);
++        for ini in ["", "[Video]\nScreenWidth=800\n", "[VERA]\n"] {
++            assert!(load_snapshot(&startup, ini.as_bytes()).retained_profile.yr_original_style);
++        }
+ 
+         for value in ["yes", "no"] {
+             let ignored = load_snapshot(
+@@ -1573,18 +1545,18 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+                 format!("[VERA]\nRA2Look={value}\n").as_bytes(),
+             );
+             assert!(
+-                !ignored.retained_profile.yr_original_style,
++                ignored.retained_profile.yr_original_style,
+                 "RA2Look={value} must not affect the default"
+             );
+         }
+ 
+         let explicit_new_key = load_snapshot(
+             &RetailStartupOptions::default(),
+-            b"[VERA]\nYROriginalStyle=yes\n",
++            b"[VERA]\nYROriginalStyle=no\n",
+         );
+         assert!(
+-            explicit_new_key.retained_profile.yr_original_style,
+-            "the YR-original preference must be read from its own key"
++            !explicit_new_key.retained_profile.yr_original_style,
++            "an explicit saved opt-out must override this fork's default"
+         );
+     }
+ 
 diff --git a/src/app/radar_movie.rs b/src/app/radar_movie.rs
 index f400d12..4ca70e3 100644
 --- a/src/app/radar_movie.rs
@@ -828,6 +909,19 @@ index 75dbcc2..8fb7d2c 100644
              return_to,
          );
          state.frontend.fullscreen_movie = Some(movie);
+diff --git a/src/ui/main_menu_dialogs/options.rs b/src/ui/main_menu_dialogs/options.rs
+index 8fc9282..2680b37 100644
+--- a/src/ui/main_menu_dialogs/options.rs
++++ b/src/ui/main_menu_dialogs/options.rs
+@@ -564,7 +564,7 @@ impl Default for LauncherOptionsValues {
+             show_hidden: false,
+             full_screen: false,
+             original_shape: false,
+-            yr_original_style: false,
++            yr_original_style: true,
+             render_interpolation: false,
+             mouse_wheel_zoom: false,
+             shift_queue: false,
 diff --git a/src/ui/shell/in_game_shell.rs b/src/ui/shell/in_game_shell.rs
 index a8f5cd0..c958955 100644
 --- a/src/ui/shell/in_game_shell.rs
