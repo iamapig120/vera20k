@@ -2,7 +2,7 @@ Upstream: https://github.com/YuriPlanet/vera20k.git
 Revision: ab588ea949d3a082b3e7421f1b87eec9b02846c0
 wasm-bindgen: 0.2.114
 Web UI upstream: libi/vera20k-web 5afb0d2166f3d6d2bb95e265982838feba116f3f
-Web integration: 2c5b23774eed950ad17b4b7cf80d0dbef31a4ad8
+Web integration: a7ae1bf3835198fbd5d25d4564b6dc361eb7cad8
 Audio upstream: c9d6fe2d29f6da244590f60edd61645d3f44b67b
 Features: wasm (single-player)
 WASM SHA256: dce2240e0c640bccac0c5fcfa8229a06bdb7ae3caabc20c6623c0f2d58575c3d
