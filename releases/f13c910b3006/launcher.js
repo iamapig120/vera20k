@@ -1,5 +1,5 @@
-import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game} from './pkg/vera20k.js?v=2b301ffc16da4182f41fefe19851366a18c5df8b';
-import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs?v=2b301ffc16da4182f41fefe19851366a18c5df8b';
+import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game} from './pkg/vera20k.js?v=61a6cfb4857a8d8d92a37839b9bb126f4bb40af9';
+import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs?v=61a6cfb4857a8d8d92a37839b9bb126f4bb40af9';
 const $=id=>document.getElementById(id);
 const status=$('status'), button=$('start'), files=$('files');
 const gatewayInput=$('gateway-address'), gatewayStatus=$('gateway-status');
@@ -29,16 +29,19 @@ updateGateway();
 
 let selectionRevision=0, restoreRevision=0, engineLoading=false;
 let ready=false, busy=false, failed=false, selecting=false, selected=[];
-let importController,lastImport;
+let importController,lastImport,exiting=false;
 const store=globalThis.VeraStorage;
 let storageAvailable=false, cachedSelection=false, saving=false;
 const pending=new Map();
+let saveTask;
 window.addEventListener('beforeunload',event=>{if(pending.size){event.preventDefault();event.returnValue='';}});
 function storageStatus(message,error=false){$('storage-status').textContent=message;$('storage-status').classList.toggle('error',error);if(error)$('storage-panel').open=true;}
 const userPath=path=>typeof path==='string'&&(path==='/config.toml'||/^\/(retail|saves)\/.+/.test(path))&&!path.split('/').some(part=>part==='..'||part==='.');
-async function flushUserData(){
- if(saving||!storageAvailable)return;
+function flushUserData(){
+ if(saving)return saveTask;
+ if(!storageAvailable)return Promise.resolve();
  saving=true;storageStatus('正在保存到本机…');
+ saveTask=(async()=>{
  try{
   while(pending.size){
    const [path,row]=pending.entries().next().value;
@@ -48,6 +51,8 @@ async function flushUserData(){
   $('retry-storage').hidden=true;storageStatus('本机数据已保存');
  }catch(error){storageStatus(`保存失败：${error.message}。请重试或导出备份。`,true);$('retry-storage').hidden=false;}
  finally{saving=false;}
+ })();
+ return saveTask;
 }
 globalThis.vera20kPersistWrite=(path,bytes,modified_ms)=>{
  if(!userPath(path))return;
@@ -84,13 +89,13 @@ const droppedPaths=new WeakMap();
 const relativePath=file=>droppedPaths.get(file) ?? (file.webkitRelativePath ? file.webkitRelativePath.split('/').slice(1).join('/') : file.name);
 const sizeLabel=bytes=>bytes>=1024**3 ? `${(bytes/1024**3).toFixed(1)} GB` : `${Math.max(1,Math.round(bytes/1024**2))} MB`;
 function syncButton(){
- button.disabled=!ready||busy||failed||selecting||!selected.length;
+ button.disabled=exiting||!ready||busy||failed||selecting||!selected.length;
  $('start-label').textContent=busy?'正在进入战场…':!ready?'正在准备游戏…':'开始游戏';
- $('choose-folder').disabled=busy||failed||selecting;
- $('change-folder').disabled=busy||failed||selecting;
- for(const id of ['choose-zip','zip-url','download-zip','cache-resources','clear-cache','retry-cache'])$(id).disabled=busy||failed||selecting||document.body.classList.contains('playing');
+ $('choose-folder').disabled=exiting||busy||failed||selecting;
+ $('change-folder').disabled=exiting||busy||failed||selecting;
+ for(const id of ['choose-zip','zip-url','download-zip','cache-resources','clear-cache','retry-cache'])$(id).disabled=exiting||busy||failed||selecting||document.body.classList.contains('playing');
  $('retry-import').hidden=!lastImport||busy||failed||selecting;
- $('import-data').disabled=busy||selecting||document.body.classList.contains('playing')||!storageAvailable;
+ $('import-data').disabled=exiting||busy||selecting||document.body.classList.contains('playing')||!storageAvailable;
 }
 function feedback(message,error=false){$('feedback').textContent=message;$('feedback').classList.toggle('error',error);}
 function fail(message,detail=message){
@@ -109,7 +114,20 @@ function enterGame(){
  busy=false;document.body.classList.add('playing');
  const canvas=$('game').querySelector('canvas');if(canvas)canvas.focus({preventScroll:true});
 }
+async function finishExit(){
+ if(exiting)return;
+ exiting=true;busy=false;
+ const canvas=$('game').querySelector('canvas');if(canvas)canvas.hidden=true;
+ document.body.classList.remove('playing');syncButton();
+ feedback('游戏已停止，正在保存本机数据…');
+ await flushUserData();
+ if(pending.size){feedback('游戏已退出，但有数据尚未保存。请重试保存或导出备份后再关闭页面。',true);return;}
+ feedback('游戏已退出，数据已保存。若页面未自动关闭，请手动关闭此标签页。');
+ window.close();
+}
 function engineStatus(message){
+ if(message==='Exited'){void finishExit();return;}
+ if(exiting)return;
  status.textContent=message;
  if(message==='Ready')enterGame();
  else if(message==='Starting engine')feedback('正在启动引擎…');
@@ -238,7 +256,7 @@ async function engineBytes(){
  const arm=()=>{clearTimeout(timer);timer=setTimeout(()=>controller.abort(),30000);};
  arm();
  try{
-  const response=await fetch(new URL('./pkg/vera20k_bg.wasm?v=2b301ffc16da4182f41fefe19851366a18c5df8b',import.meta.url),{signal:controller.signal});
+  const response=await fetch(new URL('./pkg/vera20k_bg.wasm?v=61a6cfb4857a8d8d92a37839b9bb126f4bb40af9',import.meta.url),{signal:controller.signal});
   if(!response.ok)throw Error(`下载引擎失败（HTTP ${response.status}）`);
   const encoding=response.headers.get('Content-Encoding');
   const total=encoding&&encoding!=='identity'?0:Number(response.headers.get('Content-Length'));

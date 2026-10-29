@@ -2,11 +2,16 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const import_file: (a: number, b: number, c: number, d: number) => [number, number];
+export const import_spawn_file: (a: number, b: number, c: number, d: number) => [number, number];
 export const initialize: () => void;
 export const prepare_audio: () => [number, number];
+export const probe: (a: number, b: number) => [number, number, number, number];
 export const restore_user_file: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const set_persistence_callbacks: (a: any, b: any) => void;
+export const spawn_leave: () => [number, number];
+export const spawn_resign: () => [number, number];
 export const start_game: (a: any, b: any) => [number, number];
+export const start_spawn: (a: any, b: any, c: number, d: number) => [number, number];
 export const wasm_bindgen_1497b49e3f902d81___closure__destroy___dyn_core_7d5f0a2ba6a62c33___ops__function__FnMut__core_7d5f0a2ba6a62c33___option__Option_web_sys_a2ab6a6de277ed20___features__gen_Blob__Blob_____Output_______: (a: number, b: number) => void;
 export const wasm_bindgen_1497b49e3f902d81___closure__destroy___dyn_core_7d5f0a2ba6a62c33___ops__function__FnMut__wasm_bindgen_1497b49e3f902d81___JsValue____Output_______: (a: number, b: number) => void;
 export const wasm_bindgen_1497b49e3f902d81___closure__destroy___dyn_core_7d5f0a2ba6a62c33___ops__function__FnMut__wasm_bindgen_1497b49e3f902d81___JsValue____Output___core_7d5f0a2ba6a62c33___result__Result_____wasm_bindgen_1497b49e3f902d81___JsError___: (a: number, b: number) => void;

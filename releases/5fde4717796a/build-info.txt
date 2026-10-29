@@ -1,7 +1,0 @@
-Upstream: https://github.com/YuriPlanet/vera20k.git
-Revision: ab588ea949d3a082b3e7421f1b87eec9b02846c0
-wasm-bindgen: 0.2.114
-Web integration: 5fde4717796a941d9c9ec78f445857bb64e8bfc7
-Movie subtitles upstream PR: #3210 (5c03777ca391ff2d4fb66a66689e3cc558ef7020)
-Features: wasm (single-player)
-WASM SHA256: a6a3e9ebdff98080a9e4e8cd5c6e78cea1dc5cdbb72a6697ad5c07654a4b5619
