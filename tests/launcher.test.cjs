@@ -4,6 +4,7 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const source=name=>fs.readFileSync(`${__dirname}/../templates/${name}`,'utf8');
 async function exitFixture(storage){
+ const {installFullscreen}=await import('../templates/fullscreen.mjs');
  const resources=await import('../templates/resources.mjs'),elements=new Map();
  let closeCalls=0;
  const canvas={hidden:false};
@@ -11,7 +12,7 @@ async function exitFixture(storage){
   if(!elements.has(id))elements.set(id,{value:'',textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},querySelector(){return canvas;},setAttribute(){},addEventListener(){}});
   return elements.get(id);
  };
- const context=vm.createContext({...resources,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
+ const context=vm.createContext({...resources,installFullscreen,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
   navigator:{gpu:{}},window:{addEventListener(){},close(){closeCalls++;}},document:{createElement(){return {};},getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
   fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},set_persistence_callbacks(){},
   VeraStorage:{open:async()=>{},library:async()=>null,users:async()=>[],...storage},import_file(){},prepare_audio(){},restore_user_file(){},start_game(){}
@@ -64,10 +65,11 @@ test('database timeout rejects and permits retry',async()=>{
  assert.equal(requests.length,2);
 });
 test('manual folder wins over late cache restoration and storage does not gate engine',async()=>{
+ const {installFullscreen}=await import('../templates/fullscreen.mjs');
  const resources=await import('../templates/resources.mjs');
  let restore;const elements=new Map();
  const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},setAttribute(){},addEventListener(){}});return elements.get(id);};
- const context=vm.createContext({...resources,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,
+ const context=vm.createContext({...resources,installFullscreen,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,
  setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},
  navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,body:{classList:element('body').classList},addEventListener(){}},
  MutationObserver:class{observe(){}},
@@ -85,11 +87,12 @@ test('manual folder wins over late cache restoration and storage does not gate e
 });
 
 test('startup waits for saved preferences even when storage opens after the engine',async()=>{
+ const {installFullscreen}=await import('../templates/fullscreen.mjs');
  const resources=await import('../templates/resources.mjs');
  let openStorage;const calls=[],elements=new Map();
  const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},setAttribute(){},addEventListener(){}});return elements.get(id);};
  const opening=new Promise(resolve=>openStorage=resolve);
- const context=vm.createContext({...resources,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
+ const context=vm.createContext({...resources,installFullscreen,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
  navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
  fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},set_persistence_callbacks(){},
  VeraStorage:{open:()=>opening,library:async()=>null,users:async()=>[{path:'/retail/RA2MD.INI',bytes:new Uint8Array([89]),modified_ms:1}],saveLibrary:async()=>{}},
@@ -106,6 +109,7 @@ test('startup waits for saved preferences even when storage opens after the engi
 });
 
 test('optional gateway restores and validates origins without probing or gating single-player',async()=>{
+ const {installFullscreen}=await import('../templates/fullscreen.mjs');
  const resources=await import('../templates/resources.mjs');
  const elements=new Map(),writes=[],requests=[];
  let startCalls=0;
@@ -113,7 +117,7 @@ test('optional gateway restores and validates origins without probing or gating 
   if(!elements.has(id))elements.set(id,{value:'',textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},setAttribute(){},addEventListener(){}});
   return elements.get(id);
  };
- const context=vm.createContext({...resources,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,
+ const context=vm.createContext({...resources,installFullscreen,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,
  setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
  localStorage:{getItem:()=> 'wss://gateway.example:8443/',setItem(key,value){writes.push([key,value]);}},
  navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},

@@ -1,5 +1,5 @@
 diff --git a/src/app/diagnostics/shell_capture/movies.rs b/src/app/diagnostics/shell_capture/movies.rs
-index 506f769..1326963 100644
+index e6da4331e..d0211bcbd 100644
 --- a/src/app/diagnostics/shell_capture/movies.rs
 +++ b/src/app/diagnostics/shell_capture/movies.rs
 @@ -23,6 +23,7 @@ pub(super) use opening::OpeningTarget;
@@ -22,8 +22,130 @@ index 506f769..1326963 100644
  /// Row-0 press point for the selected-list checkpoint (inside `0x744`).
  const LIST_ROW0_POINT: (f32, f32) = (150.0, 137.0);
  /// Down-arrow press point of the 17-row list's scrollbar.
+diff --git a/src/app/frontend/skirmish_shell_render.rs b/src/app/frontend/skirmish_shell_render.rs
+index 65e697012..b930daf6b 100644
+--- a/src/app/frontend/skirmish_shell_render.rs
++++ b/src/app/frontend/skirmish_shell_render.rs
+@@ -788,18 +788,18 @@ fn render_skirmish_shell_with_atlas(
+                     setup_layout,
+                     sliding,
+                 );
+-                shell_draws.extend(crate::render::shell_paint::paint_labels_at_depth(
++                shell_draws.extend(paint_map_dialog_statics(
+                     &state.renderer.bit_font,
+                     &setup_statics,
+-                    SHELL_DROPDOWN_TEXT_DEPTH - 0.00008,
++                    setup_layout.scale,
+                 ));
+             }
+         } else if !leaving {
+             push_choose_map_modal_text_draws(&mut shell_draws, state, choose_map_layout, sliding);
+-            shell_draws.extend(crate::render::shell_paint::paint_labels_at_depth(
++            shell_draws.extend(paint_map_dialog_statics(
+                 &state.renderer.bit_font,
+                 &chooser_statics,
+-                SHELL_DROPDOWN_TEXT_DEPTH - 0.00008,
++                choose_map_layout.scale,
+             ));
+         }
+     }
+@@ -1042,12 +1042,94 @@ fn clear_shell_target(
+     });
+ }
+ 
++fn paint_map_dialog_statics(
++    font: &BitFont,
++    labels: &[crate::render::shell_paint::PaintLabel<'_>],
++    scale: crate::ui::shell::geom::ShellScale,
++) -> Vec<ShellTextDraw> {
++    crate::render::shell_paint::paint_labels_at_depth_scaled(
++        font,
++        labels,
++        SHELL_DROPDOWN_TEXT_DEPTH - 0.00008,
++        scale.factor(),
++    )
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+     use crate::ui::shell::geom::ShellScale;
+     use crate::ui::skirmish_shell::{compute_fixed_800_layout, compute_layout};
+ 
++    #[test]
++    fn map_dialog_statics_keep_page_scale_and_clipping() {
++        use crate::ui::shell::static_reveal::{Kind1RevealWindow, StaticPaint};
++        use crate::ui::skirmish_shell::{
++            compute_responsive_choose_map_modal_layout, compute_responsive_random_map_setup_layout,
++        };
++
++        let font = crate::render::bit_font::tests::make_test_font(
++            &[('字' as u16, 12), (u16::from(b'A'), 6)],
++            4,
++        );
++        let draw = |width, height, random, sample: &str| {
++            let (title, help, scale) = if random {
++                let layout = compute_responsive_random_map_setup_layout(width, height);
++                (layout.title, layout.status_help, layout.scale)
++            } else {
++                let layout = compute_responsive_choose_map_modal_layout(width, height);
++                (layout.title, layout.status_help, layout.scale)
++            };
++            let shown = StaticPaint {
++                text: sample,
++                window: Kind1RevealWindow {
++                    count: u32::MAX,
++                    range: 0,
++                },
++            };
++            let draws = paint_map_dialog_statics(
++                &font,
++                &[
++                    text::static_label(shown, title, ShellAlign::H_CENTER),
++                    text::static_label(shown, help, ShellAlign::NONE),
++                ],
++                scale,
++            );
++            (draws, [title, help], scale.factor())
++        };
++        for (random, sample) in [true, false].into_iter().flat_map(|random| {
++            ["字".repeat(90), "A ".repeat(100)].map(|sample| (random, sample))
++        }) {
++            let base = draw(800, 600, random, &sample).0;
++            assert!(base.iter().all(|draw| !draw.instances.is_empty()));
++            for (width, height) in [(800, 600), (1200, 900), (1600, 1200)] {
++                let (fitted, rects, factor) = draw(width, height, random, &sample);
++                for ((original, scaled), rect) in base.iter().zip(&fitted).zip(rects) {
++                    assert_eq!(scaled.instances.len(), original.instances.len());
++                    assert_eq!(
++                        [
++                            scaled.scissor.x,
++                            scaled.scissor.y,
++                            scaled.scissor.w,
++                            scaled.scissor.h,
++                        ],
++                        [rect.x as u32, rect.y as u32, rect.w as u32, rect.h as u32],
++                    );
++                    for (a, b) in original.instances.iter().zip(&scaled.instances) {
++                        assert_eq!(b.size, a.size.map(|v| v * factor));
++                        assert_eq!(b.position, a.position.map(|v| v * factor));
++                        assert_eq!(b.depth, a.depth);
++                    }
++                }
++                let help = &fitted[1];
++                assert!(
++                    (help.instances[0].position[1] - rects[1].y as f32).abs() <= 0.5
++                );
++                assert!(help.scissor.y + help.scissor.h <= height);
++            }
++        }
++    }
++
+     fn test_entry(width: f32, height: f32) -> SkirmishShellChromeEntry {
+         SkirmishShellChromeEntry {
+             uv_origin: [0.0, 0.0],
 diff --git a/src/app/frontend/skirmish_shell_render/in_game_shell.rs b/src/app/frontend/skirmish_shell_render/in_game_shell.rs
-index 74c3635..e1e579d 100644
+index 74c36354c..e1e579d56 100644
 --- a/src/app/frontend/skirmish_shell_render/in_game_shell.rs
 +++ b/src/app/frontend/skirmish_shell_render/in_game_shell.rs
 @@ -161,11 +161,14 @@ pub(super) fn background_instances(
@@ -46,167 +168,338 @@ index 74c3635..e1e579d 100644
      // Original 72F540 order; the background clear is performed by the render pass.
      for (entry, rect) in [
          (background, layout.background),
-diff --git a/src/app/input/messages.rs b/src/app/input/messages.rs
-index 8e8af9b..62676f3 100644
---- a/src/app/input/messages.rs
-+++ b/src/app/input/messages.rs
-@@ -588,6 +588,29 @@ pub(crate) fn post_chat_line(state: &mut AppState, name: &str, text: &str, rgb:
-     );
+diff --git a/src/app/frontend/skirmish_shell_render/keyboard.rs b/src/app/frontend/skirmish_shell_render/keyboard.rs
+index 96ab23798..62c9cacf2 100644
+--- a/src/app/frontend/skirmish_shell_render/keyboard.rs
++++ b/src/app/frontend/skirmish_shell_render/keyboard.rs
+@@ -429,10 +429,7 @@ pub(crate) fn render_keyboard_shell(
+             SHELL_CONTROL_TEXT_DEPTH,
+         ));
+     }
+-    texts.extend(shell_paint::paint_labels(
+-        font,
+-        &status_label.into_iter().collect::<Vec<_>>(),
+-    ));
++    texts.extend(paint_status_label(font, status_label, layout.scale));
+     let mut overlay = ShellFrameOverlay::default();
+     if dialog.category_open {
+         let popup = layout.category_popup(dialog.categories.len());
+@@ -500,10 +497,62 @@ pub(crate) fn render_keyboard_shell(
+     Ok(())
  }
  
-+/// Radar subtitle callback `0x005BF360`: literal text, scheme 0 and native
-+/// MessageList duration buckets; cue Position/RGB belong to full-screen movies.
-+pub(crate) fn post_movie_subtitle(state: &mut AppState, text: &str, duration: u32) {
-+    let rgb = state.rules().map_or(MESSAGE_RGB_SYSTEM, |rules| {
-+        country_message_rgb(0, &rules.color_schemes)
-+    });
-+    post_resolved_message(state, &movie_subtitle_post(text, duration, rgb));
++// Kind-1 footer (0x00615A91): the same page scale as the other controls.
++fn paint_status_label(
++    font: &BitFont,
++    label: Option<shell_paint::PaintLabel<'_>>,
++    scale: ShellScale,
++) -> Vec<ShellTextDraw> {
++    shell_paint::paint_labels_scaled(
++        font,
++        &label.into_iter().collect::<Vec<_>>(),
++        scale.factor(),
++    )
 +}
 +
-+fn movie_subtitle_post(
-+    text: &str,
-+    duration: u32,
-+    rgb: [f32; 3],
-+) -> crate::ui::messages::MessagePost<'_> {
-+    crate::ui::messages::MessagePost {
-+        prefix: None,
-+        text,
-+        rgb,
-+        timeout_ms: (duration != u32::MAX).then(|| u64::from(duration) * 16),
-+        silent: false,
-+    }
-+}
-+
- /// The observer gate's silent `TXT_OBSERVER_CANT_SEND` row in the "Grey"
- /// scheme (`0x004E12D0` with `0x00822728`), flags 0x16, MessageDelay*900
- /// (`0x0055EED0..0x0055EF2C`).
-@@ -908,6 +931,31 @@ fn message_instances(
+ #[cfg(test)]
  mod tests {
      use super::*;
  
 +    #[test]
-+    fn movie_subtitle_rows_keep_native_duration_and_literal_text() {
-+        let rgb = [0.2, 0.3, 0.4];
-+        let post = movie_subtitle_post("test subtitle", 180, rgb);
-+        assert_eq!(post.text, "test subtitle");
-+        assert_eq!(post.rgb, rgb);
-+        assert!(post.prefix.is_none());
-+        let mut list = crate::ui::messages::MessageList::new(3, 0, 6, 600);
-+        let result = list.add_message(&post, 1_000, &|s| s.len() as i32);
-+        assert!(result.play_sound, "native callback uses silent=0");
-+        assert_eq!(list.messages()[0].deadline_ms, Some(3_880));
-+        list.manage(3_879);
-+        assert_eq!(list.messages().len(), 1);
-+        list.manage(3_880);
-+        assert_eq!(list.messages().len(), 1, "MessageList expires strictly after its deadline");
-+        list.manage(3_881);
-+        assert!(list.messages().is_empty());
-+        assert!(
-+            movie_subtitle_post("persistent", u32::MAX, rgb)
-+                .timeout_ms
-+                .is_none()
-+        );
-+        assert_eq!(movie_subtitle_post("zero", 0, rgb).timeout_ms, Some(0));
++    fn keyboard_footer_keeps_cjk_glyphs_and_clip_in_page_pixels() {
++        let font = crate::render::bit_font::tests::make_test_font(&[('字' as u16, 12)], 4);
++        let draw = |scale: ShellScale| {
++            paint_status_label(
++                &font,
++                Some(shell_paint::PaintLabel {
++                    text: "字\n字".into(),
++                    rect: scale.scale_rect(RectPx::new(0, 560, 400, 40)),
++                    align: ShellAlign::NONE,
++                    rgb: [1.0, 1.0, 0.0],
++                    path_a_reveal: Some(PathAReveal {
++                        count: u32::MAX,
++                        range: 0,
++                        base_rgb: [255, 255, 0],
++                        highlight_rgb: [255; 3],
++                    }),
++                }),
++                scale,
++            )
++        };
++        let retail = draw(ShellScale::RETAIL);
++        assert_eq!(retail[0].instances.len(), 2);
++        for scale in [
++            ShellScale::from_screen(1200, 900),
++            ShellScale::from_screen(1600, 1200),
++        ] {
++            let fitted = draw(scale);
++            assert_eq!(fitted[0].instances.len(), 2);
++            for (base, grown) in retail[0].instances.iter().zip(&fitted[0].instances) {
++                assert_eq!(grown.size, base.size.map(|v| v * scale.factor()));
++                assert_eq!(grown.position, base.position.map(|v| v * scale.factor()));
++            }
++            assert_eq!(
++                fitted[0].scissor.w,
++                (retail[0].scissor.w as f32 * scale.factor()) as u32
++            );
++        }
 +    }
-+
-     #[cfg(feature = "ares")]
      #[test]
-     fn ares_refusal_post_uses_localized_message_owner_colour_and_expiry() {
-diff --git a/src/app/movie_subtitles.rs b/src/app/movie_subtitles.rs
-index d187f5f..9deb169 100644
---- a/src/app/movie_subtitles.rs
-+++ b/src/app/movie_subtitles.rs
-@@ -303,10 +303,16 @@ impl SubtitleTrack {
- 
-     /// `0x006C9C60` after BinkDoFrame of the one-based Bink `frame`.
-     pub(crate) fn advance(&mut self, frame: u32) {
-+        self.advance_with(frame, |_| {});
-+    }
-+
-+    /// `0x006C9C96`: radar movies deliver every due cue to their HUD callback.
-+    pub(crate) fn advance_with(&mut self, frame: u32, mut on_cue: impl FnMut(&Subtitle)) {
-         let now = frame.wrapping_mul(self.ticks_per_frame);
-         while self.cues.get(self.next).is_some_and(|cue| cue.time <= now) {
-             self.shown = Some(self.next);
-             self.next += 1;
-+            on_cue(&self.cues[self.next - 1]);
+     fn native_group_caption_gap_and_bevel_polarity_are_preserved() {
+         //61E700:207px group at95,159;17px font moves its top edge down8.
+diff --git a/src/app/handler.rs b/src/app/handler.rs
+index 12ba0ad25..36cdf51c8 100644
+--- a/src/app/handler.rs
++++ b/src/app/handler.rs
+@@ -241,6 +241,12 @@ impl App {
+         if state.platform.capture_client_size.is_some() {
+             return;
          }
-         if self
-             .shown()
-@@ -401,6 +407,48 @@ mod tests {
-         assert!(track.shown().is_none());
++        #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++        let full_screen = web_sys::window()
++            .and_then(|window| window.document())
++            .and_then(|document| document.fullscreen_element())
++            .is_some();
++        #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
+         let full_screen = state.platform.window.fullscreen().is_some();
+         #[cfg(target_os = "macos")]
+         if !full_screen {
+@@ -1042,6 +1048,10 @@ impl ApplicationHandler for App {
+                     }
+                     return;
+                 }
++                #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++                if crate::app::input::keyboard::window_key(state, &event) {
++                    return;
++                }
+                 // The keys above work under every layer; the rest follow it.
+                 let screen = match layer {
+                     InputLayer::Screen(screen) => screen,
+diff --git a/src/app/input/dispatch.rs b/src/app/input/dispatch.rs
+index 32b2293ac..09434337e 100644
+--- a/src/app/input/dispatch.rs
++++ b/src/app/input/dispatch.rs
+@@ -1766,6 +1766,8 @@ fn place_ready_building_for_tab(state: &mut AppState, tab: SidebarTab) {
+ 
+ fn dispatch_retail_hotkey(state: &mut AppState, command: HotkeyCommand) {
+     match command {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++        HotkeyCommand::ToggleFullscreen => crate::web::toggle_fullscreen(),
+         HotkeyCommand::HealthNav => selection_navigation::execute_category_navigation(
+             state,
+             crate::app::types::CategoryNavigationKind::Health,
+diff --git a/src/app/input/hotkeys.rs b/src/app/input/hotkeys.rs
+index d96784806..2843e119d 100644
+--- a/src/app/input/hotkeys.rs
++++ b/src/app/input/hotkeys.rs
+@@ -22,6 +22,8 @@ const VK_DELETE: u16 = 0x2e;
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub(crate) enum HotkeyCommand {
+     CenterView,
++    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++    ToggleFullscreen,
+     Options,
+     CenterOnRadarEvent,
+     TeamSelect(usize),
+@@ -245,6 +247,20 @@ impl HotkeyBindings {
+         bindings
      }
  
-+    #[test]
-+    fn callbacks_deliver_preload_and_catchup_cues_once() {
-+        let cue = |time, text: &str| Subtitle {
-+            time,
-+            duration: 4,
-+            text: Some(text.to_owned()),
-+            ..Subtitle::default()
-+        };
-+        let mut track = SubtitleTrack::new(
-+            vec![cue(0, "first"), cue(8, "second"), cue(8, "third")],
-+            15,
-+            1,
-+        )
-+        .unwrap();
-+        let mut delivered = Vec::new();
-+        track.advance_with(1, |cue| delivered.push(cue.text.clone().unwrap()));
-+        track.advance_with(1, |cue| delivered.push(cue.text.clone().unwrap()));
-+        assert_eq!(delivered, ["first"]);
-+        track.advance_with(3, |cue| delivered.push(cue.text.clone().unwrap()));
-+        assert_eq!(delivered, ["first", "second", "third"]);
-+        assert!(
-+            track.shown().is_none(),
-+            "expired video overlays still deliver HUD cues"
-+        );
-+        track.advance_with(3, |_| panic!("same frame must not repost"));
-+    }
-+
-+    #[test]
-+    fn replay_starts_a_fresh_callback_cursor_and_no_cues_stay_disabled() {
-+        let bytes = file("BeginMovie RADAR\n<Time=00:00:00:00, Text=\"test\">\nEndMovie");
-+        for _ in 0..2 {
-+            let mut track =
-+                SubtitleTrack::new(movie_subtitles(&bytes, "RADAR").unwrap(), 15, 1).unwrap();
-+            let mut delivered = 0;
-+            track.advance_with(1, |_| delivered += 1);
-+            track.advance_with(2, |_| delivered += 1);
-+            assert_eq!(delivered, 1);
++    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++    pub(crate) fn install_web_defaults(&mut self, bytes: Option<&[u8]>, saved_profile: bool) {
++        let configured = bytes
++            .and_then(|bytes| IniFile::from_bytes(bytes).ok())
++            .and_then(|ini| ini.section("Hotkey").cloned())
++            .is_some_and(|section| section.is_present("ToggleFullscreen"));
++        // Fresh/reset retail defaults give F11 to Taunt_7. Do not take a key
++        // from an existing saved profile, or resurrect an explicit zero.
++        if !configured && (self.command_at(0x7a).is_none()
++            || (!saved_profile && self.command_at(0x7a) == Some(HotkeyCommand::Taunt(6)))) {
++            self.by_key.insert(0x7a, HotkeyCommand::ToggleFullscreen);
 +        }
-+        assert!(movie_subtitles(&bytes, "NO_SUBTITLES").is_none());
-+        assert!(movie_subtitles(&file(""), "RADAR").is_none());
 +    }
 +
-     #[test]
-     fn text_sits_on_its_line_in_the_band_at_the_movie_bottom() {
-         let cue = Subtitle {
+     pub(crate) fn command_at(&self, encoded: u16) -> Option<HotkeyCommand> {
+         self.by_key.get(&encoded).copied()
+     }
+diff --git a/src/app/input/hotkeys/catalog.rs b/src/app/input/hotkeys/catalog.rs
+index 36fb6a7d2..b7bbf0217 100644
+--- a/src/app/input/hotkeys/catalog.rs
++++ b/src/app/input/hotkeys/catalog.rs
+@@ -29,12 +29,14 @@ macro_rules! command {
+ }
+ 
+ pub(crate) fn registered_commands() -> &'static [CommandMetadata] {
+-    #[cfg(any(feature = "verax", feature = "phobos"))]
++    #[cfg(any(feature = "verax", feature = "phobos", all(feature = "wasm", target_arch = "wasm32")))]
+     {
+         use std::sync::OnceLock;
+         static ALL: OnceLock<Vec<CommandMetadata>> = OnceLock::new();
+         ALL.get_or_init(|| {
+             let mut all = RETAIL_COMMANDS.to_vec();
++            #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++            all.extend_from_slice(&WEB_COMMANDS);
+             #[cfg(feature = "verax")]
+             all.extend_from_slice(&VERA_COMMANDS);
+             #[cfg(feature = "phobos")]
+@@ -42,7 +44,7 @@ pub(crate) fn registered_commands() -> &'static [CommandMetadata] {
+             all
+         })
+     }
+-    #[cfg(not(any(feature = "verax", feature = "phobos")))]
++    #[cfg(not(any(feature = "verax", feature = "phobos", all(feature = "wasm", target_arch = "wasm32"))))]
+     {
+         retail_commands()
+     }
+@@ -791,3 +793,9 @@ const PHOBOS_COMMANDS: [CommandMetadata; 11] = [
+     command!(HotkeyCommand::FireTacticalSw(9), "FireTacticalSW10", "TXT_FIRE_TACTICAL_SW_XX", "TXT_INTERFACE", "TXT_FIRE_TACTICAL_SW_XX_DESC", Some(10)),
+     command!(HotkeyCommand::ToggleSwSidebar, "Toggle Super Weapon Sidebar", "TXT_TOGGLE_SW_SIDEBAR", "TXT_INTERFACE", "TXT_TOGGLE_SW_SIDEBAR_DESC", None),
+ ];
++
++#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++const WEB_COMMANDS: [CommandMetadata; 1] = [command!(
++    HotkeyCommand::ToggleFullscreen, "ToggleFullscreen", "VERA:ToggleFullscreen",
++    "vera20k", "VERA:ToggleFullscreenDesc", None
++)];
+diff --git a/src/app/input/keyboard.rs b/src/app/input/keyboard.rs
+index 2f0b1fbd8..9dcf0018c 100644
+--- a/src/app/input/keyboard.rs
++++ b/src/app/input/keyboard.rs
+@@ -117,6 +117,42 @@ pub(crate) fn in_game_key_edge(
+     }
+ }
+ 
++/// Window command uses the same binding owner, before ordinary game dispatch.
++#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++pub(crate) fn window_key(state: &mut AppState, event: &KeyEvent) -> bool {
++    use crate::app::input::precedence::{InputLayer, ModalPage, ScreenPage};
++    let allowed = match crate::app::input::precedence::input_layer(state) {
++        InputLayer::Page(ModalPage::Keyboard) => state.frontend.keyboard_dialog.as_ref()
++            .is_some_and(|dialog| !dialog.capture_focused),
++        InputLayer::Screen(ScreenPage::MainMenu | ScreenPage::SinglePlayer |
++            ScreenPage::MoviesAndCredits | ScreenPage::MovieList | ScreenPage::Campaign |
++            ScreenPage::LauncherOptions | ScreenPage::Battlefield) => true,
++        InputLayer::Screen(ScreenPage::InGameShell(
++            crate::ui::pause_menu::InGameMenuState::Menu |
++            crate::ui::pause_menu::InGameMenuState::Options |
++            crate::ui::pause_menu::InGameMenuState::Sound |
++            crate::ui::pause_menu::InGameMenuState::MissionBriefing |
++            crate::ui::pause_menu::InGameMenuState::Diplomacy
++        )) => true,
++        // Text-entry pages and transitions keep ownership of their keys.
++        _ => false,
++    };
++    if !allowed || state.match_state.match_presentation.message_list.editing() {
++        return false;
++    }
++    let unmodified = event.key_without_modifiers();
++    let key = hotkeys::binding_logical_key(&event.logical_key, &unmodified, event.location);
++    if state.match_state.input.hotkey_bindings.resolve_event(
++        key, event.location, state.platform.live_modifiers,
++    ) != hotkeys::HotkeyResolution::Command(hotkeys::HotkeyCommand::ToggleFullscreen) {
++        return false;
++    }
++    if event.state.is_pressed() && !event.repeat {
++        crate::web::toggle_fullscreen();
++    }
++    true
++}
++
+ pub(crate) fn layout(state: &AppState) -> Option<KeyboardLayout> {
+     layout_and_pointer(state).map(|(layout, _)| layout)
+ }
+@@ -154,7 +190,13 @@ fn localized(state: &AppState, key: &str, parameter: Option<u8>) -> String {
+         .csf
+         .as_ref()
+         .and_then(|csf| csf.get(key))
+-        .unwrap_or(key);
++        .unwrap_or_else(|| match key {
++            #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++            "VERA:ToggleFullscreen" => "全屏/退出全屏",
++            #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++            "VERA:ToggleFullscreenDesc" => "切换全屏与窗口。若浏览器保留 F11，请重新绑定或使用网页全屏按钮。",
++            _ => key,
++        });
+     match parameter {
+         Some(value) => text
+             .replace("%2d", &format!("{value:2}"))
+diff --git a/src/app/persistence/keyboard.rs b/src/app/persistence/keyboard.rs
+index 5fe29ef6d..3e029530d 100644
+--- a/src/app/persistence/keyboard.rs
++++ b/src/app/persistence/keyboard.rs
+@@ -14,16 +14,32 @@ fn read(root: &Path) -> Option<Vec<u8>> {
+ }
+ pub(crate) fn reload(root: &Path, archive: Option<&[u8]>) -> HotkeyBindings {
+     let bytes = read(root);
+-    HotkeyBindings::reload_from_ini_bytes(bytes.as_deref().or(archive))
++    let selected = bytes.as_deref().or(archive);
++    #[allow(unused_mut)]
++    let mut bindings = HotkeyBindings::reload_from_ini_bytes(selected);
++    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++    bindings.install_web_defaults(selected, bytes.is_some());
++    bindings
+ }
+ /// Process startup shares the profile file owner, but retains the initial
+ /// Escape/Delete/Space installation that a dialog reload intentionally omits.
+ pub(crate) fn startup(root: &Path, archive: Option<&[u8]>) -> HotkeyBindings {
+     let bytes = read(root);
+-    HotkeyBindings::from_ini_bytes(bytes.as_deref().or(archive))
++    let selected = bytes.as_deref().or(archive);
++    #[allow(unused_mut)]
++    let mut bindings = HotkeyBindings::from_ini_bytes(selected);
++    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++    bindings.install_web_defaults(selected, bytes.is_some());
++    bindings
+ }
+ pub(crate) fn save(root: &Path, bindings: &HotkeyBindings) -> std::io::Result<()> {
+-    let ini = IniFile::from_str(&bindings.to_ini_string());
++    #[allow(unused_mut)]
++    let mut serialized = bindings.to_ini_string();
++    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++    if bindings.first_key(crate::app::input::hotkeys::HotkeyCommand::ToggleFullscreen).is_none() {
++        serialized.push_str("ToggleFullscreen=0\n");
++    }
++    let ini = IniFile::from_str(&serialized);
+     let entries = ini.section_or_empty("Hotkey");
+     let mut entries = entries.raw_entries().collect::<Vec<_>>();
+     if entries.is_empty() {
+@@ -34,7 +50,10 @@ pub(crate) fn save(root: &Path, bindings: &HotkeyBindings) -> std::io::Result<()
+     profile_file::update(root, |bytes| replace_ini_section(bytes, "Hotkey", &entries))
+ }
+ pub(crate) fn reset(root: &Path, archive: Option<&[u8]>) -> HotkeyBindings {
+-    let defaults = HotkeyBindings::reload_from_ini_bytes(archive);
++    #[allow(unused_mut)]
++    let mut defaults = HotkeyBindings::reload_from_ini_bytes(archive);
++    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++    defaults.install_web_defaults(archive, false);
+     // Native delete/reload resets bindings. Replace only our section so the
+     // options sharing VERA.INI survive; a failed save retains current bindings.
+     if let Err(error) = save(root, &defaults) {
 diff --git a/src/app/persistence/options_profile.rs b/src/app/persistence/options_profile.rs
-index 9807a7e..b01236e 100644
+index cae5e7603..b0ff90df1 100644
 --- a/src/app/persistence/options_profile.rs
 +++ b/src/app/persistence/options_profile.rs
-@@ -124,8 +124,8 @@ pub(crate) struct RetailOptionsProfile {
-     /// The Options page's battle sidebar size.
+@@ -125,8 +125,8 @@ pub(crate) struct RetailOptionsProfile {
      pub(crate) sidebar: crate::ui::main_menu_dialogs::options::SidebarSize,
-     /// `[VERA] YROriginalStyle=`: whether the startup splash and the menu
--    /// movie use Yuri's Revenge's art. Off by default, so new profiles show
--    /// Red Alert 2's. Only those two read it; see
-+    /// movie use Yuri's Revenge's art. This fork defaults to YR; an explicit
-+    /// saved choice still wins. Only those two read it; see
+     /// `[VERA] YROriginalStyle=`: whether the startup splash, the menu movie,
+     /// the offline Skirmish background and the LAN/WOL lobby backgrounds use
+-    /// Yuri's Revenge's art. Off by default, so new profiles show Red Alert
+-    /// 2's. Only those surfaces read it; see
++    /// Yuri's Revenge's art. This fork defaults to YR; an explicit saved
++    /// choice still wins. Only those surfaces read it; see
      /// [`LauncherCheckboxId::YrOriginalStyle`](crate::ui::main_menu_dialogs::options::LauncherCheckboxId::YrOriginalStyle).
      pub(crate) yr_original_style: bool,
-     /// `[VERA] RenderInterpolation=`: client-only motion smoothing. Off by
-@@ -219,7 +219,7 @@ impl Default for RetailOptionsProfile {
+     /// `[VERA] SkipStartupLogo=`: start without the logo movie `Init_Game`
+@@ -240,7 +240,7 @@ impl Default for RetailOptionsProfile {
              zoom: crate::ui::main_menu_dialogs::options::Zoom::Auto,
              original_shape: false,
              sidebar: crate::ui::main_menu_dialogs::options::SidebarSize::Normal,
 -            yr_original_style: false,
 +            yr_original_style: true,
+             skip_startup_logo: false,
              render_interpolation: false,
              mouse_wheel_zoom: false,
-             shift_queue: false,
-@@ -1320,7 +1320,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -1379,7 +1379,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
          assert_eq!(defaults.retained_profile.zoom, Zoom::Auto);
          assert!(!defaults.retained_profile.original_shape);
          assert_eq!(defaults.retained_profile.sidebar, SidebarSize::Normal);
@@ -215,16 +508,16 @@ index 9807a7e..b01236e 100644
          // Shift + left click queues one copy, as in gamemd, until it is ticked.
          assert!(!defaults.retained_profile.shift_queue);
          // Internet shows TXT_APIMISSING, as on retail, until it is ticked.
-@@ -1341,7 +1341,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -1400,7 +1400,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
          assert_eq!(load.retained_profile.zoom, Zoom::Percent(200));
          assert!(load.retained_profile.original_shape);
          assert_eq!(load.retained_profile.sidebar, SidebarSize::Large);
 -        assert!(!load.retained_profile.yr_original_style);
 +        assert!(load.retained_profile.yr_original_style);
+         assert!(!load.retained_profile.skip_startup_logo);
          assert!(load.retained_profile.shift_queue);
          assert!(load.retained_profile.wol_test_service);
-         assert!(load.retained_profile.solo_skirmish);
-@@ -1531,12 +1531,13 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -1641,12 +1641,13 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
      }
  
      #[test]
@@ -232,7 +525,7 @@ index 9807a7e..b01236e 100644
 -        let defaults = load_snapshot(&RetailStartupOptions::default(), b"[VERA]\n");
 -        assert!(
 -            !defaults.retained_profile.yr_original_style,
--            "unchecked YR Loading & Menu Movie selects the default RA2 look"
+-            "unchecked Original YR Style selects the default RA2 look"
 -        );
 +    fn yr_original_style_defaults_to_yr_and_reads_only_its_own_key() {
 +        let startup = RetailStartupOptions::default();
@@ -244,7 +537,7 @@ index 9807a7e..b01236e 100644
  
          for value in ["yes", "no"] {
              let ignored = load_snapshot(
-@@ -1544,18 +1545,18 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -1654,18 +1655,18 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
                  format!("[VERA]\nRA2Look={value}\n").as_bytes(),
              );
              assert!(
@@ -267,101 +560,11 @@ index 9807a7e..b01236e 100644
          );
      }
  
-diff --git a/src/app/radar_movie.rs b/src/app/radar_movie.rs
-index 4ca70e3..0e28a5f 100644
---- a/src/app/radar_movie.rs
-+++ b/src/app/radar_movie.rs
-@@ -15,6 +15,7 @@ use std::sync::Arc;
- 
- use crate::app::AppState;
- use crate::app::movie_playback::MoviePlayback;
-+use crate::app::movie_subtitles::{self, SubtitleTrack};
- use crate::audio::arbiter::HandleOwner;
- use crate::audio::sfx::SpatialGain;
- use crate::render::bink_movie::BinkMovieSurface;
-@@ -80,6 +81,7 @@ pub(crate) fn playback_active(state: &AppState) -> bool {
- 
- struct QueuedMovie {
-     surface: Option<BinkMovieSurface>,
-+    subtitles: Option<SubtitleTrack>,
-     pause_simulation: bool,
- }
- 
-@@ -184,6 +186,14 @@ pub(crate) fn enqueue(state: &mut AppState, index: i32, pause_simulation: bool)
-         wgpu::FilterMode::Nearest,
-     ) {
-         Ok(surface) => {
-+            // BinkMovie_Open 0x00432750 resolves cues when the clip is admitted.
-+            let header = &surface.file().header;
-+            let subtitles = state
-+                .process_assets
-+                .manager()
-+                .and_then(|assets| assets.get_ref(movie_subtitles::SUBTITLE_FILE))
-+                .and_then(|file| movie_subtitles::movie_subtitles(file, stem))
-+                .and_then(|cues| SubtitleTrack::new(cues, header.fps_num, header.fps_den));
-             log::info!(
-                 "Radar movie admitted: {file_name}, source={}, pause={pause_simulation}",
-                 surface.source_archive()
-@@ -195,6 +205,7 @@ pub(crate) fn enqueue(state: &mut AppState, index: i32, pause_simulation: bool)
-                 .queue
-                 .push_back(QueuedMovie {
-                     surface: Some(surface),
-+                    subtitles,
-                     pause_simulation,
-                 });
-         }
-@@ -348,10 +359,8 @@ pub(crate) fn service(state: &mut AppState, wall_ms: u64) {
-             .surface
-             .take()
-             .expect("unstarted head owns video");
--        // RESIDUAL: BinkMovie_Open 0x00432750 also looks radar clips up in
--        // subtitlemd.txt and 0x00433270 would copy their text into the radar
--        // rect; no retail file is known to cue a radar clip, and VERA draws
--        // subtitles over full-screen movies only.
-+        // Radar's 0x005BF360 callback posts HUD rows instead of a movie overlay.
-+        // Its cue cursor stays with the FIFO head and advances only while active.
-         let playback = MoviePlayback::new(surface, state.audio.movie_mixer(), voice_volume, None);
-         state.match_state.match_presentation.radar_movies.playing = Some(playback);
-     }
-@@ -374,6 +383,7 @@ pub(crate) fn service(state: &mut AppState, wall_ms: u64) {
-         }
-     };
-     let surface = playback.surface();
-+    let movie_frame = surface.next_frame() as u32;
-     state
-         .match_state
-         .match_presentation
-@@ -385,6 +395,25 @@ pub(crate) fn service(state: &mut AppState, wall_ms: u64) {
-             surface.rgba(),
-             [surface.width(), surface.height()],
-         );
-+    let mut due = Vec::new();
-+    if active
-+        && let Some(subtitles) = state
-+            .match_state
-+            .match_presentation
-+            .radar_movies
-+            .queue
-+            .front_mut()
-+            .and_then(|movie| movie.subtitles.as_mut())
-+    {
-+        subtitles.advance_with(movie_frame, |cue| {
-+            if let Some(text) = cue.text.as_ref() {
-+                due.push((text.clone(), cue.duration));
-+            }
-+        });
-+    }
-+    for (text, duration) in due {
-+        crate::app::input::messages::post_movie_subtitle(state, &text, duration);
-+    }
-     if completed {
-         let (has_next, service) = state
-             .match_state
 diff --git a/src/ui/main_menu_dialogs/options.rs b/src/ui/main_menu_dialogs/options.rs
-index 814356b..b18e550 100644
+index 2b99331e7..4ccd7a7ef 100644
 --- a/src/ui/main_menu_dialogs/options.rs
 +++ b/src/ui/main_menu_dialogs/options.rs
-@@ -573,7 +573,7 @@ impl Default for LauncherOptionsValues {
+@@ -612,7 +612,7 @@ impl Default for LauncherOptionsValues {
              show_hidden: false,
              full_screen: false,
              original_shape: false,
@@ -371,7 +574,7 @@ index 814356b..b18e550 100644
              mouse_wheel_zoom: false,
              shift_queue: false,
 diff --git a/src/ui/shell/in_game_shell.rs b/src/ui/shell/in_game_shell.rs
-index a8f5cd0..c958955 100644
+index a8f5cd0ca..c9589555c 100644
 --- a/src/ui/shell/in_game_shell.rs
 +++ b/src/ui/shell/in_game_shell.rs
 @@ -7,6 +7,72 @@
@@ -471,7 +674,7 @@ index a8f5cd0..c958955 100644
          // 0x0072FCC2..0x0072FE33: all column rectangles use CREDITS width.
          let column_x = width - sizes.credits[0];
 diff --git a/src/util/file_system.rs b/src/util/file_system.rs
-index ac07c78..eb079ae 100644
+index ac07c78b4..eb079aea0 100644
 --- a/src/util/file_system.rs
 +++ b/src/util/file_system.rs
 @@ -111,6 +111,10 @@ mod memory {
@@ -505,10 +708,28 @@ index ac07c78..eb079ae 100644
  
      #[test]
 diff --git a/src/web.rs b/src/web.rs
-index ffbb582..cce352f 100644
+index 81ffdc541..1a2899a85 100644
 --- a/src/web.rs
 +++ b/src/web.rs
-@@ -104,7 +104,7 @@ pub fn initialize() {
+@@ -29,6 +29,17 @@ pub(crate) fn canvas() -> web_sys::HtmlCanvasElement {
+     })
+ }
+ 
++/// The host performs the asynchronous Fullscreen API request in this key gesture.
++pub(crate) fn toggle_fullscreen() {
++    use wasm_bindgen::JsCast;
++    let result = js_sys::Reflect::get(&js_sys::global(), &"vera20kToggleFullscreen".into())
++        .and_then(|value| value.dyn_into::<js_sys::Function>())
++        .and_then(|callback| callback.call0(&JsValue::NULL));
++    if let Err(error) = result {
++        log::warn!("Fullscreen host unavailable: {error:?}");
++    }
++}
++
+ pub(crate) fn status(message: &str) {
+     let callback = STATUS.with(|slot| slot.borrow().clone());
+     if let Some(callback) = callback {
+@@ -161,7 +172,7 @@ pub fn initialize() {
      crate::util::file_system::set_persistence_callbacks(
          |path, bytes, modified_ms| {
              WRITE.with(|slot| {
@@ -517,7 +738,7 @@ index ffbb582..cce352f 100644
                      return;
                  }
                  if let Some(callback) = slot.borrow().as_ref() {
-@@ -121,7 +121,7 @@ pub fn initialize() {
+@@ -178,7 +189,7 @@ pub fn initialize() {
          },
          |path| {
              REMOVE.with(|slot| {
@@ -526,7 +747,7 @@ index ffbb582..cce352f 100644
                      return;
                  }
                  if let Some(callback) = slot.borrow().as_ref() {
-@@ -132,6 +132,10 @@ pub fn initialize() {
+@@ -189,6 +200,10 @@ pub fn initialize() {
      );
  }
  
@@ -537,14 +758,18 @@ index ffbb582..cce352f 100644
  fn relative_path(name: &str) -> Result<(), JsValue> {
      if name.is_empty()
          || name.starts_with('/')
-@@ -182,18 +186,22 @@ pub fn set_persistence_callbacks(write: js_sys::Function, remove: js_sys::Functi
+@@ -275,7 +290,7 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
  }
  
  #[wasm_bindgen]
 -pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result<(), JsValue> {
 +pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64, deleted: bool) -> Result<(), JsValue> {
-     if gate().started() {
-         return Err(JsValue::from_str("Restore user data before starting"));
+     if !LIFECYCLE.with(|slot| slot.borrow().idle()) {
+         return Err(JsValue::from_str(
+             "Restore user data before starting or after the engine exited",
+@@ -286,14 +301,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
+     if path.starts_with("/replays/") {
+         return Ok(());
      }
 -    if !path.starts_with("/saves/") {
 -        return Err(JsValue::from_str("User data must be below /saves/"));
@@ -564,7 +789,21 @@ index ffbb582..cce352f 100644
      Ok(())
  }
  
-@@ -338,10 +346,12 @@ pub fn probe(map_name: Option<String>) -> Result<String, JsValue> {
+@@ -332,9 +351,10 @@ pub fn start_game(
+     run(
+         canvas,
+         on_status,
+-        crate::app::App::new(
+-            crate::app::frontend::startup_options::RetailStartupOptions::default(),
+-        ),
++        crate::app::App::new(crate::app::frontend::startup_options::RetailStartupOptions {
++            campaign_speed_control: true,
++            ..Default::default()
++        }),
+         false,
+     )
+ }
+@@ -410,10 +430,12 @@ pub fn probe(map_name: Option<String>) -> Result<String, JsValue> {
  }
  
  fn install_config() {

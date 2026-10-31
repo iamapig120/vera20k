@@ -1,6 +1,10 @@
 import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game} from './pkg/vera20k.js';
 import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs';
+import {installFullscreen} from './fullscreen.mjs';
 const $=id=>document.getElementById(id);
+globalThis.vera20kToggleFullscreen=installFullscreen(document,$('game'),$('toggle-fullscreen'),message=>{
+ $('fullscreen-status').textContent=message;
+});
 const status=$('status'), button=$('start'), files=$('files');
 const gatewayInput=$('gateway-address'), gatewayStatus=$('gateway-status');
 const gatewayKey='vera20k.gateway-origin';
