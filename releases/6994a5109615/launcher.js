@@ -1,6 +1,10 @@
-import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game} from './pkg/vera20k.js?v=61a6cfb4857a8d8d92a37839b9bb126f4bb40af9';
-import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs?v=61a6cfb4857a8d8d92a37839b9bb126f4bb40af9';
+import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game} from './pkg/vera20k.js?v=3428e5de2e02e2bb855b075bdeeca2f075d084a2';
+import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs?v=3428e5de2e02e2bb855b075bdeeca2f075d084a2';
+import {installFullscreen} from './fullscreen.mjs?v=3428e5de2e02e2bb855b075bdeeca2f075d084a2';
 const $=id=>document.getElementById(id);
+globalThis.vera20kToggleFullscreen=installFullscreen(document,$('game'),$('toggle-fullscreen'),message=>{
+ $('fullscreen-status').textContent=message;
+});
 const status=$('status'), button=$('start'), files=$('files');
 const gatewayInput=$('gateway-address'), gatewayStatus=$('gateway-status');
 const gatewayKey='vera20k.gateway-origin';
@@ -256,7 +260,7 @@ async function engineBytes(){
  const arm=()=>{clearTimeout(timer);timer=setTimeout(()=>controller.abort(),30000);};
  arm();
  try{
-  const response=await fetch(new URL('./pkg/vera20k_bg.wasm?v=61a6cfb4857a8d8d92a37839b9bb126f4bb40af9',import.meta.url),{signal:controller.signal});
+  const response=await fetch(new URL('./pkg/vera20k_bg.wasm?v=3428e5de2e02e2bb855b075bdeeca2f075d084a2',import.meta.url),{signal:controller.signal});
   if(!response.ok)throw Error(`下载引擎失败（HTTP ${response.status}）`);
   const encoding=response.headers.get('Content-Encoding');
   const total=encoding&&encoding!=='identity'?0:Number(response.headers.get('Content-Length'));
