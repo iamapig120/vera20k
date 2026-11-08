@@ -122,7 +122,7 @@ function createVeraStorage(name='vera20k-web-v2',{timeoutMs=20000,migrateLegacy=
   remove(path){return this.write({path,bytes:new Uint8Array(),modified_ms:Date.now(),deleted:true});},
   async library(){await libraryReady();return transaction('library','readonly',({data,done})=>{data.get('current').onsuccess=e=>done(e.target.result);});},
   async clearLibrary(){await libraryReady();return transaction('library','readwrite',({data})=>data.delete('current'));},
-  async saveLibrary(folder,files){await libraryReady();return transaction('library','readwrite',({data})=>data.put({folder,files},'current'));},
+  async saveLibrary(folder,files,remoteRequired=false){await libraryReady();return transaction('library','readwrite',({data})=>data.put({folder,files,remoteRequired},'current'));},
   async importUsers(rows){
    if(!Array.isArray(rows)||rows.length>12000)throw Error('备份条目数量无效');
    const checked=rows.map(userRow);if(checked.reduce((n,row)=>n+row.bytes.byteLength,0)>256*1024**2)throw Error('备份数据过大');

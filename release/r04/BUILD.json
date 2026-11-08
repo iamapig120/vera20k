@@ -1,0 +1,37 @@
+{
+  "project": "YR Web On-demand (unofficial modified integration based on VERA20K)",
+  "release": "20261108-r04",
+  "repository": "iamapig120/vera20k",
+  "branch": "web-ondemand-toy-20261108",
+  "parent": "6994a5109615a840dbbdd222dce8d63ce88b7553",
+  "upstreamRevision": "11eea2cec0e92c466d7dd3d1738d888a2f6015b7",
+  "engineSrcTree": "ee566d57ae7ea655c38d813f6ec0ccf7fecd4001",
+  "wasm": {
+    "bytes": 26733133,
+    "sha256": "8e201bc8c3686596bff4ce41eec9cb375378fc5f3a450566d4739aecc7ae540c"
+  },
+  "launcher": "launcher.d1b63dc4067ea89e.js",
+  "esbuild": "0.28.2",
+  "wasmBindgen": "0.2.127",
+  "rustc": "1.97.0",
+  "manifest": "https://oss.bysb.net/yr_res/vera20k-zh_hans-ai-261107/manifest.json",
+  "manifestSha256": "4188dee9aa1dbd2472d9c3a8bd11ffd9b79e7c8c12573cc2e39253bdb1724652",
+  "checks": {
+    "javascriptTests": 65,
+    "oldDescriptionCrashReproduced": true,
+    "modernGame": true,
+    "legacyWebglMenu": true,
+    "manifestRetry": true,
+    "bootstrapRetry": true,
+    "hotMenuAdditionalResourceRequests": 0,
+    "referrerHeaders": true,
+    "sourcePatchReconstructsCompiledSrc": true
+  },
+  "limitations": [
+    "Native fullscreen is denied by this headless Edge, including a minimal page with an active user gesture. Fullscreen target containment, visible loading UI and Toy landscape/immersive API calls were tested; actual App immersion/orientation remains unverified.",
+    "The App SDK was stubbed in local tests; production references the official SDK URL.",
+    "Muted tests; no listening, multiplayer, all campaigns or every save/load scale path claimed.",
+    "Default internal GameSpeed is 2 for fresh Web profiles; explicit saved choices are retained. New wall-clock simulation timing was not instrumented.",
+    "The save/load patch was ported to this pinned renderer and compiled; the previous 66-test result on a newer upstream revision is not claimed for this port."
+  ]
+}

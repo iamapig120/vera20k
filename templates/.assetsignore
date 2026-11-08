@@ -14,3 +14,6 @@
 
 !lobby.js
 !network.js
+
+!runtime.mjs
+!fullscreen.mjs

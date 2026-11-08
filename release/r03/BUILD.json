@@ -1,0 +1,42 @@
+{
+  "project": "YR Web On-demand (unofficial modified integration based on VERA20K)",
+  "release": "20261107-r03",
+  "repository": "iamapig120/vera20k",
+  "branch": "web-ondemand-toy-r03-20261107",
+  "parentBranch": "web-preview-source",
+  "parentCommit": "6994a5109615a840dbbdd222dce8d63ce88b7553",
+  "upstreamRepository": "https://github.com/YuriPlanet/vera20k.git",
+  "upstreamRevision": "11eea2cec0e92c466d7dd3d1738d888a2f6015b7",
+  "adaptedSourceCommit": "20d7b420ce4260e1df596ebe9090ded04966ee1d",
+  "webBaselineRevision": "5afb0d2166f3d6d2bb95e265982838feba116f3f",
+  "esbuild": "0.28.2",
+  "wasm": {
+    "bytes": 26721124,
+    "sha256": "905c64e7a1990f819e25da4fa4b60636e59a8d8d74c2278def6b80441f3d3671"
+  },
+  "launcher": "launcher.aadd281b72b4c749.js",
+  "toyZip": {
+    "filename": "YR-Web-Toy-JS-zhHans-AI.zip",
+    "bytes": 11166452,
+    "sha256": "0ead462fffc74d733b63e8f5dc1687d2532763f69dbbe7a7b28c8be60712f1a3"
+  },
+  "sourceSupplement": {
+    "filename": "YR-Web-Toy-JS-Build-Source-Supplement.zip",
+    "sha256": "55ccdba9929bc7779622d9172cdc05fb14402f6bb774a0832ec4cc5a507b3520"
+  },
+  "gameResources": "Not part of this source publication; use your own lawfully obtained data.",
+  "verification": "Isolated muted headless Edge: settings/skirmish, first Allied mission/movie/subtitles, cold/hot cache, URL restore, failure/retry; no runtime .mjs requests. Actual Toy-host acceptance and multiplayer are unverified.",
+  "engineSourceVerification": {
+    "reconstructedTree": "d1705f51fabbed13e2b180984aa6637590803c0f",
+    "releaseTree": "e9e3e17a8c455d4edc2adeb023b685c6e0d3e9f6",
+    "compiledSrcTree": "23d38710de002bf6c7de48e9a64dae95320e2867",
+    "allTrackedContentMatchesAfterCheckoutLineEndingNormalization": true,
+    "checkoutOnlyDifferences": [
+      ".github/release/linux/appimage.sh",
+      "tools/map_observation.wall-owner-repair.scenario",
+      "tools/procedural_drawing_oracle/magnetic_wave/ordinary-tele-magnetic.map",
+      "tools/spawn/run.sh"
+    ],
+    "note": "Two upstream test fixtures have checkout line endings; two unrelated Linux/spawn helper scripts retain upstream executable modes instead of the Windows-exported mode. No compiled source content differs."
+  }
+}

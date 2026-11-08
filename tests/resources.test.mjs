@@ -80,7 +80,7 @@ test('dropped folder readers consume all batches', async () => {
 test('HTTPS download streams progress, omits credentials, and feeds real ZIP extraction', async () => {
   const bytes=zip(gameEntries), progress=[];
   const downloaded=await downloadZip('https://fixture.example/game.zip?temporary=secret', {onProgress:p=>progress.push(p),fetchImpl:async(url,options)=>{
-    assert.equal(options.credentials,'omit'); assert.equal(options.mode,'cors'); assert.equal(options.referrerPolicy,'no-referrer');
+    assert.equal(options.credentials,'omit'); assert.equal(options.mode,'cors'); assert.equal(options.referrerPolicy,'strict-origin-when-cross-origin');
     return new Response(new ReadableStream({start(c){c.enqueue(bytes.subarray(0,50));c.enqueue(bytes.subarray(50));c.close();}}),{headers:{'Content-Length':String(bytes.length)}});
   }});
   assert.equal(libraryFromEntries(await entriesFromZip(downloaded),'remote').files.length,4);

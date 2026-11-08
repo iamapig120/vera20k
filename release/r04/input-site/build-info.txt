@@ -1,0 +1,4 @@
+YR Web On-demand unofficial modified integration, based on VERA20K
+Toy release 20261108-r04
+Engine wasm SHA256 8e201bc8c3686596bff4ce41eec9cb375378fc5f3a450566d4739aecc7ae540c
+Corresponding source: https://github.com/iamapig120/vera20k/tree/web-ondemand-toy-20261108

@@ -1,5 +1,27 @@
+diff --git a/src/app/audio_runtime.rs b/src/app/audio_runtime.rs
+index 5463558e0..ed4d68478 100644
+--- a/src/app/audio_runtime.rs
++++ b/src/app/audio_runtime.rs
+@@ -326,6 +326,17 @@ impl AppAudioRuntime {
+         main: &mut crate::sim::rng::MainRngDraws,
+     ) {
+         self.service_audio_outputs(wall_ms, paused);
++        if catalog
++            .and_then(|c| c.index())
++            .is_some_and(|index| index.is_deferred())
++            && self
++                .sfx_player
++                .as_ref()
++                .is_some_and(SfxPlayer::has_pending_audio)
++        {
++            crate::assets::deferred_assets::request_audio();
++            return;
++        }
+         let retained = main.clone();
+         let mut draw_main =
+             crate::audio::sfx::PlaybackDraws::new(move |low, high| retained.ranged(low, high));
 diff --git a/src/app/diagnostics/shell_capture/movies.rs b/src/app/diagnostics/shell_capture/movies.rs
-index e6da4331e..d0211bcbd 100644
+index 6754c2c7e..3baac4d22 100644
 --- a/src/app/diagnostics/shell_capture/movies.rs
 +++ b/src/app/diagnostics/shell_capture/movies.rs
 @@ -23,6 +23,7 @@ pub(super) use opening::OpeningTarget;
@@ -22,128 +44,175 @@ index e6da4331e..d0211bcbd 100644
  /// Row-0 press point for the selected-list checkpoint (inside `0x744`).
  const LIST_ROW0_POINT: (f32, f32) = (150.0, 137.0);
  /// Down-arrow press point of the 17-row list's scrollbar.
-diff --git a/src/app/frontend/skirmish_shell_render.rs b/src/app/frontend/skirmish_shell_render.rs
-index 65e697012..b930daf6b 100644
---- a/src/app/frontend/skirmish_shell_render.rs
-+++ b/src/app/frontend/skirmish_shell_render.rs
-@@ -788,18 +788,18 @@ fn render_skirmish_shell_with_atlas(
-                     setup_layout,
-                     sliding,
-                 );
--                shell_draws.extend(crate::render::shell_paint::paint_labels_at_depth(
-+                shell_draws.extend(paint_map_dialog_statics(
-                     &state.renderer.bit_font,
-                     &setup_statics,
--                    SHELL_DROPDOWN_TEXT_DEPTH - 0.00008,
-+                    setup_layout.scale,
-                 ));
-             }
-         } else if !leaving {
-             push_choose_map_modal_text_draws(&mut shell_draws, state, choose_map_layout, sliding);
--            shell_draws.extend(crate::render::shell_paint::paint_labels_at_depth(
-+            shell_draws.extend(paint_map_dialog_statics(
-                 &state.renderer.bit_font,
-                 &chooser_statics,
--                SHELL_DROPDOWN_TEXT_DEPTH - 0.00008,
-+                choose_map_layout.scale,
-             ));
+diff --git a/src/app/frame.rs b/src/app/frame.rs
+index d4843ea09..fd39aa4e7 100644
+--- a/src/app/frame.rs
++++ b/src/app/frame.rs
+@@ -123,6 +123,10 @@ impl App {
+         simulation_allowed: bool,
+         catch_up_allowed: bool,
+     ) -> RuntimeServiceResult {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if super::remote_assets::pump(state) {
++            return RuntimeServiceResult::default();
++        }
+         if state.persistence.pending_load.is_some() {
+             return RuntimeServiceResult::default();
          }
-     }
-@@ -1042,12 +1042,94 @@ fn clear_shell_target(
-     });
+@@ -677,6 +681,10 @@ impl App {
+         >,
+         pass: FramePass,
+     ) -> Result<FrameRenderOutcome> {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if super::remote_assets::pump(state) {
++            return Ok(FrameRenderOutcome::Deferred);
++        }
+         if let Some(presented) = crate::app::persistence::commands::pump_saved_game_load(state) {
+             return Ok(if presented {
+                 FrameRenderOutcome::Presented
+diff --git a/src/app/frontend/fullscreen_movie.rs b/src/app/frontend/fullscreen_movie.rs
+index 36365254a..78f2a9a82 100644
+--- a/src/app/frontend/fullscreen_movie.rs
++++ b/src/app/frontend/fullscreen_movie.rs
+@@ -101,6 +101,14 @@ pub(crate) fn movie_rect(screen_w: i32, screen_h: i32, movie_w: i32, movie_h: i3
+     [(screen_w - w) / 2, (screen_h - h) / 2, w, h]
  }
  
-+fn paint_map_dialog_statics(
-+    font: &BitFont,
-+    labels: &[crate::render::shell_paint::PaintLabel<'_>],
-+    scale: crate::ui::shell::geom::ShellScale,
-+) -> Vec<ShellTextDraw> {
-+    crate::render::shell_paint::paint_labels_at_depth_scaled(
-+        font,
-+        labels,
-+        SHELL_DROPDOWN_TEXT_DEPTH - 0.00008,
-+        scale.factor(),
-+    )
++fn subtitle_scale(screen_w: i32, screen_h: i32, movie_w: i32, movie_h: i32) -> f32 {
++    // Radar clips can be 140x110; their fixed 640-wide caption band must not
++    // inherit that image's extreme fullscreen enlargement.
++    let width = movie_w.max(BAND_WIDTH);
++    let height = movie_h.max(480);
++    movie_rect(screen_w, screen_h, width, height)[2] as f32 / width as f32
 +}
 +
- #[cfg(test)]
- mod tests {
-     use super::*;
-     use crate::ui::shell::geom::ShellScale;
-     use crate::ui::skirmish_shell::{compute_fixed_800_layout, compute_layout};
- 
-+    #[test]
-+    fn map_dialog_statics_keep_page_scale_and_clipping() {
-+        use crate::ui::shell::static_reveal::{Kind1RevealWindow, StaticPaint};
-+        use crate::ui::skirmish_shell::{
-+            compute_responsive_choose_map_modal_layout, compute_responsive_random_map_setup_layout,
-+        };
+ pub(crate) struct FullscreenMovie {
+     playback: crate::app::movie_playback::MoviePlayback,
+     return_to: MovieReturn,
+@@ -188,16 +196,32 @@ impl FullscreenMovie {
+             self.surface().width() as i32,
+             self.surface().height() as i32,
+         );
+-        let [movie_x, movie_y, scaled_w, _] = movie_rect(screen_w, screen_h, movie_w, movie_h);
+-        let scale = scaled_w as f32 / movie_w as f32;
++        let [movie_x, movie_y, scaled_w, scaled_h] =
++            movie_rect(screen_w, screen_h, movie_w, movie_h);
++        let scale = subtitle_scale(screen_w, screen_h, movie_w, movie_h);
++        // At 640x480 an 800x600 retail picture is cropped; captions still
++        // belong inside the visible portion rather than below the window.
++        let visible_w = scaled_w.min(screen_w - movie_x);
++        let visible_h = scaled_h.min(screen_h - movie_y);
++        let movie_w = (visible_w as f32 / scale).round() as i32;
++        let movie_h = (visible_h as f32 / scale).round() as i32;
+         let layout = font.wrap_layout(text, BAND_WIDTH as u32);
+-        let [x, y] = text_origin(
++        let [x, mut y] = text_origin(
+             cue,
+             layout.width as i32,
+             font.cell_height() as i32,
+             movie_w,
+             movie_h,
+         );
++        if (crate::app::frontend::shell_layout::window_takes_fitted_shell((
++            screen_w as u32,
++            screen_h as u32,
++        )) || visible_w != scaled_w
++            || visible_h != scaled_h)
++            && layout.height <= BAND_HEIGHT as u32
++        {
++            y = y.clamp(movie_h - BAND_HEIGHT, movie_h - layout.height as i32);
++        }
+         let [r, g, b, _] = ACTIVE_RETAIL_RGB565_PRESENTATION.quantize_rgba8([
+             cue.rgb()[0],
+             cue.rgb()[1],
+@@ -208,14 +232,17 @@ impl FullscreenMovie {
+             font,
+             text,
+             TextRect {
+-                x: (x as f32 * scale) as i32,
+-                y: (y as f32 * scale) as i32,
+-                w: (BAND_WIDTH as f32 * scale) as u32,
+-                h: (BAND_HEIGHT as f32 * scale) as u32,
++                x: 0,
++                y: 0,
++                w: (BAND_WIDTH as f32 * scale).round() as u32,
++                h: (BAND_HEIGHT as f32 * scale).round() as u32,
+             },
+             [r, g, b].map(|channel| f32::from(channel) / 255.0),
+             ShellAlign::NONE,
+-            [movie_x as f32, movie_y as f32],
++            [
++                movie_x as f32 + x as f32 * scale,
++                movie_y as f32 + y as f32 * scale,
++            ],
+             TEXT_DEPTH,
+             scale,
+         );
+@@ -226,24 +253,24 @@ impl FullscreenMovie {
+         let right = (x + layout.width as i32).min(band[0] + BAND_WIDTH);
+         let bottom = (y + layout.height as i32).min(band[1] + BAND_HEIGHT);
+         let to_screen = |value: i32, origin: i32, limit: i32| {
+-            (origin + (value as f32 * scale).round() as i32).clamp(0, limit)
++            (origin as f32 + value as f32 * scale).clamp(0.0, limit as f32)
+         };
+         let [x0, y0] = [
+-            to_screen(left, movie_x, screen_w),
+-            to_screen(top, movie_y, screen_h),
++            to_screen(left, movie_x, screen_w).floor() as u32,
++            to_screen(top, movie_y, screen_h).floor() as u32,
+         ];
+         let [x1, y1] = [
+-            to_screen(right, movie_x, screen_w),
+-            to_screen(bottom, movie_y, screen_h),
++            to_screen(right, movie_x, screen_w).ceil() as u32,
++            to_screen(bottom, movie_y, screen_h).ceil() as u32,
+         ];
+         if x1 <= x0 || y1 <= y0 {
+             return None;
+         }
+         draw.scissor = ScissorRect {
+-            x: x0 as u32,
+-            y: y0 as u32,
+-            w: (x1 - x0) as u32,
+-            h: (y1 - y0) as u32,
++            x: x0,
++            y: y0,
++            w: x1 - x0,
++            h: y1 - y0,
+         };
+         Some(draw)
+     }
+@@ -284,4 +311,30 @@ mod tests {
+         assert_eq!(movie_rect(1024, 768, 800, 600), [0, 0, 1024, 768]);
+         assert_eq!(movie_rect(400, 300, 800, 600), [0, 0, 400, 300]);
+     }
 +
-+        let font = crate::render::bit_font::tests::make_test_font(
-+            &[('字' as u16, 12), (u16::from(b'A'), 6)],
-+            4,
-+        );
-+        let draw = |width, height, random, sample: &str| {
-+            let (title, help, scale) = if random {
-+                let layout = compute_responsive_random_map_setup_layout(width, height);
-+                (layout.title, layout.status_help, layout.scale)
-+            } else {
-+                let layout = compute_responsive_choose_map_modal_layout(width, height);
-+                (layout.title, layout.status_help, layout.scale)
-+            };
-+            let shown = StaticPaint {
-+                text: sample,
-+                window: Kind1RevealWindow {
-+                    count: u32::MAX,
-+                    range: 0,
-+                },
-+            };
-+            let draws = paint_map_dialog_statics(
-+                &font,
-+                &[
-+                    text::static_label(shown, title, ShellAlign::H_CENTER),
-+                    text::static_label(shown, help, ShellAlign::NONE),
-+                ],
-+                scale,
-+            );
-+            (draws, [title, help], scale.factor())
-+        };
-+        for (random, sample) in [true, false].into_iter().flat_map(|random| {
-+            ["字".repeat(90), "A ".repeat(100)].map(|sample| (random, sample))
-+        }) {
-+            let base = draw(800, 600, random, &sample).0;
-+            assert!(base.iter().all(|draw| !draw.instances.is_empty()));
-+            for (width, height) in [(800, 600), (1200, 900), (1600, 1200)] {
-+                let (fitted, rects, factor) = draw(width, height, random, &sample);
-+                for ((original, scaled), rect) in base.iter().zip(&fitted).zip(rects) {
-+                    assert_eq!(scaled.instances.len(), original.instances.len());
-+                    assert_eq!(
-+                        [
-+                            scaled.scissor.x,
-+                            scaled.scissor.y,
-+                            scaled.scissor.w,
-+                            scaled.scissor.h,
-+                        ],
-+                        [rect.x as u32, rect.y as u32, rect.w as u32, rect.h as u32],
-+                    );
-+                    for (a, b) in original.instances.iter().zip(&scaled.instances) {
-+                        assert_eq!(b.size, a.size.map(|v| v * factor));
-+                        assert_eq!(b.position, a.position.map(|v| v * factor));
-+                        assert_eq!(b.depth, a.depth);
-+                    }
-+                }
-+                let help = &fitted[1];
-+                assert!(
-+                    (help.instances[0].position[1] - rects[1].y as f32).abs() <= 0.5
-+                );
-+                assert!(help.scissor.y + help.scissor.h <= height);
-+            }
++    #[test]
++    fn radar_subtitles_use_a_screen_fitted_caption_band() {
++        for (w, h, expected) in [
++            (640, 480, 1.0),
++            (800, 600, 1.0),
++            (1280, 900, 1.875),
++            (1920, 1080, 2.25),
++            (2880, 1800, 3.75),
++            (400, 300, 0.625),
++        ] {
++            let scale = subtitle_scale(w, h, 140, 110);
++            assert_eq!(scale, expected);
++            assert!(BAND_WIDTH as f32 * scale <= w as f32);
 +        }
 +    }
 +
-     fn test_entry(width: f32, height: f32) -> SkirmishShellChromeEntry {
-         SkirmishShellChromeEntry {
-             uv_origin: [0.0, 0.0],
++    #[test]
++    fn ordinary_movie_subtitle_scaling_stays_with_its_picture() {
++        for (w, h) in [(640, 480), (800, 600), (1280, 900), (1920, 1080)] {
++            for (movie_w, movie_h) in [(640, 480), (800, 600)] {
++                let picture_scale = movie_rect(w, h, movie_w, movie_h)[2] as f32 / movie_w as f32;
++                assert_eq!(subtitle_scale(w, h, movie_w, movie_h), picture_scale);
++            }
++        }
++    }
+ }
 diff --git a/src/app/frontend/skirmish_shell_render/in_game_shell.rs b/src/app/frontend/skirmish_shell_render/in_game_shell.rs
 index 74c36354c..e1e579d56 100644
 --- a/src/app/frontend/skirmish_shell_render/in_game_shell.rs
@@ -247,11 +316,254 @@ index 96ab23798..62c9cacf2 100644
      #[test]
      fn native_group_caption_gap_and_bevel_polarity_are_preserved() {
          //61E700:207px group at95,159;17px font moves its top edge down8.
+diff --git a/src/app/frontend/skirmish_shell_render/modals.rs b/src/app/frontend/skirmish_shell_render/modals.rs
+index 3ae7c5c7a..048507c78 100644
+--- a/src/app/frontend/skirmish_shell_render/modals.rs
++++ b/src/app/frontend/skirmish_shell_render/modals.rs
+@@ -58,7 +58,9 @@ pub(crate) fn render_saved_game_loading(
+     use super::in_game_shell::{
+         InGameShellFrame, ShellFrameArt, ShellFrameCursor, ShellFrameOverlay,
+     };
+-    use crate::ui::shell::modal::{body_ok_layout, build_saved_game_loading_descriptor, control};
++    use crate::ui::shell::modal::{
++        build_saved_game_loading_descriptor, control, saved_game_loading_layout,
++    };
+ 
+     // An in-match load paints over the match frame at its source size and
+     // zooms with it; a menu load paints over the menu at the window's size.
+@@ -88,36 +90,34 @@ pub(crate) fn render_saved_game_loading(
+         .expect("loading shell chrome");
+     // 559D60 shows F0 before 69BB40 clears Session+30D8. An active load thus
+     // starts with its current side; a menu load starts with the neutral assets.
+-    let side = (state.frontend.screen == crate::ui::game_screen::GameScreen::InGame)
+-        .then(|| crate::app::presentation::sidebar_render::current_sidebar_theme(state));
+-    let layout = body_ok_layout(frame.0 as i32, frame.1 as i32);
++    let in_match = state.frontend.screen == crate::ui::game_screen::GameScreen::InGame;
++    let side =
++        in_match.then(|| crate::app::presentation::sidebar_render::current_sidebar_theme(state));
++    let (width, height) = if in_match {
++        super::in_game_shell::in_game_shell_size(state)
++    } else {
++        (frame.0 as i32, frame.1 as i32)
++    };
++    let layout = saved_game_loading_layout(width, height, in_match);
+     let descriptor = build_saved_game_loading_descriptor();
+     let body = descriptor
+         .controls
+         .iter()
+         .find(|child| child.id == control::BODY_STATIC && child.visible)
+         .expect("F0 visible body Static");
+-    let labels = [shell_paint::PaintLabel {
+-        text: super::text::localized_label(
+-            state,
+-            body.csf_key.expect("F0 loading caption"),
+-            "Mission is loading. Please wait...",
+-        )
+-        .into(),
+-        rect: layout.body,
+-        rgb: SHELL_LABEL_TEXT_RGB,
+-        align: super::text::validation_modal_body_text_align(),
+-        path_a_reveal: None,
+-    }];
+-    let modal = shell_paint::paint_modal_shp(
++    let caption = super::text::localized_label(
++        state,
++        body.csf_key.expect("F0 loading caption"),
++        "Mission is loading. Please wait...",
++    );
++    // This pinned renderer paints glyphs and panel art into the retained
++    // frame together. Map both through SidebarFrame on an active load.
++    let modal = paint_saved_game_loading(
+         &state.renderer.bit_font,
+         atlas.mode_two_dialog_background(side),
+-        shell_paint::ModalButtonFrames::default(),
+-        layout.dialog,
+-        &[],
+-        &labels,
+-        ShellScale::RETAIL,
+-        VALIDATION_MODAL_SPRITE_DEPTHS,
++        &layout,
++        &caption,
++        in_match.then(|| state.sidebar_frame()),
+     );
+     super::in_game_shell::render_shell_frame(
+         state,
+@@ -135,6 +135,67 @@ pub(crate) fn render_saved_game_loading(
+     )
+ }
+ 
++/// F0 (0x00559D60 -> 0x00623230) retains the match backing instead of
++/// repainting the Sidebar-size shell surface. Map its panel through that same
++/// SidebarFrame owner, including glyph instances and their clipping. The
++/// frame presenter then applies the match zoom once to the whole composition.
++fn paint_saved_game_loading(
++    font: &crate::render::bit_font::BitFont,
++    background: Option<SkirmishShellChromeEntry>,
++    layout: &crate::ui::shell::modal::MessageBoxLayout,
++    caption: &str,
++    sidebar: Option<crate::ui::sidebar::SidebarFrame>,
++) -> shell_paint::ModalDraw {
++    let labels = [shell_paint::PaintLabel {
++        text: caption.into(),
++        rect: layout.body,
++        rgb: SHELL_LABEL_TEXT_RGB,
++        align: super::text::validation_modal_body_text_align(),
++        path_a_reveal: None,
++    }];
++    let mut modal = shell_paint::paint_modal_shp(
++        font,
++        background,
++        shell_paint::ModalButtonFrames::default(),
++        layout.dialog,
++        &[],
++        &labels,
++        layout.scale,
++        VALIDATION_MODAL_SPRITE_DEPTHS,
++    );
++    if let Some(sidebar) = sidebar {
++        for sprite in &mut modal.sprites {
++            let rect = sidebar.rect_to_frame(crate::ui::sidebar::Rect {
++                x: sprite.position[0],
++                y: sprite.position[1],
++                w: sprite.size[0],
++                h: sprite.size[1],
++            });
++            sprite.position = [rect.x, rect.y];
++            sprite.size = [rect.w, rect.h];
++        }
++        for draw in &mut modal.text {
++            for glyph in &mut draw.instances {
++                let rect = sidebar.rect_to_frame(crate::ui::sidebar::Rect {
++                    x: glyph.position[0], y: glyph.position[1],
++                    w: glyph.size[0], h: glyph.size[1],
++                });
++                glyph.position = [rect.x, rect.y];
++                glyph.size = [rect.w, rect.h];
++            }
++            let clip = sidebar.rect_to_frame(crate::ui::sidebar::Rect {
++                x: draw.scissor.x as f32, y: draw.scissor.y as f32,
++                w: draw.scissor.w as f32, h: draw.scissor.h as f32,
++            });
++            draw.scissor.x = clip.x.round().max(0.0) as u32;
++            draw.scissor.y = clip.y.round().max(0.0) as u32;
++            draw.scissor.w = clip.w.round().max(0.0) as u32;
++            draw.scissor.h = clip.h.round().max(0.0) as u32;
++        }
++    }
++    modal
++}
++
+ /// Native owner-draw listboxes preserve a composed backing surface. On the
+ /// exact-800 chooser that backing is the Customize Battle artwork; the solid
+ /// interior exists only to keep the asset-missing fallback readable.
+@@ -748,7 +809,8 @@ pub(super) fn push_saved_browser_prompt_instances<I: Clone + PartialEq>(
+     browser: &SavedSeedBrowserState<I>,
+ ) {
+     if let Some(prompt) = browser.prompt.as_ref() {
+-        let (dialog, _, yes, no) = prompt.layout(layout.screen.w as u32, layout.screen.h as u32);
++        let (dialog, _, yes, no) =
++            prompt.layout(layout.screen.w as u32, layout.screen.h as u32, layout.scale);
+         let mut buttons = vec![shell_paint::ModalButton {
+             rect: yes,
+             pressed: browser.pressed_control == Some(SavedSeedControl::Action),
+@@ -766,8 +828,48 @@ pub(super) fn push_saved_browser_prompt_instances<I: Clone + PartialEq>(
+             super::chrome::type3_button_frames(atlas),
+             dialog,
+             &buttons,
+-            ShellScale::RETAIL,
++            layout.scale,
+             VALIDATION_MODAL_SPRITE_DEPTHS,
+         ));
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn saved_progress_panel_and_text_share_sidebar_size_and_single_zoom() {
++        use crate::render::bit_font::tests::make_test_font;
++        use crate::ui::shell::modal::saved_game_loading_layout;
++        use crate::ui::sidebar::SidebarFrame;
++        let font = make_test_font(&[(b'A' as u16, 6)], 4);
++        let background = Some(SkirmishShellChromeEntry {
++            uv_origin: [0.0; 2],
++            uv_size: [1.0; 2],
++            pixel_size: [451.0, 326.0],
++        });
++        let retail = paint_saved_game_loading(
++            &font,
++            background,
++            &saved_game_loading_layout(1600, 1200, true),
++            "A",
++            None,
++        );
++        let sidebar = SidebarFrame::new(1600, 1200, 150);
++        let (width, height) = sidebar.layout_size();
++        let enlarged = paint_saved_game_loading(
++            &font,
++            background,
++            &saved_game_loading_layout(width as i32, height as i32, true),
++            "A",
++            Some(sidebar),
++        );
++        assert_eq!(enlarged.sprites[0].size, [676.5, 489.0]);
++        assert_eq!(enlarged.sprites[0].size, retail.sprites[0].size.map(|v| v * 1.5));
++        assert_eq!(
++            enlarged.text[0].instances[0].size,
++            retail.text[0].instances[0].size.map(|v| v * 1.5),
++        );
++    }
++}
+diff --git a/src/app/frontend/skirmish_shell_render/text.rs b/src/app/frontend/skirmish_shell_render/text.rs
+index c0a9f5992..341517bbb 100644
+--- a/src/app/frontend/skirmish_shell_render/text.rs
++++ b/src/app/frontend/skirmish_shell_render/text.rs
+@@ -1716,7 +1716,7 @@ pub(super) fn push_saved_browser_prompt_text<I>(
+ ) {
+     if let Some(prompt) = browser.prompt.as_ref() {
+         let (dialog, body_rect, yes, no) =
+-            prompt.layout(layout.screen.w as u32, layout.screen.h as u32);
++            prompt.layout(layout.screen.w as u32, layout.screen.h as u32, layout.scale);
+         exclude_text_under(out, dialog);
+         let mut labels = vec![PaintLabel {
+             text: prompt.body.as_str().into(),
+@@ -1731,7 +1731,7 @@ pub(super) fn push_saved_browser_prompt_text<I>(
+                 yes,
+                 browser.pressed_control
+                     == Some(crate::ui::skirmish_shell::SavedSeedControl::Action),
+-                ShellScale::RETAIL,
++                layout.scale,
+             ),
+             rgb: SHELL_LABEL_TEXT_RGB,
+             align: ShellAlign::H_CENTER | ShellAlign::V_CENTER,
+@@ -1744,17 +1744,18 @@ pub(super) fn push_saved_browser_prompt_text<I>(
+                     rect,
+                     browser.pressed_control
+                         == Some(crate::ui::skirmish_shell::SavedSeedControl::Back0x686),
+-                    ShellScale::RETAIL,
++                    layout.scale,
+                 ),
+                 rgb: SHELL_LABEL_TEXT_RGB,
+                 align: ShellAlign::H_CENTER | ShellAlign::V_CENTER,
+                 path_a_reveal: None,
+             });
+         }
+-        out.extend(shell_paint::paint_labels_at_depth(
++        out.extend(shell_paint::paint_labels_at_depth_scaled(
+             &state.renderer.bit_font,
+             &labels,
+             SHELL_DROPDOWN_TEXT_DEPTH - 0.00013,
++            layout.scale.factor(),
+         ));
+     }
+ }
 diff --git a/src/app/handler.rs b/src/app/handler.rs
-index 12ba0ad25..36cdf51c8 100644
+index de861f6ce..6232107e2 100644
 --- a/src/app/handler.rs
 +++ b/src/app/handler.rs
-@@ -241,6 +241,12 @@ impl App {
+@@ -282,6 +282,12 @@ impl App {
          if state.platform.capture_client_size.is_some() {
              return;
          }
@@ -264,7 +576,28 @@ index 12ba0ad25..36cdf51c8 100644
          let full_screen = state.platform.window.fullscreen().is_some();
          #[cfg(target_os = "macos")]
          if !full_screen {
-@@ -1042,6 +1048,10 @@ impl ApplicationHandler for App {
+@@ -650,6 +656,20 @@ impl ApplicationHandler for App {
+         }
+ 
+         let Some(state) = &mut self.state else { return };
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if super::remote_assets::pending()
++            && !matches!(
++                &event,
++                WindowEvent::RedrawRequested
++                    | WindowEvent::CloseRequested
++                    | WindowEvent::Resized(_)
++                    | WindowEvent::ScaleFactorChanged { .. }
++                    | WindowEvent::Focused(_)
++                    | WindowEvent::Occluded(_)
++            )
++        {
++            return;
++        }
+         state.sync_cursor_space();
+         // Playback has presentation-only input. Exit is local and never
+         // schedules EventClass EXIT or changes the recorded simulation.
+@@ -1158,6 +1178,10 @@ impl ApplicationHandler for App {
                      }
                      return;
                  }
@@ -275,11 +608,23 @@ index 12ba0ad25..36cdf51c8 100644
                  // The keys above work under every layer; the rest follow it.
                  let screen = match layer {
                      InputLayer::Screen(screen) => screen,
+@@ -1870,6 +1894,11 @@ impl ApplicationHandler for App {
+             if Self::poll_network_goodbye(state, event_loop) {
+                 return;
+             }
++            #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++            if super::remote_assets::pump(state) {
++                event_loop.set_control_flow(ControlFlow::Wait);
++                return;
++            }
+             Self::follow_window_full_screen(state);
+             // cursor lock: the OS drops the clip on focus loss /
+             // Windows key, so re-assert the player's choice every frame while
 diff --git a/src/app/input/dispatch.rs b/src/app/input/dispatch.rs
-index 32b2293ac..09434337e 100644
+index 538b5b934..72ef441f8 100644
 --- a/src/app/input/dispatch.rs
 +++ b/src/app/input/dispatch.rs
-@@ -1766,6 +1766,8 @@ fn place_ready_building_for_tab(state: &mut AppState, tab: SidebarTab) {
+@@ -1904,6 +1904,8 @@ fn place_ready_building_for_tab(state: &mut AppState, tab: SidebarTab) {
  
  fn dispatch_retail_hotkey(state: &mut AppState, command: HotkeyCommand) {
      match command {
@@ -423,6 +768,44 @@ index 2f0b1fbd8..9dcf0018c 100644
      match parameter {
          Some(value) => text
              .replace("%2d", &format!("{value:2}"))
+diff --git a/src/app/loading/pump.rs b/src/app/loading/pump.rs
+index be32e9ba5..ab4cc7a8f 100644
+--- a/src/app/loading/pump.rs
++++ b/src/app/loading/pump.rs
+@@ -386,6 +386,11 @@ impl LoadingRequest {
+         }
+     }
+ 
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    pub(crate) fn remote_allowed(&self) -> bool {
++        !matches!(self.startup(), LoadingStartup::Network(_) | LoadingStartup::Replay { .. })
++    }
++
+     pub(crate) fn selected_map_file(&self) -> &str {
+         self.startup().selected_map_file()
+     }
+@@ -1362,6 +1367,8 @@ fn prepare_session_for_loading(
+ }
+ 
+ pub(crate) fn begin_loading(state: &mut AppState, request: LoadingRequest) {
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    let Some(request) = crate::app::remote_assets::map(state, request, false) else { return; };
+     state
+         .frontend
+         .multiplayer_shell_runtime
+diff --git a/src/app/mod.rs b/src/app/mod.rs
+index 603b792e5..105c1b5ff 100644
+--- a/src/app/mod.rs
++++ b/src/app/mod.rs
+@@ -54,6 +54,8 @@ pub(crate) mod diagnostics;
+ /// Which screen the game opens on: the Display list's own translation between
+ /// VERA's profile value and the window system's monitors.
+ pub(crate) mod display_target;
++#[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++pub(crate) mod remote_assets;
+ mod frame;
+ pub mod frontend;
+ mod game_data_check;
 diff --git a/src/app/persistence/keyboard.rs b/src/app/persistence/keyboard.rs
 index 5fe29ef6d..3e029530d 100644
 --- a/src/app/persistence/keyboard.rs
@@ -476,7 +859,7 @@ index 5fe29ef6d..3e029530d 100644
      // options sharing VERA.INI survive; a failed save retains current bindings.
      if let Err(error) = save(root, &defaults) {
 diff --git a/src/app/persistence/options_profile.rs b/src/app/persistence/options_profile.rs
-index cae5e7603..b0ff90df1 100644
+index 31820445b..eff89106e 100644
 --- a/src/app/persistence/options_profile.rs
 +++ b/src/app/persistence/options_profile.rs
 @@ -125,8 +125,8 @@ pub(crate) struct RetailOptionsProfile {
@@ -489,17 +872,29 @@ index cae5e7603..b0ff90df1 100644
 +    /// choice still wins. Only those surfaces read it; see
      /// [`LauncherCheckboxId::YrOriginalStyle`](crate::ui::main_menu_dialogs::options::LauncherCheckboxId::YrOriginalStyle).
      pub(crate) yr_original_style: bool,
-     /// `[VERA] SkipStartupLogo=`: start without the logo movie `Init_Game`
-@@ -240,7 +240,7 @@ impl Default for RetailOptionsProfile {
+     /// `[VERA] SkipIntro=`: start straight at the main menu, without the logo
+@@ -264,7 +264,10 @@ impl Default for RetailOptionsProfile {
+         // Retail provenance: Options profile defaults —
+         // `OptionsClass__SetDefaults` @ `0x005FA350`.
+         Self {
+-            game_speed: 3,
++            // Web integration: a fresh -SPEEDCONTROL campaign starts at the
++            // ordinary campaign pace (internal 2). Saved choices and the
++            // native desktop default are retained. This is intentional.
++            game_speed: if cfg!(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")) { 2 } else { 3 },
+             difficulty: 1,
+             // Native relies on the static object's zero initialization for
+             // this one persisted field rather than storing it in the body.
+@@ -301,7 +304,7 @@ impl Default for RetailOptionsProfile {
              zoom: crate::ui::main_menu_dialogs::options::Zoom::Auto,
              original_shape: false,
              sidebar: crate::ui::main_menu_dialogs::options::SidebarSize::Normal,
 -            yr_original_style: false,
 +            yr_original_style: true,
-             skip_startup_logo: false,
+             skip_intro: false,
              render_interpolation: false,
              mouse_wheel_zoom: false,
-@@ -1379,7 +1379,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -1509,7 +1512,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
          assert_eq!(defaults.retained_profile.zoom, Zoom::Auto);
          assert!(!defaults.retained_profile.original_shape);
          assert_eq!(defaults.retained_profile.sidebar, SidebarSize::Normal);
@@ -508,16 +903,16 @@ index cae5e7603..b0ff90df1 100644
          // Shift + left click queues one copy, as in gamemd, until it is ticked.
          assert!(!defaults.retained_profile.shift_queue);
          // Internet shows TXT_APIMISSING, as on retail, until it is ticked.
-@@ -1400,7 +1400,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -1530,7 +1533,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
          assert_eq!(load.retained_profile.zoom, Zoom::Percent(200));
          assert!(load.retained_profile.original_shape);
          assert_eq!(load.retained_profile.sidebar, SidebarSize::Large);
 -        assert!(!load.retained_profile.yr_original_style);
 +        assert!(load.retained_profile.yr_original_style);
-         assert!(!load.retained_profile.skip_startup_logo);
+         assert!(!load.retained_profile.skip_intro);
          assert!(load.retained_profile.shift_queue);
          assert!(load.retained_profile.wol_test_service);
-@@ -1641,12 +1641,13 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -1936,12 +1939,13 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
      }
  
      #[test]
@@ -537,7 +932,7 @@ index cae5e7603..b0ff90df1 100644
  
          for value in ["yes", "no"] {
              let ignored = load_snapshot(
-@@ -1654,18 +1655,18 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -1949,18 +1953,18 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
                  format!("[VERA]\nRA2Look={value}\n").as_bytes(),
              );
              assert!(
@@ -560,11 +955,640 @@ index cae5e7603..b0ff90df1 100644
          );
      }
  
+diff --git a/src/app/process_assets.rs b/src/app/process_assets.rs
+index 3a8846778..70f7cd4e0 100644
+--- a/src/app/process_assets.rs
++++ b/src/app/process_assets.rs
+@@ -508,6 +508,50 @@ impl ProcessAssets {
+         self.manager.as_ref()
+     }
+ 
++    pub(crate) fn has_deferred_audio(&self) -> bool {
++        self.audio_catalog
++            .as_ref()
++            .and_then(|c| c.index())
++            .is_some_and(|i| i.is_deferred())
++    }
++
++    /// The initial readiness stage keeps the process definitions and sticky file cache.
++    pub(crate) fn complete_initial_library(
++        &mut self,
++        root: &std::path::Path,
++        audio: bool,
++    ) -> Result<(), String> {
++        let mut next = self.reconstruct_manager(root).map_err(|e| e.to_string())?;
++        next.register_neutral_archives()
++            .map_err(|e| e.to_string())?;
++        let audio_index = if audio {
++            let loaded = next
++                .load_audio_index()
++                .map_err(|e| e.to_string())?
++                .ok_or_else(|| "completed sound bank is missing".to_owned())?;
++            let original = self
++                .audio_catalog
++                .as_ref()
++                .and_then(|c| c.index.as_ref())
++                .ok_or_else(|| "no frozen audio index".to_owned())?;
++            if loaded.sources != original.sources || loaded.index.is_deferred() {
++                return Err("sound bank completion changed the selected sources".into());
++            }
++            Some(loaded)
++        } else {
++            None
++        };
++        self.manager
++            .as_mut()
++            .ok_or_else(|| "asset manager is currently leased".to_owned())?
++            .admit_initial_library(next)
++            .map_err(|e| e.to_string())?;
++        if let Some(index) = audio_index {
++            self.audio_catalog.as_mut().unwrap().index = Some(index);
++        }
++        Ok(())
++    }
++
+     /// Field-level split borrow for a scenario rescan: the scan registers loose
+     /// YRO archives, and its PKT titles resolve through the process CSF. Both
+     /// fields live on this owner, so the pair is borrowed together.
+diff --git a/src/app/radar_movie.rs b/src/app/radar_movie.rs
+index b3d1d410f..2d1b8bb93 100644
+--- a/src/app/radar_movie.rs
++++ b/src/app/radar_movie.rs
+@@ -180,12 +180,41 @@ pub(crate) fn enqueue(state: &mut AppState, index: i32, pause_simulation: bool)
+ /// Returns whether the clip was admitted. `false` means it is missing or
+ /// undecodable; the caller decides what to do with the failed request.
+ pub(crate) fn enqueue_file(state: &mut AppState, stem: &str, pause_simulation: bool) -> bool {
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    {
++        let file = format!("{stem}.BIK");
++        if super::remote_assets::movie_missing(state, &file) {
++            let stem = stem.to_owned();
++            super::remote_assets::movie(
++                &file,
++                Box::new(move |state, bytes| {
++                    if let Some(bytes) = bytes {
++                        enqueue_file_bytes(state, &stem, pause_simulation, Some(bytes));
++                    }
++                }),
++            );
++            return true;
++        }
++    }
++    enqueue_file_bytes(state, stem, pause_simulation, None)
++}
++fn enqueue_file_bytes(
++    state: &mut AppState,
++    stem: &str,
++    pause_simulation: bool,
++    remote: Option<Arc<[u8]>>,
++) -> bool {
+     let file_name = format!("{stem}.BIK");
+-    let Some((bytes, source)) = state.process_assets.manager().and_then(|assets| {
+-        assets
+-            .get_with_source_ref(&file_name)
+-            .map(|(bytes, source)| (Arc::<[u8]>::from(bytes), source.to_string()))
+-    }) else {
++    let Some((bytes, source)) = state
++        .process_assets
++        .manager()
++        .and_then(|assets| {
++            assets
++                .get_with_source_ref(&file_name)
++                .map(|(bytes, source)| (Arc::<[u8]>::from(bytes), source.to_string()))
++        })
++        .or_else(|| remote.map(|bytes| (bytes, format!("remote:{file_name}"))))
++    else {
+         log::info!("Radar movie {file_name} is not installed");
+         return false;
+     };
+diff --git a/src/app/shell_campaign.rs b/src/app/shell_campaign.rs
+index 71900800f..b71ee7f40 100644
+--- a/src/app/shell_campaign.rs
++++ b/src/app/shell_campaign.rs
+@@ -282,6 +282,10 @@ impl App {
+         state: &mut AppState,
+         request: crate::app::loading::pump::LoadingRequest,
+     ) {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        let Some(request) = super::remote_assets::map(state, request, true) else {
++            return;
++        };
+         let movie = (|| -> anyhow::Result<Option<String>> {
+             let Some(assets) = state.process_assets.manager() else {
+                 return Ok(None);
+diff --git a/src/app/shell_movies_credits.rs b/src/app/shell_movies_credits.rs
+index b487b378f..2b0cf2b8f 100644
+--- a/src/app/shell_movies_credits.rs
++++ b/src/app/shell_movies_credits.rs
+@@ -5,8 +5,8 @@
+ 
+ use crate::sim::trigger_runtime::ThemeRequest;
+ use crate::ui::shell::list::ListMetrics;
+-use std::sync::Arc;
+ use crate::util::time::Instant;
++use std::sync::Arc;
+ 
+ use super::{App, AppState};
+ use crate::app::frontend::credits_roll::{
+@@ -241,6 +241,35 @@ impl App {
+ 
+     /// Play_Movie `0x005BED40` from the shell.
+     pub(super) fn start_fullscreen_movie(state: &mut AppState, name: &str, return_to: MovieReturn) {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        {
++            let file = format!("{}.BIK", movie_stem(name));
++            let native_skips = matches!(&return_to, MovieReturn::RunningScenario)
++                && state
++                    .match_state
++                    .sim_runtime
++                    .as_ref()
++                    .is_some_and(|r| r.simulation.session().game_mode_nonzero());
++            if !native_skips && super::remote_assets::movie_missing(state, &file) {
++                let name = name.to_owned();
++                super::remote_assets::movie(
++                    &file,
++                    Box::new(move |state, bytes| {
++                        Self::start_fullscreen_movie_bytes(state, &name, return_to, bytes);
++                    }),
++                );
++                return;
++            }
++        }
++        Self::start_fullscreen_movie_bytes(state, name, return_to, None);
++    }
++
++    fn start_fullscreen_movie_bytes(
++        state: &mut AppState,
++        name: &str,
++        return_to: MovieReturn,
++        remote: Option<Arc<[u8]>>,
++    ) {
+         let running_scenario = matches!(&return_to, MovieReturn::RunningScenario);
+         // The calling dialog is destroyed before the movie state runs.
+         Self::destroy_current_shell_dialog(state);
+@@ -270,6 +299,8 @@ impl App {
+                 .get_with_source_ref(&file_name)
+                 .map(|(bytes, source)| (Arc::<[u8]>::from(bytes), source.to_string()))
+         });
++        let resolved =
++            resolved.or_else(|| remote.map(|bytes| (bytes, format!("remote:{file_name}"))));
+         let Some((bytes, source)) = resolved else {
+             // No .BIK (and no VQA decoder is needed: retail YR ships none):
+             // Play_Movie returns with no visible or audible change.
+@@ -388,7 +419,7 @@ impl App {
+         }
+     }
+ 
+-    fn return_from_fullscreen_movie(state: &mut AppState, return_to: MovieReturn) {
++    pub(super) fn return_from_fullscreen_movie(state: &mut AppState, return_to: MovieReturn) {
+         match return_to {
+             // The frame loop presents the splash, then starts the pending
+             // intro, then paints the shell (`App::render_frame`).
+diff --git a/src/assets/asset_manager.rs b/src/assets/asset_manager.rs
+index cfa4c0a95..8ad9b3d79 100644
+--- a/src/assets/asset_manager.rs
++++ b/src/assets/asset_manager.rs
+@@ -462,6 +462,109 @@ impl AssetManager {
+         &self.ini_roots
+     }
+ 
++    /// Complete a verified bootstrap library before the first scenario. Sticky reads survive.
++    pub fn admit_initial_library(&mut self, next: Self) -> Result<(), AssetError> {
++        let fail = |detail: &str| AssetError::ParseError {
++            format: "initial resource stage".into(),
++            detail: detail.to_owned(),
++        };
++        if self.active_theater.is_some() || self.ini_roots != next.ini_roots {
++            return Err(fail(
++                "resource stage must precede theater activation and keep the INI roots",
++            ));
++        }
++        for name in [
++            self.ini_roots.rules(),
++            self.ini_roots.art(),
++            self.ini_roots.ai(),
++            self.ini_roots.sound(),
++            self.ini_roots.eva(),
++        ] {
++            if self.get_ref(name) != next.get_ref(name) {
++                return Err(fail("resource stage changed a process definition"));
++            }
++        }
++        let cache = self
++            .mix_file_cache
++            .lock()
++            .unwrap_or_else(|p| p.into_inner());
++        for (id, cached) in cache.iter() {
++            let loose = next.loose_files.values().find(|loose| {
++                loose
++                    .source_name
++                    .eq_ignore_ascii_case(&cached.source_archive)
++            });
++            let candidate = if let Some(loose) = loose {
++                loose.bytes()
++            } else {
++                next.lookup_index.get(id).and_then(|where_| {
++                    let archive = &next.archives[where_.archive_index];
++                    archive
++                        .name
++                        .eq_ignore_ascii_case(&cached.source_archive)
++                        .then(|| archive.archive.get_by_id(*id))
++                        .flatten()
++                })
++            };
++            if candidate != Some(cached.bytes.as_ref()) {
++                return Err(fail("resource stage changed a sticky file winner"));
++            }
++        }
++        drop(cache);
++        self.archives = next.archives;
++        self.archive_catalog = next.archive_catalog;
++        self.lookup_index = next.lookup_index;
++        self.loose_files = next.loose_files;
++        self.audio_pairs = next.audio_pairs;
++        Ok(())
++    }
++
++    /// Existing leaf data may not change when a bootstrap archive is completed.
++    pub fn validate_archive_expansion(
++        previous: Arc<[u8]>,
++        complete: Arc<[u8]>,
++    ) -> Result<(), AssetError> {
++        fn check(old: &MixArchive, full: &MixArchive, depth: usize) -> Result<(), AssetError> {
++            if depth > 8 {
++                return Err(AssetError::InvalidMixHeader {
++                    reason: "resource stage nesting exceeds eight levels".into(),
++                });
++            }
++            for entry in old.entries() {
++                let Some(next) = full.get_by_id(entry.id) else {
++                    return Err(AssetError::InvalidMixHeader {
++                        reason: "stage removed a bootstrap member".into(),
++                    });
++                };
++                let Some(bytes) = old.get_by_id(entry.id) else {
++                    return Err(AssetError::InvalidMixHeader {
++                        reason: "invalid bootstrap member bounds".into(),
++                    });
++                };
++                if KNOWN_NESTED_MIX_NAMES
++                    .iter()
++                    .any(|name| mix_hash(name) == entry.id)
++                {
++                    check(
++                        &MixArchive::from_bytes(bytes.to_vec())?,
++                        &MixArchive::from_bytes(next.to_vec())?,
++                        depth + 1,
++                    )?;
++                } else if bytes != next {
++                    return Err(AssetError::InvalidMixHeader {
++                        reason: "stage changed a bootstrap member".into(),
++                    });
++                }
++            }
++            Ok(())
++        }
++        check(
++            &MixArchive::from_shared(previous)?,
++            &MixArchive::from_shared(complete)?,
++            0,
++        )
++    }
++
+     /// Read-only INI tooling without a complete retail installation. No game
+     /// archives are implicitly registered; the probe may explicitly use the
+     /// existing load_all_disk_mixes widening. Not a gameplay constructor.
+@@ -665,6 +768,43 @@ impl AssetManager {
+             let Some(pair) = self.audio_pairs.first() else {
+                 return Ok(None);
+             };
++            if pair.bag.is_none()
++                && let (Some(idx), Some(bank)) =
++                    (&pair.idx, crate::assets::deferred_assets::bank_metadata())
++            {
++                let idx = self.selected_audio_ref(idx).ok_or_else(|| missing(idx))?;
++                let hash = crate::util::sha256::sha256_hex(idx.bytes);
++                if hash != bank.index_sha256 {
++                    return Err(AssetError::ParseError {
++                        format: "deferred audio index".into(),
++                        detail: "index metadata does not match the selected source".into(),
++                    });
++                }
++                let index =
++                    AudioIndex::from_idx_metadata(idx.bytes, bank.size).ok_or_else(|| {
++                        AssetError::ParseError {
++                            format: "audio.idx".into(),
++                            detail: "invalid deferred index".into(),
++                        }
++                    })?;
++                return Ok(Some(LoadedAudioIndex {
++                    index,
++                    sources: AudioIndexSources {
++                        idx: AudioSourceIdentity {
++                            source_archive: idx.source_archive.to_owned(),
++                            entry_id: idx.entry_id,
++                            payload_len: idx.bytes.len(),
++                            source_sha256: hash,
++                        },
++                        bag: AudioSourceIdentity {
++                            source_archive: bank.source_archive,
++                            entry_id: mix_hash("audio.bag"),
++                            payload_len: bank.size,
++                            source_sha256: bank.sha256,
++                        },
++                    },
++                }));
++            }
+             let (Some(idx), Some(bag)) = (&pair.idx, &pair.bag) else {
+                 return Ok(None);
+             };
+diff --git a/src/assets/audio_bag.rs b/src/assets/audio_bag.rs
+index 4c445a702..fea087396 100644
+--- a/src/assets/audio_bag.rs
++++ b/src/assets/audio_bag.rs
+@@ -97,6 +97,7 @@ pub struct AudioIndex {
+     entries: Vec<AudioBagEntry>,
+     /// Backing files, retained independently: offsets stay relative to their BAG.
+     bag_data: Vec<Vec<u8>>,
++    deferred_bag_len: Option<usize>,
+     /// Parallel to entries; constructed by parsing or the sole merge owner below.
+     entry_bags: Vec<usize>,
+     #[cfg(feature = "ares")]
+@@ -118,6 +119,16 @@ impl AudioIndex {
+         Self::parse(idx_data, bag_data, IndexLayout::Stock)
+     }
+ 
++    /// Index admission is independent of the bank payload. Playback waits for its source stage.
++    pub fn from_idx_metadata(idx_data: &[u8], bag_len: usize) -> Option<Self> {
++        let mut index = Self::parse(idx_data, Vec::new(), IndexLayout::Stock)?;
++        index.deferred_bag_len = Some(bag_len);
++        Some(index)
++    }
++    pub fn is_deferred(&self) -> bool {
++        self.deferred_bag_len.is_some()
++    }
++
+     /// Installed Ares AudioBag::Open1005AA00, selected by Audio_Load4011C0.
+     /// See tools/rules_oracle/ares_audio_bags.md and its executed controls.
+     #[cfg(feature = "ares")]
+@@ -205,6 +216,7 @@ impl AudioIndex {
+         Some(Self {
+             entries,
+             bag_data: vec![bag_data],
++            deferred_bag_len: None,
+             entry_bags: vec![0; entry_count],
+             #[cfg(feature = "ares")]
+             layout,
+@@ -230,6 +242,7 @@ impl AudioIndex {
+             entries,
+             entry_bags,
+             bag_data: files,
++            deferred_bag_len: None,
+             layout: IndexLayout::Ares,
+         }
+     }
+@@ -279,6 +292,9 @@ impl AudioIndex {
+ 
+     /// Exact binary search by uppercase name.
+     fn get_exact(&self, name: &str) -> Option<(&AudioBagEntry, &[u8])> {
++        if self.is_deferred() {
++            return None;
++        }
+         let idx = self.find_sample_index(name)?;
+         let entry = &self.entries[idx];
+         let start = entry.offset as usize;
+diff --git a/src/assets/mix_archive.rs b/src/assets/mix_archive.rs
+index 9a91f010e..63b6bcd03 100644
+--- a/src/assets/mix_archive.rs
++++ b/src/assets/mix_archive.rs
+@@ -207,6 +207,14 @@ impl std::ops::Deref for SharedBytes {
+ }
+ 
+ impl MixArchive {
++    pub fn from_shared(bytes: Arc<[u8]>) -> Result<Self, AssetError> {
++        let len = bytes.len();
++        Self::from_data(MixData {
++            bytes: MixBytes::Owned(bytes),
++            start: 0,
++            len,
++        })
++    }
+     /// Parse a MIX archive from raw bytes.
+     ///
+     /// Detects old vs new format by checking the first u16:
+diff --git a/src/assets/mod.rs b/src/assets/mod.rs
+index bf717b26f..c8b92d2b4 100644
+--- a/src/assets/mod.rs
++++ b/src/assets/mod.rs
+@@ -30,6 +30,7 @@ pub mod bink_decode;
+ pub mod bink_file;
+ pub(crate) mod blowfish;
+ pub mod csf_file;
++pub mod deferred_assets;
+ pub mod error;
+ pub mod fnt_file;
+ pub mod format_sniff;
+diff --git a/src/audio/music.rs b/src/audio/music.rs
+index f18b39c27..185033549 100644
+--- a/src/audio/music.rs
++++ b/src/audio/music.rs
+@@ -126,6 +126,7 @@ pub struct MusicPlayer {
+     /// rodio mixer device sink — must be kept alive or all audio stops.
+     _device: MusicOutput,
+     current_player: Option<Player>,
++    pending_remote: Option<String>,
+     volume: f64,
+     /// The Theme stream's own `+0x10` interp (`stream+0x14 -> +0x10`), built
+     /// by the stream constructor at rate `0x10624D` (1000 ms from full to
+@@ -161,6 +162,7 @@ impl MusicPlayer {
+         Self {
+             _device: device,
+             current_player: None,
++            pending_remote: None,
+             volume: DEFAULT_SCORE_VOLUME,
+             own: VolumeInterp::new(VOLUME_SCALE, 0),
+             focus_output_scale: 1.0,
+@@ -175,6 +177,9 @@ impl MusicPlayer {
+     }
+ 
+     pub(crate) fn state(&self) -> MusicOutputState {
++        if self.pending_remote.is_some() {
++            return MusicOutputState::Playing;
++        }
+         match self.current_player.as_ref() {
+             Some(player) if player.empty() => MusicOutputState::Finished,
+             Some(_) if self.own.moving() => MusicOutputState::Ramping,
+@@ -184,9 +189,17 @@ impl MusicPlayer {
+     }
+ 
+     pub(crate) fn submit(&mut self, prepared: PreparedTrack) -> bool {
++        if let Some(name) = prepared.deferred_name.as_ref() {
++            self.stop();
++            self.pending_remote = Some(name.clone());
++            self.own.set_target_immediate(VOLUME_SCALE);
++            self.own.tick(0);
++            return true;
++        }
+         let Some(sample_rate) = NonZero::new(prepared.sample_rate) else {
+             return false;
+         };
++        self.pending_remote = None;
+         if let Some(player) = self.current_player.take() {
+             player.stop();
+         }
+@@ -208,11 +221,28 @@ impl MusicPlayer {
+     }
+ 
+     pub fn stop(&mut self) {
++        self.pending_remote = None;
+         if let Some(player) = self.current_player.take() {
+             player.stop();
+         }
+     }
+ 
++    pub(crate) fn pending_remote(&self) -> Option<&str> {
++        self.pending_remote.as_deref()
++    }
++    pub(crate) fn fulfill_remote(&mut self, name: &str, bytes: std::sync::Arc<[u8]>) -> bool {
++        if self.pending_remote.as_deref() != Some(name) {
++            return false;
++        }
++        let stem = name.strip_suffix(".WAV").unwrap_or(name);
++        let file = crate::assets::mix_archive::SharedBytes::from(bytes);
++        let Some(prepared) = PreparedTrack::streamed(stem, &file) else {
++            return false;
++        };
++        self.pending_remote = None;
++        self.submit(prepared)
++    }
++
+     /// Play_Movie `0x005BED40` blocks and pauses every stream player
+     /// (`0x00408270`) and resumes them afterwards (`0x00408230`), so the
+     /// theme continues from where it stopped rather than restarting.
+diff --git a/src/audio/sfx.rs b/src/audio/sfx.rs
+index 2fae6eb9c..8721aa97f 100644
+--- a/src/audio/sfx.rs
++++ b/src/audio/sfx.rs
+@@ -1378,6 +1378,9 @@ fn open_sfx_sink() -> Result<SfxOutput, String> {
+ }
+ 
+ impl SfxPlayer {
++    pub(crate) fn has_pending_audio(&self) -> bool {
++        !self.pending.is_empty() || !self.coordinate_requests.is_empty()
++    }
+     /// Create a new SfxPlayer. Returns None if audio output cannot be opened.
+     pub fn new() -> Option<Self> {
+         let device = open_sfx_sink()
+diff --git a/src/audio/theme.rs b/src/audio/theme.rs
+index 2193e3ea3..9db433cff 100644
+--- a/src/audio/theme.rs
++++ b/src/audio/theme.rs
+@@ -135,6 +135,7 @@ pub(crate) struct ThemeGates {
+ pub(crate) struct PreparedTrack {
+     pub(crate) stem: String,
+     pub(crate) sample_rate: u32,
++    pub(super) deferred_name: Option<String>,
+     /// Decoded samples; those from `pulled` on are still to play.
+     pcm: Vec<f32>,
+     pulled: usize,
+@@ -159,6 +160,7 @@ impl PreparedTrack {
+         Self {
+             stem,
+             sample_rate,
++            deferred_name: None,
+             pcm: samples,
+             pulled: 0,
+             stream: None,
+@@ -176,6 +178,7 @@ impl PreparedTrack {
+         let mut track = Self {
+             stem: stem.to_string(),
+             sample_rate: wav.sample_rate,
++            deferred_name: None,
+             pcm: Vec::new(),
+             pulled: 0,
+             stream: Some(WavStream {
+@@ -194,6 +197,17 @@ impl PreparedTrack {
+         Some(track)
+     }
+ 
++    pub(super) fn deferred(stem: &str, name: &str) -> Self {
++        Self {
++            stem: stem.to_owned(),
++            sample_rate: 0,
++            deferred_name: Some(name.to_uppercase()),
++            pcm: Vec::new(),
++            pulled: 0,
++            stream: None,
++        }
++    }
++
+     /// Every sample has been pulled.
+     pub(crate) fn exhausted(&self) -> bool {
+         self.pulled >= self.pcm.len()
+@@ -947,7 +961,13 @@ impl ThemeRuntime {
+ /// its first piece here (see [`PreparedTrack`]).
+ fn prepare_track(track_name: &str, assets: &AssetManager) -> Option<PreparedTrack> {
+     for filename in [format!("{track_name}.wav"), format!("{track_name}.aud")] {
+-        let Some(file) = assets.get_shared(&filename) else {
++        let file = assets.get_shared(&filename).or_else(|| {
++            crate::assets::deferred_assets::music_bytes(&filename).map(SharedBytes::from)
++        });
++        let Some(file) = file else {
++            if crate::assets::deferred_assets::music_metadata(&filename).is_some() {
++                return Some(PreparedTrack::deferred(track_name, &filename));
++            }
+             continue;
+         };
+ 
+diff --git a/src/render/gpu.rs b/src/render/gpu.rs
+index 8b9f01765..d965355fe 100644
+--- a/src/render/gpu.rs
++++ b/src/render/gpu.rs
+@@ -244,11 +244,19 @@ impl GpuContext {
+         // default options, which can succeed where this request fails.
+         #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+         let instance: wgpu::Instance = {
++            // Older WebViews expose WebGPU but not GPUAdapter.info. wgpu reads
++            // info.description while resolving request_adapter, so probing
++            // through wgpu first would itself throw outside Rust.
++            let adapter_info_supported = (|| {
++                let constructor = js_sys::Reflect::get(&js_sys::global(), &"GPUAdapter".into()).ok()?;
++                let prototype = js_sys::Reflect::get(&constructor, &"prototype".into()).ok()?;
++                js_sys::Reflect::has(&prototype, &"info".into()).ok()
++            })().unwrap_or(false);
+             let probe = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                 backends: wgpu::Backends::BROWSER_WEBGPU,
+                 ..wgpu::InstanceDescriptor::new_without_display_handle()
+             });
+-            let webgpu = probe
++            let webgpu = adapter_info_supported && probe
+                 .request_adapter(&wgpu::RequestAdapterOptions {
+                     power_preference: wgpu::PowerPreference::HighPerformance,
+                     compatible_surface: None,
+diff --git a/src/rules/theme_ini.rs b/src/rules/theme_ini.rs
+index 44581c095..085a96d75 100644
+--- a/src/rules/theme_ini.rs
++++ b/src/rules/theme_ini.rs
+@@ -113,10 +113,13 @@ fn scan_catalog_availability(entries: &mut [ThemeEntry], assets: &AssetManager)
+         let wav = (!entry.sound.is_empty())
+             .then(|| assets.get_ref(&format!("{}.wav", entry.sound)))
+             .flatten();
+-        entry.available = wav.is_some();
++        let remote =
++            crate::assets::deferred_assets::music_metadata(&format!("{}.wav", entry.sound));
++        entry.available = wav.is_some() || remote.is_some();
+         entry.duration_seconds = wav
+             .and_then(crate::assets::wav_file::WavFile::parse)
+             .and_then(|wav| wav.native_duration_seconds())
++            .or_else(|| remote.map(|metadata| metadata.duration_seconds))
+             .unwrap_or(0);
+     }
+ }
 diff --git a/src/ui/main_menu_dialogs/options.rs b/src/ui/main_menu_dialogs/options.rs
-index 2b99331e7..4ccd7a7ef 100644
+index b6863acaa..615a67dbc 100644
 --- a/src/ui/main_menu_dialogs/options.rs
 +++ b/src/ui/main_menu_dialogs/options.rs
-@@ -612,7 +612,7 @@ impl Default for LauncherOptionsValues {
+@@ -738,7 +738,7 @@ impl Default for LauncherOptionsValues {
              show_hidden: false,
              full_screen: false,
              original_shape: false,
@@ -572,7 +1596,7 @@ index 2b99331e7..4ccd7a7ef 100644
 +            yr_original_style: true,
              render_interpolation: false,
              mouse_wheel_zoom: false,
-             shift_queue: false,
+             right_click_orders: false,
 diff --git a/src/ui/shell/in_game_shell.rs b/src/ui/shell/in_game_shell.rs
 index a8f5cd0ca..c9589555c 100644
 --- a/src/ui/shell/in_game_shell.rs
@@ -673,11 +1697,213 @@ index a8f5cd0ca..c9589555c 100644
          let background = RectPx::new(0, 0, background_size[0], background_size[1]);
          // 0x0072FCC2..0x0072FE33: all column rectangles use CREDITS width.
          let column_x = width - sizes.credits[0];
+diff --git a/src/ui/shell/modal.rs b/src/ui/shell/modal.rs
+index bad22e99c..a0afe47e0 100644
+--- a/src/ui/shell/modal.rs
++++ b/src/ui/shell/modal.rs
+@@ -360,6 +360,22 @@ pub fn message_box_layout_on(
+     }
+ }
+ 
++/// F0 saved-load progress (0x00559D60 -> 0x00623230). An active-game box
++/// uses the browser's Sidebar-size pixels, mapped by its presenter; a menu box
++/// uses the front-end shell mapping instead.
++pub fn saved_game_loading_layout(screen_w: i32, screen_h: i32, in_match: bool) -> MessageBoxLayout {
++    if in_match {
++        message_box_layout(ModalKind::BodyOk, screen_w, screen_h)
++    } else {
++        message_box_layout_on(
++            ModalKind::BodyOk,
++            screen_w,
++            screen_h,
++            geom::ShellScale::from_screen(screen_w, screen_h),
++        )
++    }
++}
++
+ pub fn body_ok_layout(screen_w: i32, screen_h: i32) -> BodyOkLayout {
+     let layout = message_box_layout(ModalKind::BodyOk, screen_w, screen_h);
+     BodyOkLayout {
+@@ -1243,4 +1259,22 @@ mod tests {
+         }
+         assert_eq!(checked, 27);
+     }
++
++    #[test]
++    fn saved_game_loading_uses_menu_scale_but_not_match_zoom() {
++        let scale = geom::ShellScale::from_screen(3440, 1440);
++        let authored = message_box_layout(ModalKind::BodyOk, 800, 600);
++        let menu = saved_game_loading_layout(3440, 1440, false);
++        assert_eq!(menu.dialog, scale.scale_rect(authored.dialog));
++        assert_eq!(menu.body, scale.scale_rect(authored.body));
++        assert_eq!(menu.scale, scale);
++        for (width, height) in [(800, 600)] {
++            let retail = saved_game_loading_layout(width, height, false);
++            assert_eq!((retail.dialog.w, retail.dialog.h), (451, 326));
++            assert!(retail.scale.is_retail());
++        }
++        let active = saved_game_loading_layout(1600, 900, true);
++        assert_eq!(active.dialog, RectPx::new(575, 287, 451, 326));
++        assert!(active.scale.is_retail(), "the match presenter owns zoom");
++    }
+ }
+diff --git a/src/ui/shell/saved_file_input.rs b/src/ui/shell/saved_file_input.rs
+index 9f71af5c7..d2027ecc3 100644
+--- a/src/ui/shell/saved_file_input.rs
++++ b/src/ui/shell/saved_file_input.rs
+@@ -97,7 +97,7 @@ fn hit<I>(
+ ) -> Option<SavedSeedControl> {
+     let (x, y) = pointer;
+     if let Some(prompt) = browser.prompt.as_ref() {
+-        prompt.control_at(extent.0, extent.1, x, y)
++        prompt.control_at(extent.0, extent.1, layout.scale, x, y)
+     } else {
+         SeedListGeometry::new(
+             layout.list,
+@@ -340,7 +340,7 @@ mod tests {
+             affirmative: "OK".into(),
+             negative: None,
+         };
+-        let (dialog, _, ok, _) = prompt.layout(800, 600);
++        let (dialog, _, ok, _) = prompt.layout(800, 600, layout.scale);
+         browser.prompt = Some(prompt);
+         let limits = (Duration::from_millis(500), 4, 4);
+         let on_ok = (ok.x + 2, ok.y + 2);
+@@ -480,4 +480,60 @@ mod tests {
+         );
+         assert_eq!(browser.top_index, 2);
+     }
++
++    #[test]
++    fn fitted_saved_game_prompts_hit_the_visible_scaled_buttons() {
++        use crate::ui::shell::modal::{ModalKind, message_box_layout_on};
++        for (width, height, negative) in [(3440, 1440, None), (1200, 1200, Some("No"))] {
++            let (mut browser, _) = fixture(SavedSeedMode::Save, 0);
++            let layout = crate::ui::skirmish_shell::compute_responsive_saved_seed_layout(
++                SavedSeedMode::Save,
++                width,
++                height,
++            );
++            browser.prompt = Some(SavedSeedPrompt {
++                purpose: SavedSeedPromptPurpose::Error,
++                body: "Saved game".into(),
++                affirmative: "OK".into(),
++                negative: negative.map(str::to_owned),
++            });
++            let kind = if negative.is_some() {
++                ModalKind::Confirm
++            } else {
++                ModalKind::BodyOk
++            };
++            let modal = message_box_layout_on(kind, width as i32, height as i32, layout.scale);
++            let on_ok = (modal.ok.x + modal.ok.w / 2, modal.ok.y + modal.ok.h / 2);
++            let now = Instant::now();
++            let limits = (Duration::from_millis(500), 4, 4);
++            assert!(matches!(
++                mouse_down(&mut browser, &layout, (width, height), on_ok, now, limits),
++                BrowserInputResult::PromptButtonPressed
++            ));
++            assert!(matches!(
++                mouse_up(&mut browser, &layout, (width, height), on_ok),
++                BrowserInputResult::PromptAnswer(true)
++            ));
++            if let Some(cancel) = modal.cancel {
++                let on_cancel = (cancel.x + cancel.w / 2, cancel.y + cancel.h / 2);
++                let _ = mouse_down(&mut browser, &layout, (width, height), on_ok, now, limits);
++                assert!(matches!(
++                    mouse_up(&mut browser, &layout, (width, height), on_cancel),
++                    BrowserInputResult::None
++                ));
++                let _ = mouse_down(
++                    &mut browser,
++                    &layout,
++                    (width, height),
++                    on_cancel,
++                    now,
++                    limits,
++                );
++                assert!(matches!(
++                    mouse_up(&mut browser, &layout, (width, height), on_cancel),
++                    BrowserInputResult::PromptAnswer(false)
++                ));
++            }
++        }
++    }
+ }
+diff --git a/src/ui/skirmish_shell/state/saved_seed_browser.rs b/src/ui/skirmish_shell/state/saved_seed_browser.rs
+index 6d6835806..46035cad1 100644
+--- a/src/ui/skirmish_shell/state/saved_seed_browser.rs
++++ b/src/ui/skirmish_shell/state/saved_seed_browser.rs
+@@ -43,28 +43,38 @@ pub struct SavedSeedPrompt<I = NativeFileName> {
+ }
+ 
+ impl<I> SavedSeedPrompt<I> {
+-    /// Both shapes use the shared native message-box templates.
++    /// Both shapes use ShellMessageBox__Run (0x005D3490)'s native templates,
++    /// mapped by the browser's shell scale for both painting and hit-testing.
+     pub fn layout(
+         &self,
+         width: u32,
+         height: u32,
++        scale: crate::ui::shell::geom::ShellScale,
+     ) -> (
+         super::super::layout::RectPx,
+         super::super::layout::RectPx,
+         super::super::layout::RectPx,
+         Option<super::super::layout::RectPx>,
+     ) {
+-        if self.negative.is_some() {
+-            let layout = crate::ui::shell::modal::quit_confirm_layout(width as i32, height as i32);
+-            (layout.dialog, layout.body, layout.ok, Some(layout.cancel))
++        use crate::ui::shell::modal::{ModalKind, message_box_layout_on};
++        let kind = if self.negative.is_some() {
++            ModalKind::Confirm
+         } else {
+-            let layout = crate::ui::shell::modal::body_ok_layout(width as i32, height as i32);
+-            (layout.dialog, layout.body, layout.ok, None)
+-        }
++            ModalKind::BodyOk
++        };
++        let layout = message_box_layout_on(kind, width as i32, height as i32, scale);
++        (layout.dialog, layout.body, layout.ok, layout.cancel)
+     }
+ 
+-    pub fn control_at(&self, width: u32, height: u32, x: i32, y: i32) -> Option<SavedSeedControl> {
+-        let (_, _, yes, no) = self.layout(width, height);
++    pub fn control_at(
++        &self,
++        width: u32,
++        height: u32,
++        scale: crate::ui::shell::geom::ShellScale,
++        x: i32,
++        y: i32,
++    ) -> Option<SavedSeedControl> {
++        let (_, _, yes, no) = self.layout(width, height, scale);
+         if yes.contains(x, y) {
+             Some(SavedSeedControl::Action)
+         } else if no.is_some_and(|rect| rect.contains(x, y)) {
 diff --git a/src/util/file_system.rs b/src/util/file_system.rs
-index ac07c78b4..eb079aea0 100644
+index ac07c78b4..af31e1ead 100644
 --- a/src/util/file_system.rs
 +++ b/src/util/file_system.rs
-@@ -111,6 +111,10 @@ mod memory {
+@@ -102,6 +102,16 @@ mod memory {
+     pub fn import_file(path: impl AsRef<Path>, bytes: Vec<u8>) {
+         restore_file(path, bytes, 0);
+     }
++    /// Scoped browser resource stages already own verified immutable bytes.
++    pub fn import_shared_file(path: impl AsRef<Path>, bytes: Arc<[u8]>) {
++        files().lock().unwrap().insert(
++            key(path.as_ref()),
++            Entry {
++                bytes,
++                modified_ms: 0,
++            },
++        );
++    }
+     pub fn restore_file(path: impl AsRef<Path>, bytes: Vec<u8>, modified_ms: u64) {
+         files().lock().unwrap().insert(
+             key(path.as_ref()),
+@@ -111,6 +121,10 @@ mod memory {
              },
          );
      }
@@ -688,7 +1914,7 @@ index ac07c78b4..eb079aea0 100644
      pub fn read_shared(path: impl AsRef<Path>) -> io::Result<Arc<[u8]>> {
          files()
              .lock()
-@@ -283,6 +287,18 @@ mod memory {
+@@ -283,6 +297,18 @@ mod memory {
  
  #[cfg(all(test, feature = "wasm"))]
  mod tests {
@@ -708,10 +1934,10 @@ index ac07c78b4..eb079aea0 100644
  
      #[test]
 diff --git a/src/web.rs b/src/web.rs
-index 81ffdc541..1a2899a85 100644
+index 5375a0c90..d3f80b690 100644
 --- a/src/web.rs
 +++ b/src/web.rs
-@@ -29,6 +29,17 @@ pub(crate) fn canvas() -> web_sys::HtmlCanvasElement {
+@@ -34,6 +34,17 @@ pub(crate) fn canvas() -> web_sys::HtmlCanvasElement {
      })
  }
  
@@ -729,7 +1955,26 @@ index 81ffdc541..1a2899a85 100644
  pub(crate) fn status(message: &str) {
      let callback = STATUS.with(|slot| slot.borrow().clone());
      if let Some(callback) = callback {
-@@ -161,7 +172,7 @@ pub fn initialize() {
+@@ -95,6 +106,7 @@ pub(crate) fn spawn_finished(report: &str) {
+ }
+ 
+ pub(crate) fn engine_exited() {
++    crate::app::remote_assets::clear();
+     crate::audio::web_output::pause();
+     remove_spawn_files();
+     ime::remove();
+@@ -120,7 +132,9 @@ fn request_spawn_action(action: crate::app::SpawnAction) -> Result<(), JsValue>
+ }
+ 
+ /// Run the event loop's next pass now, even while it waits.
+-fn wake() {
++pub(crate) fn started() -> bool { LIFECYCLE.with(|slot| slot.borrow().started()) }
++
++pub(crate) fn wake() {
+     WAKE.with(|slot| {
+         if let Some(proxy) = slot.borrow().as_ref() {
+             let _ = proxy.send_event(());
+@@ -166,7 +180,7 @@ pub fn initialize() {
      crate::util::file_system::set_persistence_callbacks(
          |path, bytes, modified_ms| {
              WRITE.with(|slot| {
@@ -738,7 +1983,7 @@ index 81ffdc541..1a2899a85 100644
                      return;
                  }
                  if let Some(callback) = slot.borrow().as_ref() {
-@@ -178,7 +189,7 @@ pub fn initialize() {
+@@ -183,7 +197,7 @@ pub fn initialize() {
          },
          |path| {
              REMOVE.with(|slot| {
@@ -747,7 +1992,7 @@ index 81ffdc541..1a2899a85 100644
                      return;
                  }
                  if let Some(callback) = slot.borrow().as_ref() {
-@@ -189,6 +200,10 @@ pub fn initialize() {
+@@ -194,6 +208,10 @@ pub fn initialize() {
      );
  }
  
@@ -758,7 +2003,7 @@ index 81ffdc541..1a2899a85 100644
  fn relative_path(name: &str) -> Result<(), JsValue> {
      if name.is_empty()
          || name.starts_with('/')
-@@ -275,7 +290,7 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
+@@ -280,7 +298,7 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
  }
  
  #[wasm_bindgen]
@@ -767,7 +2012,7 @@ index 81ffdc541..1a2899a85 100644
      if !LIFECYCLE.with(|slot| slot.borrow().idle()) {
          return Err(JsValue::from_str(
              "Restore user data before starting or after the engine exited",
-@@ -286,14 +301,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
+@@ -291,14 +309,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
      if path.starts_with("/replays/") {
          return Ok(());
      }
@@ -789,7 +2034,7 @@ index 81ffdc541..1a2899a85 100644
      Ok(())
  }
  
-@@ -332,9 +351,10 @@ pub fn start_game(
+@@ -337,9 +359,10 @@ pub fn start_game(
      run(
          canvas,
          on_status,
@@ -803,7 +2048,7 @@ index 81ffdc541..1a2899a85 100644
          false,
      )
  }
-@@ -410,10 +430,12 @@ pub fn probe(map_name: Option<String>) -> Result<String, JsValue> {
+@@ -415,10 +438,12 @@ pub fn probe(map_name: Option<String>) -> Result<String, JsValue> {
  }
  
  fn install_config() {

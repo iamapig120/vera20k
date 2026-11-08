@@ -1,8 +1,9 @@
-import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game} from './pkg/vera20k.js';
-import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs';
+import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game,configure_remote_assets,finish_remote_asset} from './pkg/vera20k.js';
+import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries,readRemoteManifest,loadRemoteProfile} from './resources.mjs';
 import {installFullscreen} from './fullscreen.mjs';
+import {createRuntimeLoader} from './runtime.mjs';
 const $=id=>document.getElementById(id);
-globalThis.vera20kToggleFullscreen=installFullscreen(document,$('game'),$('toggle-fullscreen'),message=>{
+globalThis.vera20kToggleFullscreen=installFullscreen(document,document.documentElement,$('toggle-fullscreen'),message=>{
  $('fullscreen-status').textContent=message;
 });
 const status=$('status'), button=$('start'), files=$('files');
@@ -32,14 +33,29 @@ globalThis.veraGatewayBase=gatewayBase;
 updateGateway();
 
 let selectionRevision=0, restoreRevision=0, engineLoading=false;
-let ready=false, busy=false, failed=false, selecting=false, selected=[];
+let ready=false, busy=false, failed=false, selecting=false, selected=[],feedbackError=false;
 let importController,lastImport,exiting=false;
+let remoteSource,remoteManifest,remoteManifestUrl;
+let runtimeManifest,runtimeLoader,needsRemoteConfig=false;
 const store=globalThis.VeraStorage;
 let storageAvailable=false, cachedSelection=false, saving=false;
 const pending=new Map();
 let saveTask;
 window.addEventListener('beforeunload',event=>{if(pending.size){event.preventDefault();event.returnValue='';}});
 function storageStatus(message,error=false){$('storage-status').textContent=message;$('storage-status').classList.toggle('error',error);if(error)$('storage-panel').open=true;}
+const remoteSelectionKey='vera20k.remote-selection';
+function savedRemoteSelection(){
+ try{
+  const value=JSON.parse(globalThis.localStorage?.getItem(remoteSelectionKey)||'null');
+  return value&&typeof value.url==='string'&&value.url&&typeof value.profile==='string'&&value.profile?value:null;
+ }catch{return null;}
+}
+function rememberRemoteSelection(local=false){
+ try{
+  if(local)globalThis.localStorage?.removeItem(remoteSelectionKey);
+  else globalThis.localStorage?.setItem(remoteSelectionKey,JSON.stringify({url:remoteManifestUrl,profile:remoteSource.profile,cache:$('cache-resources').checked}));
+ }catch{storageStatus('无法保存资源选择；刷新后请重新选择资源。',true);}
+}
 const userPath=path=>typeof path==='string'&&(path==='/config.toml'||/^\/(retail|saves)\/.+/.test(path))&&!path.split('/').some(part=>part==='..'||part==='.');
 function flushUserData(){
  if(saving)return saveTask;
@@ -93,15 +109,16 @@ const droppedPaths=new WeakMap();
 const relativePath=file=>droppedPaths.get(file) ?? (file.webkitRelativePath ? file.webkitRelativePath.split('/').slice(1).join('/') : file.name);
 const sizeLabel=bytes=>bytes>=1024**3 ? `${(bytes/1024**3).toFixed(1)} GB` : `${Math.max(1,Math.round(bytes/1024**2))} MB`;
 function syncButton(){
- button.disabled=exiting||!ready||busy||failed||selecting||!selected.length;
+ button.disabled=exiting||!ready||busy||failed||selecting||!selected.length||needsRemoteConfig;
  $('start-label').textContent=busy?'正在进入战场…':!ready?'正在准备游戏…':'开始游戏';
  $('choose-folder').disabled=exiting||busy||failed||selecting;
  $('change-folder').disabled=exiting||busy||failed||selecting;
- for(const id of ['choose-zip','zip-url','download-zip','cache-resources','clear-cache','retry-cache'])$(id).disabled=exiting||busy||failed||selecting||document.body.classList.contains('playing');
+ for(const id of ['choose-zip','zip-url','download-zip','cache-resources','clear-cache','retry-cache','manifest-url','load-manifest','remote-profile'])$(id).disabled=exiting||busy||failed||selecting||document.body.classList.contains('playing');
+ if(remoteSource)$('retry-cache').disabled=true;
  $('retry-import').hidden=!lastImport||busy||failed||selecting;
  $('import-data').disabled=exiting||busy||selecting||document.body.classList.contains('playing')||!storageAvailable;
 }
-function feedback(message,error=false){$('feedback').textContent=message;$('feedback').classList.toggle('error',error);}
+function feedback(message,error=false){feedbackError=error;$('feedback').textContent=message;$('feedback').classList.toggle('error',error);}
 function fail(message,detail=message){
  if(failed)return;
  failed=true;busy=false;document.body.classList.remove('playing');
@@ -152,13 +169,16 @@ function restoredUserRows(rows){
 }
 window.addEventListener('error',event=>{if(busy||document.body.classList.contains('playing'))fail('游戏运行出错，请查看错误详情。',event.message||String(event.error));});
 window.addEventListener('unhandledrejection',event=>{if(busy||document.body.classList.contains('playing'))fail('游戏运行出错，请查看错误详情。',String(event.reason));});
-$('retry').onclick=()=>{if(!ready){failed=false;$('retry').hidden=true;$('error-details').hidden=true;void prepareEngine();}else location.reload();};
-function selectResources(chosen,folderName){
+$('retry').onclick=()=>{if(!ready){failed=false;feedbackError=false;$('retry').hidden=true;$('error-details').hidden=true;void prepareEngine();}else location.reload();};
+function selectResources(chosen,folderName,rememberLocal=true){
+ remoteSource=undefined;
+ runtimeManifest=undefined;needsRemoteConfig=false;
  selectionRevision++;
  const keep=chosen;
  const rootNames=new Set(keep.filter(file=>!relativePath(file).includes('/')).map(file=>file.name.toLowerCase()));
  if(!rootNames.has('ra2.mix')||!rootNames.has('ra2md.mix'))throw Error('请选择完整尤里的复仇资源；旧选择保留');
  selected=keep;cachedSelection=false;
+ if(rememberLocal)rememberRemoteSelection(true);
  $('folder-name').textContent=folderName;
  $('folder-meta').textContent=`${selected.length} 个资源文件 · ${sizeLabel(selected.reduce((sum,file)=>sum+file.size,0))}`;
  $('choose-folder').hidden=true;$('folder-selected').hidden=false;
@@ -171,30 +191,32 @@ function resourceFiles(library){
   droppedPaths.set(file,entry.path);return file;
  });
 }
-async function saveSelection(chosen,label){
- await store.saveLibrary(label,chosen.map(file=>({path:relativePath(file),file})));
+async function saveSelection(chosen,label,remoteRequired=!!runtimeManifest?.runtime?.size){
+ await store.saveLibrary(label,chosen.map(file=>({path:relativePath(file),file})),remoteRequired);
  cachedSelection=true;$('retry-cache').hidden=true;storageStatus('资源已缓存；设置与存档独立保留');
 }
 function resourceProgress(value){
  const detail=value.phase+(value.file?' · '+value.file:` · ${sizeLabel(value.loaded)}${value.total?' / '+sizeLabel(value.total):''}`);
  progress(value.total?value.loaded/value.total*100:0,detail);feedback(detail);
 }
-async function importResources(read,label){
+async function importResources(read,label,manifest){
  if(selecting||busy||failed||document.body.classList.contains('playing'))return;
+ const remote=!!manifest?.runtime?.size;
  const controller=new AbortController();importController=controller;
- lastImport=()=>importResources(read,label);selectionRevision++;selecting=true;
+ lastImport=()=>importResources(read,label,manifest);selectionRevision++;selecting=true;
  $('cancel-import').hidden=false;$('cancel-import').disabled=false;$('retry-cache').hidden=true;syncButton();
  try{
   const entries=await read({signal:controller.signal,onProgress:resourceProgress});controller.signal.throwIfAborted();
-  const candidate=libraryFromEntries(entries,label),chosen=resourceFiles(candidate);controller.signal.throwIfAborted();
+  const candidate=libraryFromEntries(entries,label,undefined,remote?['ra2.mix','ra2md.mix']:undefined),chosen=resourceFiles(candidate);controller.signal.throwIfAborted();
   let cached=false,cacheError;
   if($('cache-resources').checked){
    $('cancel-import').disabled=true;feedback('资源校验完成，正在原子保存缓存…');
-   try{await saveSelection(chosen,candidate.label);cached=true;}catch(error){cacheError=error;}
+   try{await saveSelection(chosen,candidate.label,remote);cached=true;}catch(error){cacheError=error;}
   }
-  selectResources(chosen,candidate.label);cachedSelection=cached;lastImport=undefined;
+  selectResources(chosen,candidate.label,!manifest);cachedSelection=cached;lastImport=undefined;
   if(cacheError){storageStatus(`缓存失败：${cacheError.message}。旧缓存保留，当前资源仍可启动。`,true);$('retry-cache').hidden=false;}
   else if(!cached)storageStatus('本次不缓存资源；旧缓存与用户数据保留');
+  return true;
  }catch(error){feedback(controller.signal.aborted?'已取消；旧资源、缓存和用户数据保留。':`${error.message}；旧资源、缓存和用户数据保留。`,!controller.signal.aborted);}
  finally{if(importController===controller){importController=undefined;selecting=false;$('cancel-import').hidden=true;$('progress-area').hidden=true;syncButton();}}
 }
@@ -211,6 +233,42 @@ $('zip-form').onsubmit=event=>{
  event.preventDefault();const url=$('zip-url').value.trim();let label='远程 ZIP';
  try{label='ZIP · '+new URL(url).hostname;}catch{}
  void importResources(async options=>entriesFromZip(await downloadZip(url,options),options),label);
+};
+function selectRemoteProfile(){
+ if(!remoteManifest||busy||failed||selecting)return;
+ const profile=$('remote-profile').value,rows=remoteManifest.profiles.get(profile);
+ if(!rows)return;
+ const chosen=rows.map(row=>{const file={name:row.path.split('/').at(-1),size:row.size};droppedPaths.set(file,row.path);return file;});
+ selectResources(chosen,`${remoteManifest.label} · ${profile}`,false);
+ lastImport=undefined;
+ remoteSource={manifest:remoteManifest,profile};
+ runtimeManifest=remoteManifest;
+ $('manifest-url').value=remoteManifestUrl;
+ rememberRemoteSelection();
+ $('button-caption').textContent='点击开始时下载所选分组；缓存文件校验通过后复用。';
+ syncButton();
+}
+$('remote-profile').onchange=selectRemoteProfile;
+$('cache-resources').onchange=()=>{if(remoteSource)rememberRemoteSelection();};
+async function selectRemoteManifest(url,profile){
+ if(selecting||busy||failed||document.body.classList.contains('playing'))return;
+ const revision=++restoreRevision,selection=selectionRevision;
+ selecting=true;const controller=new AbortController();importController=controller;
+ $('cancel-import').hidden=false;$('cancel-import').disabled=false;syncButton();
+ try{
+  const manifest=await readRemoteManifest(url,{signal:controller.signal,onProgress:resourceProgress});
+  controller.signal.throwIfAborted();
+  if(revision!==restoreRevision||selection!==selectionRevision)return;
+  if(profile&&!manifest.profiles.has(profile))throw Error(`上次选择的资源分组已不存在：${profile}。请重新读取清单并选择分组。`);
+  const options=[...manifest.profiles.keys()].map(name=>{const option=document.createElement('option');option.value=name;option.textContent=name;return option;});
+  $('remote-profile').replaceChildren(...options);remoteManifest=manifest;remoteManifestUrl=url;
+  if(profile)$('remote-profile').value=profile;
+  selecting=false;selectRemoteProfile();
+ }catch(error){feedback(controller.signal.aborted?'已取消读取清单':error.message,true);}
+ finally{if(importController===controller){importController=undefined;selecting=false;$('cancel-import').hidden=true;$('progress-area').hidden=true;syncButton();}}
+}
+$('manifest-form').onsubmit=event=>{
+ event.preventDefault();return selectRemoteManifest($('manifest-url').value.trim());
 };
 $('cancel-import').onclick=()=>importController?.abort();
 $('retry-import').onclick=()=>{if(lastImport)void lastImport();};
@@ -232,9 +290,20 @@ dropZone.addEventListener('drop',event=>{
 });
 button.onclick=async()=>{
  if(button.disabled)return;
- busy=true;syncButton();feedback('正在读取游戏资源，请保持页面打开。');
- let loaded=0;const total=selected.reduce((sum,file)=>sum+file.size,0);
  try{
+  if(remoteSource){
+   prepare_audio();
+   const source=remoteSource;
+   const imported=await importResources(async options=>{
+    let cached=[];
+    try{cached=(await store.library())?.files??[];}catch{}
+    return loadRemoteProfile(source.manifest,source.profile,{...options,cached});
+   },`${source.manifest.label} · ${source.profile}`,source.manifest);
+   if(!imported)return;
+   runtimeManifest=source.manifest;
+  }
+  busy=true;syncButton();feedback('正在读取游戏资源，请保持页面打开。');
+  let loaded=0;const total=selected.reduce((sum,file)=>sum+file.size,0);
   prepare_audio();
   for(const file of selected){
    progress(loaded/total*90,`正在读取 ${file.name}`);
@@ -250,6 +319,11 @@ button.onclick=async()=>{
   $('import-data').disabled=true;
   const canvas=document.createElement('canvas');canvas.tabIndex=0;
   $('game').append(canvas);
+  if(runtimeManifest?.runtime?.size){
+   runtimeLoader=createRuntimeLoader({catalog:runtimeManifest.runtime,complete:finish_remote_asset,cache:$('cache-resources').checked,onState:runtimeStatus});
+   const catalog=Object.fromEntries([...runtimeManifest.runtime].map(([key,row])=>[key,{size:row.size,sha256:row.sha256,duration_seconds:row.duration_seconds,bank:row.bank}]));
+   configure_remote_assets(JSON.stringify(catalog),runtimeLoader.request);
+  }
   start_game(canvas,engineStatus);
  }catch(error){fail('读取或启动失败，请重新加载后再试。',String(error));}
 };
@@ -269,7 +343,7 @@ async function engineBytes(){
    const {done,value}=await reader.read();if(done)break;
    chunks.push(value);loaded+=value.length;arm();
    const detail=`正在下载游戏引擎… ${(loaded/1024**2).toFixed(1)} MB${total?' / '+(total/1024**2).toFixed(1)+' MB':''}`;
-   if(!selecting){feedback(detail);if(total)progress(loaded/total*100,detail);}
+   if(!selecting&&!feedbackError){feedback(detail);if(total)progress(loaded/total*100,detail);}
   }
   const bytes=new Uint8Array(loaded);let offset=0;
   for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
@@ -280,17 +354,16 @@ async function engineBytes(){
 async function prepareEngine(){
  if(engineLoading)return;engineLoading=true;syncButton();
  const started=Date.now();let compiling=false;
- const timer=setInterval(()=>{if(compiling&&!selecting)feedback(`正在准备游戏引擎… 已等待 ${Math.floor((Date.now()-started)/1000)} 秒，较慢的设备可能需要更长时间。`);},8000);
+ const timer=setInterval(()=>{if(compiling&&!selecting&&!feedbackError)feedback(`正在准备游戏引擎… 已等待 ${Math.floor((Date.now()-started)/1000)} 秒，较慢的设备可能需要更长时间。`);},8000);
  try{
-  if(!navigator.gpu)throw Error('当前浏览器不支持 WebGPU，请使用支持 WebGPU 的新版桌面浏览器。');
-  feedback('正在下载游戏引擎… 可以先选择游戏目录。');
+  if(!selecting&&!feedbackError)feedback('正在下载游戏引擎… 可以先选择游戏目录。');
   const bytes=await engineBytes();
-  compiling=true;feedback('正在准备游戏引擎…');$('progress-area').hidden=true;
+  compiling=true;if(!selecting&&!feedbackError){feedback('正在准备游戏引擎…');$('progress-area').hidden=true;}
   await init({module_or_path:bytes});
   set_persistence_callbacks(globalThis.vera20kPersistWrite,globalThis.vera20kPersistRemove);
   ready=true;failed=false;
   $('environment').className='environment ready';$('environment-label').textContent='浏览器已就绪';
-  if(!selecting)feedback(selected.length?'资源已就绪，点击「开始游戏」。':'请选择游戏目录；如果正在恢复缓存，也可以稍候。');
+  if(!selecting&&!feedbackError)feedback(selected.length?'资源已就绪，点击「开始游戏」。':'请选择游戏目录；如果正在恢复缓存，也可以稍候。');
  }catch(error){
   $('environment').className='environment error';$('environment-label').textContent='引擎准备失败';
   fail('游戏引擎未能准备好，请查看详情并重试。',String(error));
@@ -306,9 +379,11 @@ async function restoreStorage(){
   const library=await store.library();
   if(revision!==restoreRevision)return;
   if(selection===selectionRevision&&!busy&&library?.files?.length){
-   const checked=libraryFromEntries(library.files.map(entry=>({path:entry.path,blob:entry.file})),library.folder);
-   selectResources(resourceFiles(checked),checked.label);
+   const checked=libraryFromEntries(library.files.map(entry=>({path:entry.path,blob:entry.file})),library.folder,undefined,library.remoteRequired?['ra2.mix','ra2md.mix']:undefined);
+   selectResources(resourceFiles(checked),checked.label,false);
    cachedSelection=selected.length>0;
+   needsRemoteConfig=!!library.remoteRequired;
+   if(needsRemoteConfig){feedback('启动资源已缓存；请重新读取资源清单，以启用关卡和电影按需加载。');syncButton();}
   }
   storageStatus(cachedSelection?'已恢复上次资源 · 本机数据就绪':'本机数据就绪 · 设置将自动保存');
   $('retry-storage').hidden=true;
@@ -320,7 +395,25 @@ async function restoreStorage(){
 }
 $('retry-storage').onclick=async()=>{await restoreStorage();await flushUserData();};
 $('clear-cache').onclick=async()=>{
- try{++restoreRevision;await store.clearLibrary();cachedSelection=false;storageStatus('资源缓存已清除，设置与存档已保留');}
+ try{++restoreRevision;await store.clearLibrary();if(runtimeLoader)await runtimeLoader.clear();else await globalThis.caches?.delete('vera20k-runtime-assets-v1');cachedSelection=false;storageStatus('资源缓存已清除，设置与存档已保留');}
  catch(error){storageStatus(`清除缓存失败：${error.message}`,true);}
 };
-void restoreStorage();void prepareEngine();
+void restoreStorage();
+const rememberedRemote=savedRemoteSelection();
+if(rememberedRemote){
+ $('manifest-url').value=rememberedRemote.url;
+ if(typeof rememberedRemote.cache==='boolean')$('cache-resources').checked=rememberedRemote.cache;
+ void selectRemoteManifest(rememberedRemote.url,rememberedRemote.profile);
+}
+void prepareEngine();
+
+function runtimeStatus(value){
+ const showing=['loading','error','fatal'].includes(value.phase);
+ $('runtime-panel').hidden=!showing;
+ $('runtime-retry').hidden=value.phase!=='error';
+ if(value.phase==='fatal'){$('runtime-message').textContent=`资源版本不兼容：${value.error}。请检查清单并重新载入游戏。`;return;}
+ $('runtime-message').textContent=value.phase==='error'?`${value.name}：${value.error}`:`正在下载 ${value.name||''}${value.total?' '+Math.round(value.loaded/value.total*100)+'%':''}`;
+ if(value.warning)storageStatus(value.warning,true);
+}
+$('runtime-retry').onclick=()=>runtimeLoader?.retry();
+$('runtime-cancel').onclick=()=>runtimeLoader?.cancel();

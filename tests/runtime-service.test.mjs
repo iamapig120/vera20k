@@ -1,0 +1,97 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {createRuntimeServer} from './serve-runtime.mjs';
+import {readRemoteManifest,loadRemoteProfile} from '../templates/resources.mjs';
+import {mkdtemp,writeFile,mkdir} from 'node:fs/promises';
+import {resolve} from 'node:path';
+
+test('loopback test service declares deferred resources and supports controlled failure without eager downloads',async t=>{
+ const fixture=await createRuntimeServer({failOnce:'runtime/TEST.MAP'});
+ await new Promise(resolve=>fixture.server.listen(0,'127.0.0.1',resolve));
+ t.after(()=>{fixture.server.closeAllConnections();fixture.server.close();});
+ const base=`http://127.0.0.1:${fixture.server.address().port}`;
+ const manifest=await readRemoteManifest(base+'/manifest.json',{pageUrl:base+'/'});
+ assert.equal(manifest.profiles.get('bootstrap').length,2);
+ assert.equal(manifest.runtime.size,2);
+ assert.equal(fixture.counts.size,0);
+ const map=manifest.runtime.get('map:TEST.MAP');
+ assert.equal((await fetch(map.url)).status,503);
+ assert.equal((await fetch(map.url)).status,200);
+ assert.equal(fixture.counts.get('runtime/TEST.MAP'),2);
+ assert.equal((await fetch(base+'/payload/999')).status,404);
+ assert.equal((await fetch(base+'/%2e%2e%2fweb.config')).status,404);
+ assert.equal((await fetch(base+'/manifest.json',{method:'POST'})).status,405);
+ assert.equal((await fetch(base+'/metrics.json')).status,200);
+});
+
+test('explicit bootstrap and Brotli reduce wire bytes while validating decoded lengths and hashes',async t=>{
+ await mkdir('.build',{recursive:true});const assets=await mkdtemp(resolve('.build/compressed-service-fixture-'));
+ const bytes=Buffer.alloc(256*1024,47);
+ for(const name of ['ra2.mix','ra2md.mix','unused.mix'])await writeFile(resolve(assets,name),bytes);
+ await assert.rejects(createRuntimeServer({assets,bootstrapPaths:['../ra2.mix']}),/root filenames/);
+ await assert.rejects(createRuntimeServer({assets,bootstrapPaths:['missing.mix']}),/missing or excluded/);
+ const fixture=await createRuntimeServer({assets,bootstrapPaths:['ra2.mix','ra2md.mix'],encoding:'br',encodingCache:resolve(assets,'encoding')});
+ await new Promise(resolve=>fixture.server.listen(0,'127.0.0.1',resolve));
+ t.after(()=>{fixture.server.closeAllConnections();fixture.server.close();});
+ const base=`http://127.0.0.1:${fixture.server.address().port}`;
+ const manifest=await readRemoteManifest(base+'/manifest.json',{pageUrl:base+'/'});
+ const progress=[];
+ const entries=await loadRemoteProfile(manifest,'bootstrap',{pageUrl:base+'/',onProgress:value=>progress.push(value)});
+ assert.equal(entries.length,2);assert(entries.every(row=>row.blob.size===bytes.length));
+ assert.equal(fixture.manifest.profiles.bootstrap.length,2);
+ assert(fixture.transfers.every(row=>row.encoding==='br'&&row.bytes<row.decodedSize/10));
+ assert.equal(fixture.counts.has('unused.mix'),false);
+ assert(progress.some(row=>row.decoded&&row.total===0&&row.phase.startsWith('接收解压')));
+ const before=fixture.transfers.length;
+ const cached=await loadRemoteProfile(manifest,'bootstrap',{pageUrl:base+'/',cached:entries});
+ assert.equal(cached.length,2);assert.equal(fixture.transfers.length,before);
+});
+
+test('explicit menu profile retains subtitle files and the skirmish library without importing unrelated text',async t=>{
+ const assets=await mkdtemp(resolve('.build/menu-resource-fixture-'));
+ const subtitles=Buffer.from('\ufeffBeginMovie TEST\r\nEndMovie\r\n','utf16le');
+ for(const name of ['ra2.mix','ra2md.mix','multimd.mix'])await writeFile(resolve(assets,name),Buffer.from(name));
+ for(const name of ['subtitle.txt','subtitlemd.txt','private.txt'])await writeFile(resolve(assets,name),subtitles);
+ const bootstrapPaths=['ra2.mix','ra2md.mix','multimd.mix','subtitle.txt','subtitlemd.txt'];
+ const fixture=await createRuntimeServer({assets,bootstrapPaths});
+ await new Promise(resolve=>fixture.server.listen(0,'127.0.0.1',resolve));
+ t.after(()=>{fixture.server.closeAllConnections();fixture.server.close();});
+ const base=`http://127.0.0.1:${fixture.server.address().port}`;
+ const manifest=await readRemoteManifest(base+'/manifest.json',{pageUrl:base+'/'});
+ const entries=await loadRemoteProfile(manifest,'bootstrap',{pageUrl:base+'/'});
+ assert.deepEqual(new Set(entries.map(e=>e.path)),new Set(bootstrapPaths));
+ for(const entry of entries.filter(e=>e.path.endsWith('.txt')))assert(Buffer.from(await entry.blob.arrayBuffer()).equals(subtitles));
+ assert(!fixture.manifest.files.some(r=>r.path==='private.txt'));
+});
+
+test('payload shaping enforces delay and bandwidth, measures bytes, and stops after client cancellation',async t=>{
+ await mkdir('.build',{recursive:true});
+ const runtime=await mkdtemp(resolve('.build/network-service-fixture-'));
+ const size=256*1024;await writeFile(resolve(runtime,'RATE.BIK'),Buffer.alloc(size,42));
+ const fixture=await createRuntimeServer({runtime,delayMs:100,kilobitsPerSecond:1000});
+ await new Promise(resolve=>fixture.server.listen(0,'127.0.0.1',resolve));
+ t.after(()=>{fixture.server.closeAllConnections();fixture.server.close();});
+ const base=`http://127.0.0.1:${fixture.server.address().port}`;
+ const row=fixture.manifest.files.find(row=>row.path==='runtime/RATE.BIK');
+ const response=await fetch(base+row.url.slice(1));
+ assert.equal((await response.arrayBuffer()).byteLength,size);
+ await new Promise(resolve=>setTimeout(resolve,20));
+ const first=fixture.transfers[0];
+ assert(first.headersMs>=90);assert(first.elapsedMs>=2100);assert(first.elapsedMs<6000);
+ assert.equal(first.bytes,size);assert.equal(first.aborted,false);
+ const controller=new AbortController();
+ const cancelled=await fetch(base+row.url.slice(1),{signal:controller.signal});
+ await cancelled.body.getReader().read();controller.abort();
+ await new Promise(resolve=>setTimeout(resolve,200));
+ const second=fixture.transfers[1];
+ assert.equal(second.aborted,true);assert(second.bytes<size);
+ assert.throws(()=>fixture.setNetwork({kilobitsPerSecond:-1}));
+ assert.throws(()=>fixture.setNetwork({scope:'system'}));
+ const bootstrap=fixture.manifest.files.find(row=>row.path==='ra2.mix');
+ await(await fetch(base+bootstrap.url.slice(1))).arrayBuffer();
+ assert.equal(fixture.transfers[2].delayMs,0);assert.equal(fixture.transfers[2].kilobitsPerSecond,0);
+ fixture.setNetwork({scope:'all'});
+ await(await fetch(base+bootstrap.url.slice(1))).arrayBuffer();
+ assert(fixture.transfers[3].headersMs>=90);assert.equal(fixture.transfers[3].kilobitsPerSecond,1000);
+ const metrics=await(await fetch(base+'/transfers.json')).json();assert.equal(metrics.transfers.length,4);
+});

@@ -1,0 +1,4 @@
+VERA20k Web asynchronous zh-Hans AI trial 20261107
+Engine wasm SHA256 905c64e7a1990f819e25da4fa4b60636e59a8d8d74c2278def6b80441f3d3671
+Game assets are requested from the separately uploaded OSS manifest.
+Source archive is in the OSS package source/ directory.

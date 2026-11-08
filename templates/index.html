@@ -59,6 +59,7 @@
                     </div>
                     <div class="zip-actions"><button id="choose-zip" class="retry" type="button">选择 ZIP</button><input id="zip-file" type="file" accept=".zip,application/zip" hidden aria-label="游戏资源 ZIP"></div>
                     <form id="zip-form" class="zip-form"><label for="zip-url">从 HTTPS ZIP 地址下载</label><div><input id="zip-url" type="url" placeholder="https://example.com/game.zip" autocomplete="off" spellcheck="false"><button id="download-zip" type="submit">下载并导入</button></div></form>
+<form id="manifest-form" class="zip-form"><label for="manifest-url">按需加载：资源清单 URL</label><div><input id="manifest-url" type="url" placeholder="https://example.com/resources.json" required><button id="load-manifest">读取清单</button></div><label for="remote-profile">资源分组</label> <select id="remote-profile" aria-label="资源分组"></select></form>
                     <label class="cache-choice"><input id="cache-resources" type="checkbox" checked> 缓存资源，下次直接开始</label>
                     <div class="import-controls"><button id="cancel-import" class="retry" type="button" hidden>取消导入</button><button id="retry-import" class="retry" type="button" hidden>重试导入</button><button id="retry-cache" class="retry" type="button" hidden>重试缓存</button></div>
                     <p class="selection-note">资源仅在本机读取；远程下载需允许 CORS，可改用本地导入。ZIP 支持 UTF-8 Store/Deflate，最多 2 GiB、12,000 项。</p>
@@ -112,6 +113,7 @@
                     accept="application/json,.json" hidden></div>
         </details>
     </aside>
+<section id="runtime-panel" class="runtime-overlay" role="dialog" aria-modal="true" aria-label="加载游戏资源" hidden><p id="runtime-message" role="status"></p><button id="runtime-retry" type="button" hidden>重试</button><button id="runtime-cancel" type="button">取消 / 跳过</button></section>
     <div id="status" aria-hidden="true"></div>
     <script src="./storage.js"></script>
 <script src="./lobby.js"></script>
