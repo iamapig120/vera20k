@@ -4,6 +4,10 @@ function once(text,before,after){assert.equal(text.split(before).length,2,'Relea
 function releaseLauncher(text,manifestUrl){
  const url=new URL(manifestUrl);assert(['https:','http:'].includes(url.protocol));
  text=manifestOnlyLauncher(text);
+ // Only the Toy transformation opts into the engine menu policy. Ordinary Web
+ // templates and desktop launches retain Internet and LAN.
+ text=once(text,'import init, {','import init, {configure_toy_menu,');
+ text=once(text,'  start_game(canvas,engineStatus);','  configure_toy_menu(true);\n  start_game(canvas,engineStatus);');
  text="import {requestToyDisplay,observeToyContainer} from './toy.mjs';\n"+text;
  text=once(text,"button.onclick=async()=>{","button.onclick=async()=>{");
  // The existing guard is the first statement. Make the display request before

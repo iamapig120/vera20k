@@ -35,16 +35,38 @@ test('explicit bootstrap and Brotli reduce wire bytes while validating decoded l
  t.after(()=>{fixture.server.closeAllConnections();fixture.server.close();});
  const base=`http://127.0.0.1:${fixture.server.address().port}`;
  const manifest=await readRemoteManifest(base+'/manifest.json',{pageUrl:base+'/'});
- const progress=[];
- const entries=await loadRemoteProfile(manifest,'bootstrap',{pageUrl:base+'/',onProgress:value=>progress.push(value)});
- assert.equal(entries.length,2);assert(entries.every(row=>row.blob.size===bytes.length));
+ for(const exposed of [true,false]){
+  const progress=[];
+  const entries=await loadRemoteProfile(manifest,'bootstrap',{pageUrl:base+'/',onProgress:value=>progress.push(value),fetchImpl:async(url,options)=>{
+   const response=await fetch(url,options);
+   assert.equal(response.headers.get('Content-Encoding'),'br');
+   assert(Number(response.headers.get('Content-Length'))<bytes.length/10);
+   if(exposed)return response;
+   // Fetch still decodes Brotli when CORS hides Content-Encoding, while the
+   // safelisted Content-Length can retain the much smaller wire-byte count.
+   const headers=new Headers(response.headers);headers.delete('Content-Encoding');
+   return {ok:response.ok,status:response.status,url:response.url,headers,body:response.body};
+  }});
+  assert.equal(entries.length,2);assert(entries.every(row=>row.blob.size===bytes.length));
+  for(const row of manifest.profiles.get('bootstrap')){
+   const events=progress.filter(value=>value.decoded&&value.phase.endsWith(' '+row.path));
+   assert(events.length,`Missing byte progress for ${row.path}, encoding exposed=${exposed}`);
+   for(const [index,event] of events.entries()){
+    // r05c reports decoded bytes against the manifest's decoded size, never
+    // the compressed Content-Length or the old indeterminate zero total.
+    assert.equal(event.total,row.size,`Decoded total, encoding exposed=${exposed}`);
+    assert(event.loaded>0&&event.loaded<=event.total);
+    if(index)assert(event.loaded>=events[index-1].loaded);
+   }
+   assert.equal(events.at(-1).loaded,row.size);
+  }
+  const before=fixture.transfers.length;
+  const cached=await loadRemoteProfile(manifest,'bootstrap',{pageUrl:base+'/',cached:entries});
+  assert.equal(cached.length,2);assert.equal(fixture.transfers.length,before);
+ }
  assert.equal(fixture.manifest.profiles.bootstrap.length,2);
  assert(fixture.transfers.every(row=>row.encoding==='br'&&row.bytes<row.decodedSize/10));
  assert.equal(fixture.counts.has('unused.mix'),false);
- assert(progress.some(row=>row.decoded&&row.total===0&&row.phase.startsWith('接收解压')));
- const before=fixture.transfers.length;
- const cached=await loadRemoteProfile(manifest,'bootstrap',{pageUrl:base+'/',cached:entries});
- assert.equal(cached.length,2);assert.equal(fixture.transfers.length,before);
 });
 
 test('explicit menu profile retains subtitle files and the skirmish library without importing unrelated text',async t=>{

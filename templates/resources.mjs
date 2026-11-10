@@ -186,7 +186,7 @@ export async function entriesFromZip(blob, {signal, limits = LIMITS, onProgress 
   }
   return result;
 }
-export async function downloadZip(input, {signal, limits = LIMITS, onProgress = () => {}, timeoutMs = 30000, fetchImpl = fetch, pageUrl = globalThis.location?.href, resourceName = 'ZIP', redirect = 'follow'} = {}) {
+export async function downloadZip(input, {signal, limits = LIMITS, onProgress = () => {}, timeoutMs = 30000, fetchImpl = fetch, pageUrl = globalThis.location?.href, resourceName = 'ZIP', redirect = 'follow', decodedSize = 0} = {}) {
   let url;
   try { url = new URL(input); } catch { throw Error('请输入完整 HTTPS ZIP 地址'); }
   const local = value => value.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(value.hostname);
@@ -203,10 +203,10 @@ export async function downloadZip(input, {signal, limits = LIMITS, onProgress = 
     if (response.url && new URL(response.url).protocol !== 'https:' && !(development && local(new URL(response.url)))) throw Error('资源地址重定向到了不安全的连接');
     if (!response.ok) throw Error(`下载失败：HTTP ${response.status}`);
     const encoded=!!response.headers.get('Content-Encoding');
-    const total = encoded ? 0 : Number(response.headers.get('Content-Length')) || 0;
+    const total = Number.isSafeInteger(decodedSize) && decodedSize > 0 ? decodedSize : encoded ? 0 : Number(response.headers.get('Content-Length')) || 0;
     if (total > limits.archive) throw Error(`${resourceName} 超过下载大小限制`);
     if (!response.body) throw Error('浏览器无法读取下载内容');
-    const result = await consume(response.body, {signal: controller.signal, max: limits.archive, onChunk: loaded => { arm(); onProgress({phase: `${encoded?'接收解压':'下载'} ${resourceName}`, loaded, total,decoded:encoded}); }});
+    const result = await consume(response.body, {signal: controller.signal, max: limits.archive, onChunk: loaded => { arm(); onProgress({phase: `${encoded?'接收解压':'下载'} ${resourceName}`, loaded, total,decoded:encoded || decodedSize > 0}); }});
     return result.blob;
   } catch (error) {
     check(signal);
@@ -281,7 +281,7 @@ export async function loadRemoteProfile(manifest, profile, {cached = [], ...opti
     check(options.signal);
     let blob = previous.get(row.path.toLowerCase());
     if (!(blob instanceof Blob) || blob.size !== row.size || await digest(blob) !== row.sha256) {
-      blob = await downloadZip(row.url, {...options, limits: {...LIMITS, archive: row.size}, resourceName: row.path, redirect: 'error'});
+      blob = await downloadZip(row.url, {...options, limits: {...LIMITS, archive: row.size}, resourceName: row.path, redirect: 'error', decodedSize: row.size});
       if (blob.size !== row.size || await digest(blob) !== row.sha256) throw Error(`资源校验失败：${row.path}`);
     }
     check(options.signal);

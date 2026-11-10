@@ -38,3 +38,13 @@ test('release profile pins automatic manifest and hides resource configuration',
  assert.match(html,/id="folder-name" hidden/);assert(!html.includes('id="choose-folder"'));
  assert.match(html,/s1\.hdslb\.com\/bfs\/seed\/toy\/app\/sdk\/toy-sdk\.js/);
 });
+
+
+test('only the Toy launcher enables single-player menu before engine start',()=>{
+ const launcher=readFileSync(new URL('../templates/launcher.js',import.meta.url),'utf8').replaceAll('\r\n','\n');
+ const output=releaseLauncher(launcher,'https://assets.example.test/game/manifest.json');
+ assert(!launcher.includes('configure_toy_menu'));
+ assert.match(output,/import init, \{configure_toy_menu,/);
+ assert.equal(output.split('configure_toy_menu(true)').length,2);
+ assert.match(output,/configure_toy_menu\(true\);\n  start_game\(canvas,engineStatus\);/);
+});
