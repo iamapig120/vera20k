@@ -1202,6 +1202,91 @@ index b487b37..2b0cf2b 100644
          match return_to {
              // The frame loop presents the splash, then starts the pending
              // intro, then paints the shell (`App::render_frame`).
+diff --git a/src/app/shell_random_map.rs b/src/app/shell_random_map.rs
+index 303fa65..ecaafeb 100644
+--- a/src/app/shell_random_map.rs
++++ b/src/app/shell_random_map.rs
+@@ -604,18 +604,29 @@ pub(super) fn prepare_random_map_generation(
+ 
+ #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+ pub(super) fn spawn_random_map_generation_worker(
+-    _options: crate::map::rmg::RmgOptions,
+-    _settings: crate::map::rmg::RmgSettings,
+-    _resolved_inputs: crate::map::rmg::build::ResolvedTheaterInputs,
+-    _blocks: crate::map::rmg::theater_blocks::TheaterTileBlocks,
+-    _tech_types: Vec<crate::map::rmg::phases::tech_buildings::TechType>,
+-    _shared_cell_dummy: crate::map::resolved_terrain::SharedCellDummy,
+-    _map_storage_decision: RandomMapStorageDecision,
++    options: crate::map::rmg::RmgOptions,
++    settings: crate::map::rmg::RmgSettings,
++    resolved_inputs: crate::map::rmg::build::ResolvedTheaterInputs,
++    blocks: crate::map::rmg::theater_blocks::TheaterTileBlocks,
++    tech_types: Vec<crate::map::rmg::phases::tech_buildings::TechType>,
++    shared_cell_dummy: crate::map::resolved_terrain::SharedCellDummy,
++    map_storage_decision: RandomMapStorageDecision,
+ ) -> std::io::Result<std::sync::mpsc::Receiver<RandomMapUpdate>> {
+-    Err(std::io::Error::new(
+-        std::io::ErrorKind::Unsupported,
+-        "Random map generation is unavailable in the single-threaded Web preview",
+-    ))
++    // The single-threaded Web build cannot spawn std::thread. Keep the existing
++    // seed-driven generator and completion ownership, just run its work inline.
++    // No intermediate preview snapshots can be painted during this call.
++    let (sender, receiver) = std::sync::mpsc::channel();
++    map_storage_decision.apply_resize_to(&shared_cell_dummy);
++    let _ = sender.send(RandomMapUpdate::Started);
++    let generated = crate::map::rmg::build::generate_map(
++        &options,
++        &settings,
++        &resolved_inputs,
++        &blocks,
++        &tech_types,
++    );
++    let _ = sender.send(RandomMapUpdate::Finished(Box::new(generated)));
++    Ok(receiver)
+ }
+ 
+ #[cfg(not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")))]
+@@ -854,6 +865,39 @@ impl App {
+         options: &crate::map::rmg::RmgOptions,
+         accept_on_finish: bool,
+     ) -> bool {
++        // Web bootstrap archives must be completed before RMG's theater
++        // preparation mutates the process-global archive search list.
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        let (options, accept_on_finish) = {
++            let Some(input) = super::remote_assets::initial_library(
++                state,
++                (options.clone(), accept_on_finish),
++                |state, (options, accept), ready| {
++                    if state
++                        .frontend
++                        .skirmish_shell_state
++                        .random_map_setup_modal
++                        .is_none()
++                    {
++                        return;
++                    }
++                    if (!ready || !App::start_random_map_generation(state, &options, accept))
++                        && let Some(modal) = state
++                            .frontend
++                            .skirmish_shell_state
++                            .random_map_setup_modal
++                            .as_mut()
++                    {
++                        modal.fail_generate();
++                    }
++                },
++            ) else {
++                return true;
++            };
++            input
++        };
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        let options = &options;
+         // The ordinary Generate path also stamps the localized working label
+         // immediately before generator construction (0x00595BC0).
+         let mut generation_options = options.clone();
 diff --git a/src/assets/asset_manager.rs b/src/assets/asset_manager.rs
 index cfa4c0a..8ad9b3d 100644
 --- a/src/assets/asset_manager.rs
@@ -1710,7 +1795,7 @@ index ea110b9..1841b01 100644
      return_code_for_action, tooltip_csf_key_for_control,
  };
 diff --git a/src/ui/main_menu_shell/state.rs b/src/ui/main_menu_shell/state.rs
-index 4c13e5e..130e573 100644
+index 4c13e5e..22c227f 100644
 --- a/src/ui/main_menu_shell/state.rs
 +++ b/src/ui/main_menu_shell/state.rs
 @@ -68,6 +68,33 @@ pub struct MainMenuShellState {

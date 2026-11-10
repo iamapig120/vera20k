@@ -451,72 +451,82 @@ pub(super) fn pump(state: &mut AppState) -> bool {
     waiting
 }
 
+/// Complete process libraries before any consumer can activate a theater.
+/// Keep the map request or RMG options owned across the explicit async wait;
+/// neither the frozen INI roots nor AssetManager's sticky-cache checks change.
+pub(super) fn initial_library<T: 'static>(
+    state: &mut AppState,
+    input: T,
+    resume: impl FnOnce(&mut AppState, T, bool) + 'static,
+) -> Option<T> {
+    if state.process_assets.has_deferred_audio()
+        && let Some(bank) = crate::assets::deferred_assets::bank_metadata()
+    {
+        archive_request(
+            state,
+            "audio",
+            &bank.archive_name,
+            Box::new(move |state, ready| {
+                resume(state, input, ready);
+            }),
+        );
+        return None;
+    }
+    let next = HOST.with(|h| {
+        let h = h.borrow();
+        h.catalog
+            .keys()
+            .filter(|k| k.starts_with("archive:") && !h.installed.contains(*k))
+            .min()
+            .cloned()
+    });
+    if let Some(next) = next {
+        let (_, name) = next.split_once(':').unwrap();
+        archive_request(
+            state,
+            "archive",
+            name,
+            Box::new(move |state, ready| {
+                resume(state, input, ready);
+            }),
+        );
+        return None;
+    }
+    if !HOST.with(|h| h.borrow().graphics_ready) {
+        if let Some(root) = state
+            .platform
+            .game_config
+            .as_ref()
+            .map(|c| c.paths.ra2_dir.clone())
+        {
+            if let Err(error) = state.process_assets.complete_initial_library(&root, false) {
+                incompatible(state, error);
+                return None;
+            }
+            HOST.with(|h| h.borrow_mut().graphics_ready = true);
+        }
+    }
+    Some(input)
+}
+
 pub(super) fn map(
     state: &mut AppState,
     request: super::loading::pump::LoadingRequest,
     campaign: bool,
 ) -> Option<super::loading::pump::LoadingRequest> {
-    if request.remote_allowed() {
-        if state.process_assets.has_deferred_audio()
-            && let Some(bank) = crate::assets::deferred_assets::bank_metadata()
-        {
-            archive_request(
-                state,
-                "audio",
-                &bank.archive_name,
-                Box::new(move |state, ready| {
-                    if !ready {
-                        back_to_menu(state);
-                    } else if campaign {
-                        App::start_campaign_scenario(state, request);
-                    } else {
-                        super::loading::pump::begin_loading(state, request);
-                    }
-                }),
-            );
-            return None;
-        }
-        let next = HOST.with(|h| {
-            let h = h.borrow();
-            h.catalog
-                .keys()
-                .filter(|k| k.starts_with("archive:") && !h.installed.contains(*k))
-                .min()
-                .cloned()
-        });
-        if let Some(next) = next {
-            let (_, name) = next.split_once(':').unwrap();
-            archive_request(
-                state,
-                "archive",
-                name,
-                Box::new(move |state, ready| {
-                    if !ready {
-                        back_to_menu(state);
-                    } else if campaign {
-                        App::start_campaign_scenario(state, request);
-                    } else {
-                        super::loading::pump::begin_loading(state, request);
-                    }
-                }),
-            );
-            return None;
-        }
-        if !HOST.with(|h| h.borrow().graphics_ready) {
-            if let Some(root) = state
-                .platform
-                .game_config
-                .as_ref()
-                .map(|c| c.paths.ra2_dir.clone())
-            {
-                if let Err(error) = state.process_assets.complete_initial_library(&root, false) {
-                    incompatible(state, error);
-                    return None;
-                }
-                HOST.with(|h| h.borrow_mut().graphics_ready = true);
+    let request = if request.remote_allowed() {
+        initial_library(state, request, move |state, request, ready| {
+            if !ready {
+                back_to_menu(state);
+            } else if campaign {
+                App::start_campaign_scenario(state, request);
+            } else {
+                super::loading::pump::begin_loading(state, request);
             }
-        }
-    }
+        })?
+    } else {
+        request
+    };
     let name = request.selected_map_file().to_owned();
     if !request.remote_allowed() || !declared("map", &name) {
         return Some(request);
