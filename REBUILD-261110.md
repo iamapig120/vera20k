@@ -1,8 +1,10 @@
-# Toy 261110: RMG repair and Skirmish setup-entry removal
+# Toy 261110: RMG, Skirmish entry removal and Escape fullscreen input
 
 This corresponding-source snapshot retains the Toy single-player menu and fixed 261110 resource manifest, includes the tested single-threaded Wasm random-map and initial resource-stage repairs, and removes the VERA-only Save Setup / Load Setup entries from Skirmish. Existing [Skirmish]/[MultiPlayer] profile memory and saved setup files are preserved. See docs/TOY-SKIRMISH-SETUP-ENTRIES.md.
 
-It does not include the separate touch movie-skip, Esc frontend or new localization changes. The pinned engine does not include later upstream PR #3892's full Last Setup implementation.
+It also includes the accepted Escape fullscreen-input integration: request browser keyboard capture, lock only Escape when supported, keep the browser-native long-press exit route and explicit fullscreen button, and show diagnostics only when locking is unsupported or refused. The redundant custom success hint is removed. See docs/TOY-FULLSCREEN-ESC.md.
+
+It does not include the separate touch movie-skip or new localization changes. The pinned engine does not include later upstream PR #3892's full Last Setup implementation.
 
 ## Corresponding engine and frontend
 
@@ -18,6 +20,6 @@ Packaging may set the visible source link and build-info.txt receipt to this sna
 
 ## Verification boundaries
 
-A complete offline Wasm build passed. The actual reconstructed source recipe matched that engine; a second redundant Cargo build was not performed after Web documentation commits. All 75 JavaScript regressions passed. Owned desktop headless Edge checks covered removed hit areas, repeated clicks and drag cancellation, Tab/Enter, map chooser cancellation/re-entry/Use Map, player-name keyboard editing, Back/revisit setting retention, preservation of existing setup files, ordinary Skirmish startup and prior RMG generation/resource-stage repairs. No JS exceptions, failed requests or resource-stage errors appeared in those local runs.
+A complete offline Wasm build passed. The actual reconstructed source recipe matched that engine; a second redundant Cargo build was not performed after Web documentation commits. The integrated frontend passes all 83 JavaScript regressions. Owned desktop headless Edge checks covered removed hit areas, repeated clicks and drag cancellation, Tab/Enter, map chooser cancellation/re-entry/Use Map, player-name keyboard editing, Back/revisit setting retention, preservation of existing setup files, ordinary Skirmish startup and prior RMG generation/resource-stage repairs. No JS exceptions, failed requests or resource-stage errors appeared in those local runs.
 
-The focused Rust regression is included but the native Rust unit suite was not run. Physical phone/Toy App gameplay, all viewport sizes, human audio listening and multiplayer are not claimed. Upload and review status are separate platform actions and must be verified from their receipts; this source snapshot alone is not evidence of deployment or approval.
+The focused Rust regression is included but the native Rust unit suite was not run. Physical phone/Toy App gameplay, all viewport sizes, human audio listening and multiplayer are not claimed. Real native fullscreen/keyboard capture is browser-dependent; the headless browser can refuse it, so unit coverage is not a physical Toy App guarantee. Upload and review status are separate platform actions and must be verified from their receipts; this source snapshot alone is not evidence of deployment or approval.

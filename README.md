@@ -1,6 +1,6 @@
 # YR Web Toy 261110 source
 
-This branch now includes the Toy single-player menu, the tested random-map/resource-stage repairs and removal of Skirmish Save Setup / Load Setup entries. Read REBUILD-261110.md for the current corresponding engine hash, build instructions and verification limits. The r04 material below is historical context, not this release's binary correspondence. Separate touch, Esc and new localization changes are not included.
+This branch now includes the Toy single-player menu, the tested random-map/resource-stage repairs and removal of Skirmish Save Setup / Load Setup entries, plus Escape fullscreen-input handling without a duplicate success hint. Read REBUILD-261110.md for the current corresponding engine hash, build instructions and verification limits. The r04 material below is historical context, not this release's binary correspondence. Separate touch movie-skip and new localization changes are not included.
 
 # YR Web On-demand — Toy r04 source
 
