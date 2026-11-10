@@ -4,7 +4,7 @@ export async function requestToyDisplay(document, {toy=globalThis.toy,screen=glo
  const attempt=fn=>{try{return Promise.resolve(fn()).then(()=>true,()=>false);}catch{return Promise.resolve(false);}};
  const host=toy?.setContainerMode?attempt(()=>toy.setContainerMode({orientation:'landscape',immersive:true})):Promise.resolve(false);
  const root=document.documentElement;
- const native=document.fullscreenElement?Promise.resolve(true):root.requestFullscreen?attempt(()=>root.requestFullscreen()):Promise.resolve(false);
+ const native=document.fullscreenElement?Promise.resolve(true):root.requestFullscreen?attempt(()=>root.requestFullscreen({keyboardLock:'browser'})):Promise.resolve(false);
  const browser=await native;
  if(browser&&screen?.orientation?.lock)await attempt(()=>screen.orientation.lock('landscape'));
  const supported=await host;

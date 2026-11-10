@@ -48,3 +48,10 @@ test('only the Toy launcher enables single-player menu before engine start',()=>
  assert.equal(output.split('configure_toy_menu(true)').length,2);
  assert.match(output,/configure_toy_menu\(true\);\n  start_game\(canvas,engineStatus\);/);
 });
+
+test('Toy Start requests standard browser keyboard lock mode without delaying the App request',async()=>{
+ const calls=[];
+ const document={documentElement:{requestFullscreen(options){calls.push(options);return Promise.resolve();}}};
+ assert.equal(await requestToyDisplay(document,{toy:{setContainerMode(){calls.push('host');return Promise.resolve();}},screen:{}}),true);
+ assert.deepEqual(calls,['host',{keyboardLock:'browser'}]);
+});
