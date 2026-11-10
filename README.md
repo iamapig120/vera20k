@@ -1,3 +1,7 @@
+# YR Web Toy 261110 source
+
+This branch now includes the Toy single-player menu, the tested random-map/resource-stage repairs and removal of Skirmish Save Setup / Load Setup entries. Read REBUILD-261110.md for the current corresponding engine hash, build instructions and verification limits. The r04 material below is historical context, not this release's binary correspondence. Separate touch, Esc and new localization changes are not included.
+
 # YR Web On-demand — Toy r04 source
 
 Unofficial modified integration based on VERA20K. This is not an official VERA20K build. EA has not endorsed and does not support this product. The historical repository name is retained, while this integration is called YR Web On-demand.

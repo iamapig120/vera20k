@@ -10,4 +10,4 @@ This branch also retains the separately tested single-threaded Wasm random-map g
 
 Validation: reconstructed engine sources match the complete previously compiled and browser-tested Toy/RMG/entry-removal candidate after CRLF/LF normalization. That candidate passed a complete Wasm build, 75 JavaScript regressions, old-tile click/drag and Tab/Enter checks, Choose Map Cancel/re-entry/Use Map, player-name keyboard editing, Back/revisit settings retention and ordinary Skirmish startup. A production Rust regression for inert old hit areas is included in the patch, but the native Rust test suite was not run. Physical Toy App/phone acceptance and all viewport sizes are not claimed.
 
-No push, upstream PR, deployment or review submission is performed by this local source change. Separate Esc, touch-movie-skip and new localization changes are not included in this commit.
+Publication is a separate owner-authorized action. Source availability, uploaded-package correspondence and platform review status must be verified independently. Separate Esc, touch-movie-skip and new localization changes are not included.
