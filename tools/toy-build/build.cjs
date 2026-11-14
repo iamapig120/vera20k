@@ -5,6 +5,7 @@ const crypto=require('node:crypto');
 const assert=require('node:assert/strict');
 const esbuild=require(process.env.VERA_ESBUILD_PATH||'esbuild');
 const config=require('./release.json');
+const {packageDependencies}=require('./package-files.cjs');
 const manifestUrl=process.env.VERA_TOY_MANIFEST_URL||config.manifestUrl;
 const {releaseLauncher,releaseHtml,manifestOnlyResources}=require('./release.cjs');
 async function main(){
@@ -13,6 +14,7 @@ async function main(){
  const input=path.resolve(inputArg),output=path.resolve(outputArg);
  assert(!fs.existsSync(output),'Refusing to overwrite an existing output directory');
  const files=['index.html','launcher.css','storage.js','lobby.js','network.js','LICENSE-GPL','build-info.txt','assets/RA2MD.png','pkg/vera20k.js','pkg/vera20k_bg.wasm'];
+ files.push(...packageDependencies(input));
  for(const name of files)assert(fs.statSync(path.join(input,name)).isFile(),name);
  const built=await esbuild.build({
   entryPoints:[path.join(input,'launcher.js')],bundle:true,format:'esm',platform:'browser',
@@ -28,8 +30,8 @@ async function main(){
  const contents=built.outputFiles[0].contents,code=Buffer.from(contents).toString();
  assert(!code.includes('.mjs'),'A runtime mjs reference survived bundling');
  const imports=Object.values(built.metafile.outputs).flatMap(row=>row.imports);
- assert.equal(imports.length,1);
- assert(imports[0].external&&/^\.\/pkg\/vera20k\.js(?:\?|$)/.test(imports[0].path));
+ assert(imports.length>0);
+ assert(imports.every(item=>item.external&&/^\.\/pkg\/vera20k\.js(?:\?|$)/.test(item.path)));
  const inputs=Object.keys(built.metafile.inputs);
  for(const name of ['launcher.js','resources.mjs','runtime.mjs','fullscreen.mjs'])assert(inputs.some(p=>p.endsWith(name)),name);
  const filename='launcher.'+crypto.createHash('sha256').update(contents).digest('hex').slice(0,16)+'.js';
@@ -41,7 +43,7 @@ async function main(){
  fs.writeFileSync(path.join(output,'index.html'),html);
  fs.writeFileSync(path.join(output,filename),contents);
  fs.appendFileSync(path.join(output,'build-info.txt'),'\nToy helpers bundled with esbuild '+esbuild.version+'; no runtime .mjs files.\nCorresponding source: https://github.com/iamapig120/vera20k/tree/web-ondemand-toy-20261108\n');
- const metadata={esbuild:esbuild.version,filename,inputFiles:inputs,externalImports:imports,wasmSha256:crypto.createHash('sha256').update(fs.readFileSync(path.join(output,'pkg/vera20k_bg.wasm'))).digest('hex'),metafile:built.metafile};
+ const metadata={packageDependencies:files.filter(name=>/^pkg\/(fonts|snippets)\//.test(name)),esbuild:esbuild.version,filename,inputFiles:inputs,externalImports:imports,wasmSha256:crypto.createHash('sha256').update(fs.readFileSync(path.join(output,'pkg/vera20k_bg.wasm'))).digest('hex'),metafile:built.metafile};
  fs.writeFileSync(path.resolve(metadataArg),JSON.stringify(metadata,null,2)+'\n');
  console.log(JSON.stringify({output,filename,esbuild:esbuild.version,wasmSha256:metadata.wasmSha256}));
 }

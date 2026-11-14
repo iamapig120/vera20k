@@ -17,3 +17,8 @@
 
 !runtime.mjs
 !fullscreen.mjs
+
+!pkg/snippets/
+!pkg/snippets/**
+!pkg/fonts/
+!pkg/fonts/**

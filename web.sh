@@ -123,13 +123,17 @@ bundle_static() {
 }
 build() {
   prepare
-  for tool in cargo rustc wasm-bindgen python3; do command -v "$tool" >/dev/null || fail "Missing $tool on PATH; see README.md"; done
+  for tool in cargo rustc wasm-bindgen python3 node; do command -v "$tool" >/dev/null || fail "Missing $tool on PATH; see README.md"; done
   expected=$(awk '$0 == "name = \"wasm-bindgen\"" {seen=1;next} seen && $1 == "version" {gsub(/"/,"",$3);print $3;exit}' "$ENGINE/Cargo.lock")
   [[ -n "$expected" ]] || fail 'wasm-bindgen missing from Cargo.lock'
   actual=$(wasm-bindgen --version)
   [[ "$actual" == "wasm-bindgen $expected" ]] || fail "CLI version must match Cargo.lock: expected $expected, got $actual"
   (
     cd "$ENGINE"
+    # Browser snapshots embed a layout ID traced by the matching host build.
+    python3 -m tools.cargo_run -- build -p vera20k-core --bin snapshot-layout --profile fast --locked
+    VERA20K_SNAPSHOT_LAYOUT=$(python3 -c 'import os, subprocess; from pathlib import Path; from tools.cargo_run import build_store, owned_target; root=Path.cwd(); target=owned_target(root, build_store(root)[1]); tool=target / "fast" / ("snapshot-layout.exe" if os.name == "nt" else "snapshot-layout"); print(subprocess.check_output([str(tool)], text=True).strip())')
+    export VERA20K_SNAPSHOT_LAYOUT
     CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}" python3 "$ROOT/tools/build-remapped.py" "$ROOT" -m tools.cargo_run -- rustc -p vera20k --lib --locked \
       --target wasm32-unknown-unknown --no-default-features --features wasm --profile fast --crate-type cdylib \
       -- -C link-arg=-zstack-size=8388608
@@ -140,6 +144,11 @@ build() {
   # Strip diagnostic metadata before the static site and its cache key are generated.
   wasm-bindgen --target web --remove-name-section --remove-producers-section \
     --out-dir "$stage/pkg" "$cargo_target/wasm32-unknown-unknown/fast/vera20k.wasm"
+  # Upstream Wasm fonts are fetched relative to its wasm-bindgen snippets.
+  mkdir -p "$stage/pkg/fonts"
+  for font in "$ENGINE"/src/render/fonts/*.ttf "$ENGINE"/src/render/fonts/*.otf "$ENGINE"/src/render/fonts/*.bin "$ENGINE"/src/render/fonts/OFL*.txt; do
+    [[ -f "$font" ]] && cp "$font" "$stage/pkg/fonts/"
+  done
   bundle_static "$stage"
   printf 'Upstream: %s\nRevision: %s\nwasm-bindgen: %s\n' "$UPSTREAM_URL" "$REVISION" "$expected" > "$stage/build-info.txt"
   if [[ -d "$DIST" ]]; then rm -rf "$DIST"; fi
@@ -157,6 +166,11 @@ package() {
   for file in pkg/vera20k.d.ts pkg/vera20k_bg.wasm.d.ts; do
     if [[ -f "$DIST/$file" ]]; then files+=("$file"); fi
   done
+  local dependencies
+  dependencies=$(node "$ROOT/tools/toy-build/package-files.cjs" "$DIST") || fail "Incomplete runtime package"
+  while IFS= read -r file; do
+    [[ -n "$file" ]] && files+=("$file")
+  done <<< "$dependencies"
   for file in "${files[@]}"; do
     [[ -f "$DIST/$file" && ! -L "$DIST/$file" ]] || fail "Missing file or unexpected symlink: $file"
   done

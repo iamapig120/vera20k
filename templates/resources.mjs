@@ -277,16 +277,24 @@ export async function loadRemoteProfile(manifest, profile, {cached = [], ...opti
   const digest = async blob => [...new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].map(byte => byte.toString(16).padStart(2, '0')).join('');
   const previous = new Map(cached.map(row => [row.path.toLowerCase(), row.file ?? row.blob]));
   const result = [];
+  const totalBytes = files.reduce((sum, row) => sum + row.size, 0);
+  let verifiedBytes = 0;
+  const report = (value, currentBytes = 0, complete = false) => options.onProgress?.({...value,
+    overall: {loaded: verifiedBytes + Math.min(currentBytes, files[result.length]?.size ?? 0),
+      total: totalBytes, completed: result.length, count: files.length, complete}});
+  report({phase: '准备首批资源', loaded: 0});
   for (const row of files) {
     check(options.signal);
     let blob = previous.get(row.path.toLowerCase());
     if (!(blob instanceof Blob) || blob.size !== row.size || await digest(blob) !== row.sha256) {
-      blob = await downloadZip(row.url, {...options, limits: {...LIMITS, archive: row.size}, resourceName: row.path, redirect: 'error', decodedSize: row.size});
+      blob = await downloadZip(row.url, {...options, limits: {...LIMITS, archive: row.size}, resourceName: row.path, redirect: 'error', decodedSize: row.size,
+        onProgress: value => report({...value, file: row.path}, value.loaded)});
       if (blob.size !== row.size || await digest(blob) !== row.sha256) throw Error(`资源校验失败：${row.path}`);
     }
     check(options.signal);
     result.push({path: row.path, blob});
-    options.onProgress?.({phase: '资源就绪', file: row.path, loaded: result.length, total: files.length});
+    verifiedBytes += row.size;
+    report({phase: '资源就绪', file: row.path, loaded: row.size, total: row.size}, 0, result.length === files.length);
   }
   return result;
 }

@@ -1,4 +1,5 @@
 import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game,configure_remote_assets,finish_remote_asset} from './pkg/vera20k.js';
+import * as engineModule from './pkg/vera20k.js';
 import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries,readRemoteManifest,loadRemoteProfile} from './resources.mjs';
 import {installFullscreen} from './fullscreen.mjs';
 import {createRuntimeLoader} from './runtime.mjs';
@@ -78,6 +79,11 @@ globalThis.vera20kPersistWrite=(path,bytes,modified_ms)=>{
  if(!userPath(path))return;
  // wasm-bindgen lends a view into Wasm memory only for this call.
  pending.set(path,{path,bytes:bytes.slice(),modified_ms});void flushUserData();
+};
+globalThis.vera20kPrepareNavigation=async()=>{
+ if(busy||document.body.classList.contains('playing'))throw Error('请先在游戏内退出，再切换版本。');
+ await flushUserData();
+ if(pending.size)throw Error('仍有未保存的数据，请重试保存或导出备份后再切换。');
 };
 globalThis.vera20kPersistRemove=path=>{if(userPath(path)){pending.set(path,null);void flushUserData();}};
 $('export-data').onclick=async()=>{
@@ -196,6 +202,18 @@ async function saveSelection(chosen,label,remoteRequired=!!runtimeManifest?.runt
  cachedSelection=true;$('retry-cache').hidden=true;storageStatus('资源已缓存；设置与存档独立保留');
 }
 function resourceProgress(value){
+ const overall=value.overall;
+ $('total-progress-area').hidden=!overall;
+ if(overall){
+  // This is the selected bootstrap profile, not every on-demand movie/map.
+  // Reserve completion for successful validation, never just bytes received.
+  const percent=overall.complete?100:Math.min(99,Math.floor(overall.loaded/overall.total*100));
+  $('total-progress-fill').style.width=percent+'%';
+  $('total-progress').setAttribute('aria-valuenow',String(percent));
+  $('total-progress-percent').textContent=percent+'%';
+  $('total-progress-detail').textContent='首批资源总进度 · '+overall.completed+'/'+overall.count+' 个文件已就绪';
+ }
+
  const detail=value.phase+(value.file?' · '+value.file:` · ${sizeLabel(value.loaded)}${value.total?' / '+sizeLabel(value.total):''}`);
  progress(value.total?value.loaded/value.total*100:0,detail);feedback(detail);
 }
@@ -218,7 +236,7 @@ async function importResources(read,label,manifest){
   else if(!cached)storageStatus('本次不缓存资源；旧缓存与用户数据保留');
   return true;
  }catch(error){feedback(controller.signal.aborted?'已取消；旧资源、缓存和用户数据保留。':`${error.message}；旧资源、缓存和用户数据保留。`,!controller.signal.aborted);}
- finally{if(importController===controller){importController=undefined;selecting=false;$('cancel-import').hidden=true;$('progress-area').hidden=true;syncButton();}}
+ finally{if(importController===controller){importController=undefined;selecting=false;$('cancel-import').hidden=true;$('total-progress-area').hidden=true;$('progress-area').hidden=true;syncButton();}}
 }
 files.onchange=()=>{
  const chosen=[...files.files];if(!chosen.length)return;
@@ -353,13 +371,17 @@ async function engineBytes(){
 }
 async function prepareEngine(){
  if(engineLoading)return;engineLoading=true;syncButton();
- const started=Date.now();let compiling=false;
+ const started=Date.now();let compiling=false,fontPreloadFailed=false;
  const timer=setInterval(()=>{if(compiling&&!selecting&&!feedbackError)feedback(`正在准备游戏引擎… 已等待 ${Math.floor((Date.now()-started)/1000)} 秒，较慢的设备可能需要更长时间。`);},8000);
  try{
   if(!selecting&&!feedbackError)feedback('正在下载游戏引擎… 可以先选择游戏目录。');
   const bytes=await engineBytes();
   compiling=true;if(!selecting&&!feedbackError){feedback('正在准备游戏引擎…');$('progress-area').hidden=true;}
   await init({module_or_path:bytes});
+  if(typeof engineModule.fonts_ready==='function'){
+   try{await engineModule.fonts_ready();}
+   catch(error){fontPreloadFailed=true;throw error;}
+  }
   set_persistence_callbacks(globalThis.vera20kPersistWrite,globalThis.vera20kPersistRemove);
   ready=true;failed=false;
   $('environment').className='environment ready';$('environment-label').textContent='浏览器已就绪';
@@ -368,6 +390,7 @@ async function prepareEngine(){
   $('environment').className='environment error';$('environment-label').textContent='引擎准备失败';
   fail('游戏引擎未能准备好，请查看详情并重试。',String(error));
   $('retry').textContent='重试准备引擎';
+  if(fontPreloadFailed){feedback('\u5b57\u4f53\u52a0\u8f7d\u5931\u8d25\uff0c\u8bf7\u5237\u65b0\u9875\u9762\u540e\u91cd\u8bd5\u3002',true);$('retry').hidden=true;}
  }finally{clearInterval(timer);engineLoading=false;syncButton();}
 }
 async function restoreStorage(){

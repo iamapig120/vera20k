@@ -5,6 +5,7 @@ import {installFullscreen} from '../templates/fullscreen.mjs';
 function fixture(keyboard){
  const events=new Map(),errors=[];let requests=0,exits=0,focus=0;
  const document={defaultView:{navigator:{keyboard}},fullscreenElement:null,addEventListener:(name,fn)=>events.set(name,fn),async exitFullscreen(){exits++;this.fullscreenElement=null;events.get('fullscreenchange')();}};
+ document.defaultView.top=document.defaultView;
  const root={querySelector:()=>({focus:()=>focus++}),async requestFullscreen(){requests++;document.fullscreenElement=root;events.get('fullscreenchange')();}};
  const button={setAttribute(name,value){this[name]=value;}};
  const toggle=installFullscreen(document,root,button,message=>errors.push(message));
@@ -101,4 +102,20 @@ test('successful locking is silent while failure diagnostics and explicit exit r
  assert.equal(f.button['data-esc-lock'],'granted');assert.equal(f.errors.at(-1),'');
  assert.equal(f.button.textContent,'退出全屏');await f.button.onclick();
  assert.equal(f.document.fullscreenElement,null);assert.equal(f.counts().exits,1);
+});
+
+
+test('embedded fullscreen never requests Keyboard Lock and preserves Escape propagation',async()=>{
+ for(const context of ['same-origin','cross-origin','unreadable-top']){
+  let locks=0,unlocks=0,prevented=0;
+  const f=fixture({lock:async()=>{locks++;},unlock:()=>{unlocks++;}});
+  if(context==='unreadable-top')Object.defineProperty(f.document.defaultView,'top',{get(){throw Error('SecurityError');}});
+  else f.document.defaultView.top=context==='same-origin'?{}:new Proxy({},{get(){throw Error('Cross-origin access forbidden');}});
+  await f.toggle();await settle();
+  assert.equal(locks,0);assert.equal(f.button['data-esc-lock'],'embedded');assert.equal(f.document.fullscreenElement,f.root);
+  assert.match(f.errors.at(-1),/Esc/);assert.equal(f.button.disabled,false);
+  f.events.get('keydown')({key:'Escape',preventDefault(){prevented++;},stopPropagation(){throw Error('Engine input swallowed');},stopImmediatePropagation(){throw Error('Engine input swallowed');}});
+  assert.equal(prevented,1);assert.equal(f.events.has('keyup'),false);
+  await f.toggle();assert.equal(unlocks,0);assert.equal(f.button['data-esc-lock'],'inactive');assert.equal(f.errors.at(-1),'');
+ }
 });

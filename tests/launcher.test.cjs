@@ -7,15 +7,15 @@ async function exitFixture(storage,globals={}){
  const {installFullscreen}=await import('../templates/fullscreen.mjs');
  const resources=await import('../templates/resources.mjs'),elements=new Map();
  let closeCalls=0;
- const canvas={hidden:false};
+ const canvas={hidden:false,focus(){}};
  const element=id=>{
   if(!elements.has(id))elements.set(id,{value:'',textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},replaceChildren(...options){this.value=options[0]?.value||'';},querySelector(){return canvas;},setAttribute(){},addEventListener(){}});
   return elements.get(id);
  };
  const context=vm.createContext({...resources,installFullscreen,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
   navigator:{gpu:{}},window:{addEventListener(){},close(){closeCalls++;}},document:{createElement(){return {};},getElementById:element,documentElement:element('document'),body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
-  fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},set_persistence_callbacks(){},
-  VeraStorage:{open:async()=>{},library:async()=>null,users:async()=>[],...storage},import_file(){},prepare_audio(){},restore_user_file(){},start_game(){},...globals
+  fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},engineModule:{},set_persistence_callbacks(){},
+  VeraStorage:{open:async()=>{},library:async()=>null,users:async()=>[],...storage},import_file(){},prepare_audio(){},restore_user_file(){},start_game(){},...globals,engineModule:globals.engineModule||{fonts_ready:globals.fonts_ready}
  });
  vm.runInContext(source('launcher.js').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js')),context);
  await new Promise(setImmediate);
@@ -235,7 +235,7 @@ test('manual folder wins over late cache restoration and storage does not gate e
  navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,documentElement:element('document'),body:{classList:element('body').classList},addEventListener(){}},
  MutationObserver:class{observe(){}},
  fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),
- AbortController,init:async()=>{},set_persistence_callbacks(){},VeraStorage:{open:async()=>{},library:()=>new Promise(resolve=>restore=resolve)},
+ AbortController,init:async()=>{},engineModule:{},set_persistence_callbacks(){},VeraStorage:{open:async()=>{},library:()=>new Promise(resolve=>restore=resolve)},
  import_file(){},prepare_audio(){},restore_user_file(){},start_game(){}
  });
  vm.runInContext(source('launcher.js').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js')),context);
@@ -255,7 +255,7 @@ test('startup waits for saved preferences even when storage opens after the engi
  const opening=new Promise(resolve=>openStorage=resolve);
  const context=vm.createContext({...resources,installFullscreen,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
  navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,documentElement:element('document'),body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
- fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},set_persistence_callbacks(){},
+ fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},engineModule:{},set_persistence_callbacks(){},
  VeraStorage:{open:()=>opening,library:async()=>null,users:async()=>[{path:'/retail/RA2MD.INI',bytes:new Uint8Array([89]),modified_ms:1}],saveLibrary:async()=>{}},
  prepare_audio(){},import_file(name){calls.push(name);},restore_user_file(path){calls.push(path);},start_game(){calls.push('start');}
  });
@@ -283,7 +283,7 @@ test('optional gateway restores and validates origins without probing or gating 
  localStorage:{getItem:()=> 'wss://gateway.example:8443/',setItem(key,value){writes.push([key,value]);}},
  navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,documentElement:element('document'),body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
  fetch:async url=>{requests.push(String(url));return {ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}};},
- init:async()=>{},set_persistence_callbacks(){},VeraStorage:{open:async()=>{},library:async()=>null,users:async()=>[],saveLibrary:async()=>{}},
+ init:async()=>{},engineModule:{},set_persistence_callbacks(){},VeraStorage:{open:async()=>{},library:async()=>null,users:async()=>[],saveLibrary:async()=>{}},
  import_file(){},prepare_audio(){},restore_user_file(){},start_game(){startCalls++;}
  });
  vm.runInContext(source('launcher.js').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js')),context);
@@ -308,4 +308,59 @@ test('optional gateway restores and validates origins without probing or gating 
  Object.defineProperty(context,'localStorage',{get(){throw Error('storage blocked');}});
  input.value='https://other.example';assert.doesNotThrow(()=>input.oninput());
  assert.equal(context.veraGatewayBase(),'https://other.example');
+});
+
+ test('engine readiness waits for required fonts and a font failure blocks Start',async()=>{
+ let finish;
+ const waiting=await exitFixture({}, {fonts_ready:()=>new Promise(resolve=>finish=resolve)});
+ assert.equal(waiting.element('start').disabled,true);
+ assert.notEqual(waiting.element('environment').className,'environment ready');
+ finish();await new Promise(setImmediate);
+ assert.equal(waiting.element('environment').className,'environment ready');
+ const failed=await exitFixture({}, {fonts_ready:async()=>{throw Error('Required font fetch failed');}});
+ assert.equal(failed.element('start').disabled,true);
+ assert.match(failed.element('error-message').textContent,/Required font fetch failed/);
+ assert.equal(failed.element('retry').hidden,true);
+ assert.match(failed.element('feedback').textContent,/刷新/);
+ });
+
+test('engine lifecycle uses stable protocol tokens rather than translated presentation strings',async()=>{
+ const fixture=await exitFixture({});
+ vm.runInContext("busy=true; engineStatus('Starting engine')",fixture.context);
+ assert.equal(vm.runInContext('failed',fixture.context),false);
+ vm.runInContext("engineStatus('Ready')",fixture.context);
+ assert.equal(vm.runInContext('busy',fixture.context),false);
+ assert.equal(vm.runInContext('failed',fixture.context),false);
+ vm.runInContext("engineStatus('startup resource failure')",fixture.context);
+ assert.equal(vm.runInContext('failed',fixture.context),true);
+ assert.equal(fixture.element('error-message').textContent,'startup resource failure');
+});
+
+test('version navigation waits for durable writes, refuses active game and failed saves',async()=>{
+ let release;const fixture=await exitFixture({write:()=>new Promise(resolve=>release=resolve)});
+ fixture.context.vera20kPersistWrite('/saves/test.sav',new Uint8Array([1,2]),1);
+ let navigable=false;const ready=fixture.context.vera20kPrepareNavigation().then(()=>{navigable=true;});
+ await new Promise(setImmediate);assert.equal(navigable,false);
+ release();await ready;assert.equal(navigable,true);
+ vm.runInContext('busy=true',fixture.context);
+ await assert.rejects(fixture.context.vera20kPrepareNavigation(),/退出/);
+ const failed=await exitFixture({write:async()=>{throw Error('test quota');}});
+ failed.context.vera20kPersistWrite('/saves/test.sav',new Uint8Array([3]),2);
+ await new Promise(setImmediate);
+ await assert.rejects(failed.context.vera20kPrepareNavigation(),/未保存/);
+});
+
+
+test('aggregate bar keeps current file progress separate and never completes before verification',async()=>{
+ const fixture=await exitFixture({});
+ fixture.context.resourceProgress({phase:'download',loaded:50,total:100,overall:{loaded:150,total:200,completed:1,count:2,complete:false}});
+ assert.equal(fixture.element('total-progress-fill').style.width,'75%');
+ assert.equal(fixture.element('progress-fill').style.width,'50%');
+ assert.equal(fixture.element('total-progress-area').hidden,false);
+ fixture.context.resourceProgress({phase:'verify',loaded:100,total:100,overall:{loaded:200,total:200,completed:1,count:2,complete:false}});
+ assert.equal(fixture.element('total-progress-fill').style.width,'99%');
+ fixture.context.resourceProgress({phase:'ready',loaded:100,total:100,overall:{loaded:200,total:200,completed:2,count:2,complete:true}});
+ assert.equal(fixture.element('total-progress-fill').style.width,'100%');
+ fixture.context.resourceProgress({phase:'manifest',loaded:1});
+ assert.equal(fixture.element('total-progress-area').hidden,true);
 });

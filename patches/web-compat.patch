@@ -1,5 +1,5 @@
 diff --git a/src/app/audio_runtime.rs b/src/app/audio_runtime.rs
-index 5463558..ed4d684 100644
+index 86c396fcb..fdf270999 100644
 --- a/src/app/audio_runtime.rs
 +++ b/src/app/audio_runtime.rs
 @@ -326,6 +326,17 @@ impl AppAudioRuntime {
@@ -21,10 +21,10 @@ index 5463558..ed4d684 100644
          let mut draw_main =
              crate::audio::sfx::PlaybackDraws::new(move |low, high| retained.ranged(low, high));
 diff --git a/src/app/diagnostics/shell_capture/movies.rs b/src/app/diagnostics/shell_capture/movies.rs
-index 6754c2c..3baac4d 100644
+index 6958b5662..7f2596f06 100644
 --- a/src/app/diagnostics/shell_capture/movies.rs
 +++ b/src/app/diagnostics/shell_capture/movies.rs
-@@ -23,6 +23,7 @@ pub(super) use opening::OpeningTarget;
+@@ -21,6 +21,7 @@ pub(super) use opening::OpeningTarget;
  /// Native control corpus read from this checkout's `tools/` at capture time.
  /// Diagnostics run from a development checkout, so the release binary does
  /// not embed the corpus (`architecture_guards` keeps fixtures out of builds).
@@ -32,7 +32,7 @@ index 6754c2c..3baac4d 100644
  fn native_corpus(path: &str) -> Result<Value> {
      let full = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
      let text = std::fs::read_to_string(&full)
-@@ -30,6 +31,11 @@ fn native_corpus(path: &str) -> Result<Value> {
+@@ -28,6 +29,11 @@ fn native_corpus(path: &str) -> Result<Value> {
      Ok(serde_json::from_str(&text)?)
  }
  
@@ -45,12 +45,12 @@ index 6754c2c..3baac4d 100644
  const LIST_ROW0_POINT: (f32, f32) = (150.0, 137.0);
  /// Down-arrow press point of the 17-row list's scrollbar.
 diff --git a/src/app/frame.rs b/src/app/frame.rs
-index d4843ea..fd39aa4 100644
+index 82840853f..3b3eccfd9 100644
 --- a/src/app/frame.rs
 +++ b/src/app/frame.rs
-@@ -123,6 +123,10 @@ impl App {
-         simulation_allowed: bool,
+@@ -167,6 +167,10 @@ impl App {
          catch_up_allowed: bool,
+         wait_for_tick: bool,
      ) -> RuntimeServiceResult {
 +        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
 +        if super::remote_assets::pump(state) {
@@ -59,19 +59,19 @@ index d4843ea..fd39aa4 100644
          if state.persistence.pending_load.is_some() {
              return RuntimeServiceResult::default();
          }
-@@ -677,6 +681,10 @@ impl App {
-         >,
-         pass: FramePass,
-     ) -> Result<FrameRenderOutcome> {
+@@ -803,6 +807,10 @@ impl App {
+                     .match_diagnostics
+                     .playback_capture_requested(),
+         );
 +        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
 +        if super::remote_assets::pump(state) {
 +            return Ok(FrameRenderOutcome::Deferred);
 +        }
          if let Some(presented) = crate::app::persistence::commands::pump_saved_game_load(state) {
+             crate::app::input::hardware_cursor::hide_game_cursor(state);
              return Ok(if presented {
-                 FrameRenderOutcome::Presented
 diff --git a/src/app/frontend/fullscreen_movie.rs b/src/app/frontend/fullscreen_movie.rs
-index 3636525..78f2a9a 100644
+index 36365254a..78f2a9a82 100644
 --- a/src/app/frontend/fullscreen_movie.rs
 +++ b/src/app/frontend/fullscreen_movie.rs
 @@ -101,6 +101,14 @@ pub(crate) fn movie_rect(screen_w: i32, screen_h: i32, movie_w: i32, movie_h: i3
@@ -214,10 +214,10 @@ index 3636525..78f2a9a 100644
 +    }
  }
 diff --git a/src/app/frontend/shell_layout.rs b/src/app/frontend/shell_layout.rs
-index 0aaef1c..99c96d5 100644
+index ac15859b6..4c7a1340e 100644
 --- a/src/app/frontend/shell_layout.rs
 +++ b/src/app/frontend/shell_layout.rs
-@@ -47,6 +47,16 @@ pub(crate) fn menu_cursor_scale(state: &AppState) -> f32 {
+@@ -46,6 +46,16 @@ pub(crate) fn menu_cursor_scale(state: &AppState) -> f32 {
      crate::ui::shell::geom::ShellScale::from_screen(width as i32, height as i32).factor()
  }
  
@@ -234,7 +234,7 @@ index 0aaef1c..99c96d5 100644
  /// Main menu dialog `0xE2`.
  pub(crate) fn main_menu_layout(state: &AppState) -> MainMenuShellLayout {
      let (width, height) = shell_screen_size(state);
-@@ -55,6 +65,7 @@ pub(crate) fn main_menu_layout(state: &AppState) -> MainMenuShellLayout {
+@@ -54,6 +64,7 @@ pub(crate) fn main_menu_layout(state: &AppState) -> MainMenuShellLayout {
      } else {
          compute_layout(width, height)
      }
@@ -242,118 +242,77 @@ index 0aaef1c..99c96d5 100644
  }
  
  /// Count-rule message boxes over the front-end shell use the same mapping for
+@@ -115,13 +126,18 @@ pub(crate) fn skirmish_layout(state: &AppState) -> SkirmishShellLayout {
+         state.frontend.scenario_catalog.shell_maps(),
+     );
+     let layout = compute_layout_for_rows(width, height, rows);
+-    if fills_window(state)
++    let layout = if fills_window(state)
+         || (layout.shown_rows > SKIRMISH_ROW_COUNT
+             && layout.authored_width() < crate::ui::shell::geom::SHELL_BASE_W)
+     {
+         compute_responsive_layout_for_rows(width, height, rows)
+     } else {
+         layout
++    };
++    if main_menu_profile() == crate::ui::main_menu_shell::MainMenuProfile::ToySinglePlayer {
++        layout.without_setup_entries()
++    } else {
++        layout
+     }
+ }
+ 
 diff --git a/src/app/frontend/shell_transition.rs b/src/app/frontend/shell_transition.rs
-index 838fe93..cfb5d54 100644
+index 63d51b516..b36dac027 100644
 --- a/src/app/frontend/shell_transition.rs
 +++ b/src/app/frontend/shell_transition.rs
-@@ -157,8 +157,7 @@ impl ShellSlideKind {
-     /// rendered shell has a `slide` table entry, so a miss is a programming
-     /// error. Options' two pages adjust `0xD5`'s retail column to VERA's
-     /// buttons: the main page slides Vera Options under Network too, and
--    /// VERA's page slides Check for Updates above Back. Skirmish slides
--    /// VERA's Save Setup and Load Setup under Choose Map.
-+    /// VERA's page slides Check for Updates above Back.
-     pub(crate) fn column(self, rows: u32, page: Option<&MenuPageSpec>) -> SlideColumn {
-         let spec = crate::ui::shell::slide::slide_spec_for(self.dialog_id())
-             .expect("rendered shell dialog must have a slide column");
-@@ -166,8 +165,10 @@ impl ShellSlideKind {
+@@ -166,12 +166,25 @@ impl ShellSlideKind {
          // WOL's simplified pages must slide only their visible buttons too.
          let top_buttons = page.map_or_else(
              || match self {
 +                ShellSlideKind::MainMenu => {
 +                    crate::app::frontend::shell_layout::main_menu_profile().top_button_count()
 +                }
-                 ShellSlideKind::Options => spec.top_buttons + 1,
--                ShellSlideKind::Skirmish => spec.top_buttons + 2,
-                 ShellSlideKind::VeraOptions => {
-                     crate::ui::main_menu_dialogs::options::shell::VERA_OPTIONS_PAGE
+                 ShellSlideKind::Options => {
+                     crate::ui::main_menu_dialogs::options::shell::OPTIONS_PAGE
                          .stacked
-@@ -1545,9 +1546,8 @@ mod tests {
-             (3, true, false)
-         );
-         assert_eq!(top_and_bottom(ShellSlideKind::MovieList), (1, true, false));
--        // Retail `0x102` slides Start Game and Choose Map; VERA's Save Setup
--        // and Load Setup slide under them.
--        assert_eq!(top_and_bottom(ShellSlideKind::Skirmish), (4, true, true));
-+        // Local build keeps retail `0x102`'s Start Game and Choose Map only.
-+        assert_eq!(top_and_bottom(ShellSlideKind::Skirmish), (2, true, true));
-         // Retail `0xD5` slides Keyboard and Network; VERA's main page adds
-         // Vera Options under them, and VERA's page slides Check for Updates
-         // above Back.
-diff --git a/src/app/frontend/skirmish_shell_render.rs b/src/app/frontend/skirmish_shell_render.rs
-index cd3ba10..5f8a77c 100644
---- a/src/app/frontend/skirmish_shell_render.rs
-+++ b/src/app/frontend/skirmish_shell_render.rs
-@@ -234,7 +234,6 @@ fn build_skirmish_shell_instances(
-     maps: &[MapMenuEntry],
-     wave: Option<&ShellFrameWave>,
-     leaving: bool,
--    load_setup_enabled: bool,
- ) -> Vec<SpriteInstance> {
-     let mut instances = Vec::new();
- 
-@@ -397,12 +396,6 @@ fn build_skirmish_shell_instances(
-                     OwnerDrawButton::ChooseMap0x5aa,
-                     false,
-                 ),
--                (layout.save_setup_button, OwnerDrawButton::SaveSetup, false),
--                (
--                    layout.load_setup_button,
--                    OwnerDrawButton::LoadSetup,
--                    !load_setup_enabled,
--                ),
-                 (layout.back_button, OwnerDrawButton::Back0x5c0, false),
-             ] {
-                 push_right_panel_button_shp(
-@@ -733,7 +726,6 @@ fn render_skirmish_shell_with_atlas(
-             state.frontend.scenario_catalog.shell_maps(),
-             wave.as_ref(),
-             leaving,
--            crate::app::App::skirmish_setup_saved(state),
-         )
-     };
-     if preview_instance.is_some() {
-diff --git a/src/app/frontend/skirmish_shell_render/in_game_shell.rs b/src/app/frontend/skirmish_shell_render/in_game_shell.rs
-index 74c3635..e1e579d 100644
---- a/src/app/frontend/skirmish_shell_render/in_game_shell.rs
-+++ b/src/app/frontend/skirmish_shell_render/in_game_shell.rs
-@@ -161,11 +161,14 @@ pub(super) fn background_instances(
- ) -> Vec<SpriteInstance> {
-     let mut out = Vec::new();
-     let screen = RectPx::new(0, 0, width, height);
--    let background = match width {
--        640 => atlas.background_small,
--        800 => atlas.background_medium,
--        _ => atlas.background_large,
--    };
-+    let background = [
-+        atlas.background_large,
-+        atlas.background_medium,
-+        atlas.background_small,
-+    ]
-+    .into_iter()
-+    .flatten()
-+    .find(|entry| entry.pixel_size == [layout.background.w as f32, layout.background.h as f32]);
-     // Original 72F540 order; the background clear is performed by the render pass.
-     for (entry, rect) in [
-         (background, layout.background),
+                         .len() as u32
+                 }
+-                ShellSlideKind::Skirmish => spec.top_buttons + 2,
++                ShellSlideKind::Skirmish => {
++                    spec.top_buttons
++                        + if matches!(
++                            crate::app::frontend::shell_layout::main_menu_profile(),
++                            crate::ui::main_menu_shell::MainMenuProfile::ToySinglePlayer
++                        ) {
++                            0
++                        } else {
++                            2
++                        }
++                }
+                 _ => spec.top_buttons,
+             },
+             |page| page.stacked.len() as u32,
 diff --git a/src/app/frontend/skirmish_shell_render/keyboard.rs b/src/app/frontend/skirmish_shell_render/keyboard.rs
-index 96ab237..62c9cac 100644
+index c45ff8515..f477ce3d1 100644
 --- a/src/app/frontend/skirmish_shell_render/keyboard.rs
 +++ b/src/app/frontend/skirmish_shell_render/keyboard.rs
-@@ -429,10 +429,7 @@ pub(crate) fn render_keyboard_shell(
+@@ -430,13 +430,7 @@ pub(crate) fn render_keyboard_shell(
              SHELL_CONTROL_TEXT_DEPTH,
          ));
      }
--    texts.extend(shell_paint::paint_labels(
+-    // The status line is a family static like the heading: it scales with the
+-    // page, as `paint_labels_scaled` does for every other family page.
+-    texts.extend(shell_paint::paint_labels_scaled(
 -        font,
 -        &status_label.into_iter().collect::<Vec<_>>(),
+-        layout.scale.factor(),
 -    ));
 +    texts.extend(paint_status_label(font, status_label, layout.scale));
      let mut overlay = ShellFrameOverlay::default();
      if dialog.category_open {
          let popup = layout.category_popup(dialog.categories.len());
-@@ -500,10 +497,62 @@ pub(crate) fn render_keyboard_shell(
+@@ -504,10 +498,58 @@ pub(crate) fn render_keyboard_shell(
      Ok(())
  }
  
@@ -363,11 +322,7 @@ index 96ab237..62c9cac 100644
 +    label: Option<shell_paint::PaintLabel<'_>>,
 +    scale: ShellScale,
 +) -> Vec<ShellTextDraw> {
-+    shell_paint::paint_labels_scaled(
-+        font,
-+        &label.into_iter().collect::<Vec<_>>(),
-+        scale.factor(),
-+    )
++    shell_paint::paint_labels_scaled(font, &label.into_iter().collect::<Vec<_>>(), scale.factor())
 +}
 +
  #[cfg(test)]
@@ -417,35 +372,31 @@ index 96ab237..62c9cac 100644
      fn native_group_caption_gap_and_bevel_polarity_are_preserved() {
          //61E700:207px group at95,159;17px font moves its top edge down8.
 diff --git a/src/app/frontend/skirmish_shell_render/modals.rs b/src/app/frontend/skirmish_shell_render/modals.rs
-index 3ae7c5c..048507c 100644
+index 1adcb0e7f..4cf84e3aa 100644
 --- a/src/app/frontend/skirmish_shell_render/modals.rs
 +++ b/src/app/frontend/skirmish_shell_render/modals.rs
-@@ -58,7 +58,9 @@ pub(crate) fn render_saved_game_loading(
-     use super::in_game_shell::{
+@@ -58,7 +58,7 @@ pub(crate) fn render_saved_game_loading(
          InGameShellFrame, ShellFrameArt, ShellFrameCursor, ShellFrameOverlay,
      };
--    use crate::ui::shell::modal::{body_ok_layout, build_saved_game_loading_descriptor, control};
-+    use crate::ui::shell::modal::{
+     use crate::ui::shell::modal::{
+-        body_ok_layout, body_ok_layout_in, build_saved_game_loading_descriptor, control,
 +        build_saved_game_loading_descriptor, control, saved_game_loading_layout,
-+    };
+     };
  
      // An in-match load paints over the match frame at its source size and
-     // zooms with it; a menu load paints over the menu at the window's size.
-@@ -88,36 +90,34 @@ pub(crate) fn render_saved_game_loading(
-         .expect("loading shell chrome");
-     // 559D60 shows F0 before 69BB40 clears Session+30D8. An active load thus
-     // starts with its current side; a menu load starts with the neutral assets.
--    let side = (state.frontend.screen == crate::ui::game_screen::GameScreen::InGame)
--        .then(|| crate::app::presentation::sidebar_render::current_sidebar_theme(state));
--    let layout = body_ok_layout(frame.0 as i32, frame.1 as i32);
-+    let in_match = state.frontend.screen == crate::ui::game_screen::GameScreen::InGame;
-+    let side =
-+        in_match.then(|| crate::app::presentation::sidebar_render::current_sidebar_theme(state));
+@@ -92,43 +92,36 @@ pub(crate) fn render_saved_game_loading(
+     let in_match = state.frontend.screen == crate::ui::game_screen::GameScreen::InGame;
+     let side =
+         in_match.then(|| crate::app::presentation::sidebar_render::current_sidebar_theme(state));
+-    let (width, height) = (frame.0 as i32, frame.1 as i32);
+-    let layout = if in_match {
+-        body_ok_layout_in(RectPx::new(0, 0, width, height))
 +    let (width, height) = if in_match {
 +        super::in_game_shell::in_game_shell_size(state)
-+    } else {
+     } else {
+-        body_ok_layout(width, height)
 +        (frame.0 as i32, frame.1 as i32)
-+    };
+     };
 +    let layout = saved_game_loading_layout(width, height, in_match);
      let descriptor = build_saved_game_loading_descriptor();
      let body = descriptor
@@ -465,14 +416,23 @@ index 3ae7c5c..048507c 100644
 -        align: super::text::validation_modal_body_text_align(),
 -        path_a_reveal: None,
 -    }];
+-    // A zoomed match's text is drawn in the window (`window_ui`).
+-    let raster = crate::app::presentation::window_ui::shell_raster(state, false)
+-        .unwrap_or(crate::render::bit_font::TextRaster::NATIVE);
+-    let frame_raster = state.renderer.bit_font.set_raster(raster);
 -    let modal = shell_paint::paint_modal_shp(
 +    let caption = super::text::localized_label(
 +        state,
 +        body.csf_key.expect("F0 loading caption"),
 +        "Mission is loading. Please wait...",
 +    );
-+    // This pinned renderer paints glyphs and panel art into the retained
-+    // frame together. Map both through SidebarFrame on an active load.
++    // This retained-frame path explicitly maps both panel and text through
++    // SidebarFrame. Keep glyphs native here instead of applying window_ui's
++    // second text-only raster transform as well.
++    let frame_raster = state
++        .renderer
++        .bit_font
++        .set_raster(crate::render::bit_font::TextRaster::NATIVE);
 +    let modal = paint_saved_game_loading(
          &state.renderer.bit_font,
          atlas.mode_two_dialog_background(side),
@@ -486,10 +446,10 @@ index 3ae7c5c..048507c 100644
 +        &caption,
 +        in_match.then(|| state.sidebar_frame()),
      );
-     super::in_game_shell::render_shell_frame(
+     let painted = super::in_game_shell::render_shell_frame(
          state,
-@@ -135,6 +135,67 @@ pub(crate) fn render_saved_game_loading(
-     )
+@@ -148,6 +141,71 @@ pub(crate) fn render_saved_game_loading(
+     painted
  }
  
 +/// F0 (0x00559D60 -> 0x00623230) retains the match backing instead of
@@ -534,15 +494,19 @@ index 3ae7c5c..048507c 100644
 +        for draw in &mut modal.text {
 +            for glyph in &mut draw.instances {
 +                let rect = sidebar.rect_to_frame(crate::ui::sidebar::Rect {
-+                    x: glyph.position[0], y: glyph.position[1],
-+                    w: glyph.size[0], h: glyph.size[1],
++                    x: glyph.position[0],
++                    y: glyph.position[1],
++                    w: glyph.size[0],
++                    h: glyph.size[1],
 +                });
 +                glyph.position = [rect.x, rect.y];
 +                glyph.size = [rect.w, rect.h];
 +            }
 +            let clip = sidebar.rect_to_frame(crate::ui::sidebar::Rect {
-+                x: draw.scissor.x as f32, y: draw.scissor.y as f32,
-+                w: draw.scissor.w as f32, h: draw.scissor.h as f32,
++                x: draw.scissor.x as f32,
++                y: draw.scissor.y as f32,
++                w: draw.scissor.w as f32,
++                h: draw.scissor.h as f32,
 +            });
 +            draw.scissor.x = clip.x.round().max(0.0) as u32;
 +            draw.scissor.y = clip.y.round().max(0.0) as u32;
@@ -556,7 +520,7 @@ index 3ae7c5c..048507c 100644
  /// Native owner-draw listboxes preserve a composed backing surface. On the
  /// exact-800 chooser that backing is the Customize Battle artwork; the solid
  /// interior exists only to keep the asset-missing fallback readable.
-@@ -748,7 +809,8 @@ pub(super) fn push_saved_browser_prompt_instances<I: Clone + PartialEq>(
+@@ -862,7 +920,8 @@ pub(super) fn push_saved_browser_prompt_instances<I: Clone + PartialEq>(
      browser: &SavedSeedBrowserState<I>,
  ) {
      if let Some(prompt) = browser.prompt.as_ref() {
@@ -566,7 +530,7 @@ index 3ae7c5c..048507c 100644
          let mut buttons = vec![shell_paint::ModalButton {
              rect: yes,
              pressed: browser.pressed_control == Some(SavedSeedControl::Action),
-@@ -766,8 +828,48 @@ pub(super) fn push_saved_browser_prompt_instances<I: Clone + PartialEq>(
+@@ -880,8 +939,51 @@ pub(super) fn push_saved_browser_prompt_instances<I: Clone + PartialEq>(
              super::chrome::type3_button_frames(atlas),
              dialog,
              &buttons,
@@ -609,7 +573,10 @@ index 3ae7c5c..048507c 100644
 +            Some(sidebar),
 +        );
 +        assert_eq!(enlarged.sprites[0].size, [676.5, 489.0]);
-+        assert_eq!(enlarged.sprites[0].size, retail.sprites[0].size.map(|v| v * 1.5));
++        assert_eq!(
++            enlarged.sprites[0].size,
++            retail.sprites[0].size.map(|v| v * 1.5)
++        );
 +        assert_eq!(
 +            enlarged.text[0].instances[0].size,
 +            retail.text[0].instances[0].size.map(|v| v * 1.5),
@@ -617,40 +584,10 @@ index 3ae7c5c..048507c 100644
 +    }
 +}
 diff --git a/src/app/frontend/skirmish_shell_render/text.rs b/src/app/frontend/skirmish_shell_render/text.rs
-index c0a9f59..adbd1ba 100644
+index 73ce42b6e..c54d1abc0 100644
 --- a/src/app/frontend/skirmish_shell_render/text.rs
 +++ b/src/app/frontend/skirmish_shell_render/text.rs
-@@ -847,10 +847,7 @@ fn push_right_panel_text_draws(
- ) {
-     let start = localized_label(state, "GUI:StartGame", "Start Game");
-     let choose = localized_label(state, "GUI:ChooseMap", "Choose Map");
--    let save = localized_label(state, "VERA:SaveSetup", "Save Setup");
--    let load = localized_label(state, "VERA:LoadSetup", "Load Setup");
-     let back = localized_label(state, "GUI:Back", "Back");
--    let load_disabled = !crate::app::App::skirmish_setup_saved(state);
- 
-     for (label, rect, button, disabled) in [
-         (
-@@ -865,18 +862,6 @@ fn push_right_panel_text_draws(
-             OwnerDrawButton::ChooseMap0x5aa,
-             false,
-         ),
--        (
--            save.as_str(),
--            layout.save_setup_button,
--            OwnerDrawButton::SaveSetup,
--            false,
--        ),
--        (
--            load.as_str(),
--            layout.load_setup_button,
--            OwnerDrawButton::LoadSetup,
--            load_disabled,
--        ),
-         (
-             back.as_str(),
-             layout.back_button,
-@@ -1716,7 +1701,7 @@ pub(super) fn push_saved_browser_prompt_text<I>(
+@@ -1988,7 +1988,7 @@ pub(super) fn push_saved_browser_prompt_text<I>(
  ) {
      if let Some(prompt) = browser.prompt.as_ref() {
          let (dialog, body_rect, yes, no) =
@@ -659,7 +596,7 @@ index c0a9f59..adbd1ba 100644
          exclude_text_under(out, dialog);
          let mut labels = vec![PaintLabel {
              text: prompt.body.as_str().into(),
-@@ -1731,7 +1716,7 @@ pub(super) fn push_saved_browser_prompt_text<I>(
+@@ -2003,7 +2003,7 @@ pub(super) fn push_saved_browser_prompt_text<I>(
                  yes,
                  browser.pressed_control
                      == Some(crate::ui::skirmish_shell::SavedSeedControl::Action),
@@ -668,7 +605,7 @@ index c0a9f59..adbd1ba 100644
              ),
              rgb: SHELL_LABEL_TEXT_RGB,
              align: ShellAlign::H_CENTER | ShellAlign::V_CENTER,
-@@ -1744,17 +1729,18 @@ pub(super) fn push_saved_browser_prompt_text<I>(
+@@ -2016,17 +2016,18 @@ pub(super) fn push_saved_browser_prompt_text<I>(
                      rect,
                      browser.pressed_control
                          == Some(crate::ui::skirmish_shell::SavedSeedControl::Back0x686),
@@ -690,23 +627,134 @@ index c0a9f59..adbd1ba 100644
      }
  }
 diff --git a/src/app/handler.rs b/src/app/handler.rs
-index de861f6..6232107 100644
+index 526f3a713..aad0dc285 100644
 --- a/src/app/handler.rs
 +++ b/src/app/handler.rs
-@@ -282,6 +282,12 @@ impl App {
+@@ -226,6 +226,14 @@ impl App {
+     /// it restores on leaving full screen while it enters, so the windowed
+     /// window then comes back on the same screen the choice names
+     /// ([`crate::app::display_target`]).
++    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++    pub(crate) fn set_full_screen(state: &mut AppState, full_screen: bool) {
++        if state.platform.capture_client_size.is_none() {
++            crate::web::set_fullscreen(full_screen);
++        }
++    }
++
++    #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
+     pub(crate) fn set_full_screen(state: &mut AppState, full_screen: bool) {
+         if !full_screen {
+             // VERA: the game's own switch (the Options and Esc menu boxes, the
+@@ -248,6 +256,16 @@ impl App {
+     /// off: the window as a launch opens it.
+     /// A full-screen window leaves full screen first and macOS animates that,
+     /// so `follow_window_full_screen` does the rest once the window is out.
++    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++    pub(crate) fn restore_launch_window(state: &mut AppState) {
++        if state.platform.capture_client_size.is_none() {
++            state.platform.launch_window_owed = false;
++            state.platform.recenter_windowed = false;
++            crate::web::set_fullscreen(false);
++        }
++    }
++
++    #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
+     pub(crate) fn restore_launch_window(state: &mut AppState) {
+         if state.platform.capture_client_size.is_none() {
+             state.platform.launch_window_owed = true;
+@@ -271,42 +289,57 @@ impl App {
          if state.platform.capture_client_size.is_some() {
              return;
          }
 +        #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
-+        let full_screen = web_sys::window()
-+            .and_then(|window| window.document())
-+            .and_then(|document| document.fullscreen_element())
-+            .is_some();
++        let full_screen = crate::web::fullscreen_active();
 +        #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
          let full_screen = state.platform.window.fullscreen().is_some();
          #[cfg(target_os = "macos")]
          if !full_screen {
-@@ -650,6 +656,20 @@ impl ApplicationHandler for App {
+             show_menu_bar_and_dock_after_full_screen();
+         }
+-        if full_screen {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++        {
++            // Browser viewport sizing is host-owned; never recenter/resize a
++            // canvas to a desktop launch size when fullscreen ends.
+             state.platform.recenter_windowed = false;
+-        } else {
+-            let leaving_full_screen = state.persistence.options_profile.full_screen;
+-            // Only a placement still owed asks the system for its screens: the
+-            // list costs a display-list query, too much for every pass.
+-            if leaving_full_screen || state.platform.recenter_windowed {
+-                let displays = crate::app::display_target::current_displays(&state.platform.window);
+-                let on_choice = crate::app::display_target::window_is_on(
+-                    &state.platform.window,
+-                    &displays,
+-                    &state.persistence.options_profile.display,
+-                );
+-                if !on_choice {
+-                    crate::app::display_target::center_windowed(
++            state.platform.launch_window_owed = false;
++        }
++        #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
++        {
++            if full_screen {
++                state.platform.recenter_windowed = false;
++            } else {
++                let leaving_full_screen = state.persistence.options_profile.full_screen;
++                // Only a placement still owed asks the system for its screens: the
++                // list costs a display-list query, too much for every pass.
++                if leaving_full_screen || state.platform.recenter_windowed {
++                    let displays =
++                        crate::app::display_target::current_displays(&state.platform.window);
++                    let on_choice = crate::app::display_target::window_is_on(
+                         &state.platform.window,
+                         &displays,
+                         &state.persistence.options_profile.display,
+                     );
++                    if !on_choice {
++                        crate::app::display_target::center_windowed(
++                            &state.platform.window,
++                            &displays,
++                            &state.persistence.options_profile.display,
++                        );
++                    }
++                    state.platform.recenter_windowed = !on_choice;
++                }
++                if std::mem::take(&mut state.platform.launch_window_owed) {
++                    let displays =
++                        crate::app::display_target::current_displays(&state.platform.window);
++                    let size = state.platform.launch_window_size;
++                    crate::app::display_target::restore_launch_placement(
++                        &state.platform.window,
++                        &displays,
++                        &state.persistence.options_profile.display,
++                        winit::dpi::LogicalSize::new(size.width, size.height),
++                    );
+                 }
+-                state.platform.recenter_windowed = !on_choice;
+-            }
+-            if std::mem::take(&mut state.platform.launch_window_owed) {
+-                let displays = crate::app::display_target::current_displays(&state.platform.window);
+-                let size = state.platform.launch_window_size;
+-                crate::app::display_target::restore_launch_placement(
+-                    &state.platform.window,
+-                    &displays,
+-                    &state.persistence.options_profile.display,
+-                    winit::dpi::LogicalSize::new(size.width, size.height),
+-                );
+             }
+         }
+         let changed = state.persistence.options_profile.full_screen != full_screen;
+@@ -466,7 +499,7 @@ impl App {
+                         .state
+                         .as_ref()
+                         .and_then(|state| state.frontend.main_menu_shell_error.clone())
+-                        .unwrap_or_else(|| crate::i18n::tr("VERA:EngineReady")),
++                        .unwrap_or_else(|| "Ready".to_owned()),
+                 );
+                 #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+                 if let (Some(error), Some(state)) = (browser_spawn_failure, self.state.as_mut()) {
+@@ -742,6 +775,20 @@ impl ApplicationHandler for App {
          }
  
          let Some(state) = &mut self.state else { return };
@@ -727,7 +775,7 @@ index de861f6..6232107 100644
          state.sync_cursor_space();
          // Playback has presentation-only input. Exit is local and never
          // schedules EventClass EXIT or changes the recorded simulation.
-@@ -1158,6 +1178,10 @@ impl ApplicationHandler for App {
+@@ -1237,6 +1284,10 @@ impl ApplicationHandler for App {
                      }
                      return;
                  }
@@ -738,7 +786,7 @@ index de861f6..6232107 100644
                  // The keys above work under every layer; the rest follow it.
                  let screen = match layer {
                      InputLayer::Screen(screen) => screen,
-@@ -1870,6 +1894,11 @@ impl ApplicationHandler for App {
+@@ -2016,6 +2067,11 @@ impl ApplicationHandler for App {
              if Self::poll_network_goodbye(state, event_loop) {
                  return;
              }
@@ -751,32 +799,49 @@ index de861f6..6232107 100644
              // cursor lock: the OS drops the clip on focus loss /
              // Windows key, so re-assert the player's choice every frame while
 diff --git a/src/app/input/dispatch.rs b/src/app/input/dispatch.rs
-index 538b5b9..72ef441 100644
+index d2c472570..799e88b47 100644
 --- a/src/app/input/dispatch.rs
 +++ b/src/app/input/dispatch.rs
-@@ -1904,6 +1904,8 @@ fn place_ready_building_for_tab(state: &mut AppState, tab: SidebarTab) {
+@@ -2041,6 +2041,8 @@ fn place_ready_building_for_tab(state: &mut AppState, tab: SidebarTab) {
  
  fn dispatch_retail_hotkey(state: &mut AppState, command: HotkeyCommand) {
      match command {
 +        #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 +        HotkeyCommand::ToggleFullscreen => crate::web::toggle_fullscreen(),
-         HotkeyCommand::HealthNav => selection_navigation::execute_category_navigation(
-             state,
-             crate::app::types::CategoryNavigationKind::Health,
+         // Held camera commands are sampled by queue_keyboard_scroll.
+         HotkeyCommand::CameraUp
+         | HotkeyCommand::CameraDown
+@@ -2215,8 +2217,14 @@ pub(crate) fn run_window_command(state: &mut AppState, command: HotkeyCommand) {
+         HotkeyCommand::LockCursor => crate::app::input::cursor::toggle_cursor_confinement(state),
+         // A capture keeps its fixed surface.
+         HotkeyCommand::FullScreen if state.platform.capture_client_size.is_none() => {
+-            let full_screen = state.platform.window.fullscreen().is_none();
+-            crate::app::App::set_full_screen(state, full_screen);
++            // Keep the loader/progress overlay inside browser fullscreen too.
++            #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++            crate::web::toggle_fullscreen();
++            #[cfg(not(all(feature = "wasm", target_arch = "wasm32")))]
++            {
++                let full_screen = state.platform.window.fullscreen().is_none();
++                crate::app::App::set_full_screen(state, full_screen);
++            }
+         }
+         HotkeyCommand::PerformanceStats => {
+             let shown = state.renderer.performance_overlay.toggle();
 diff --git a/src/app/input/hotkeys.rs b/src/app/input/hotkeys.rs
-index d967848..2843e11 100644
+index d8e304b88..2a4c2dac3 100644
 --- a/src/app/input/hotkeys.rs
 +++ b/src/app/input/hotkeys.rs
-@@ -22,6 +22,8 @@ const VK_DELETE: u16 = 0x2e;
- #[derive(Debug, Clone, Copy, PartialEq, Eq)]
- pub(crate) enum HotkeyCommand {
+@@ -63,6 +63,8 @@ pub(crate) enum HotkeyCommand {
+     CameraLeft,
+     CameraRight,
      CenterView,
 +    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 +    ToggleFullscreen,
      Options,
      CenterOnRadarEvent,
      TeamSelect(usize),
-@@ -245,6 +247,20 @@ impl HotkeyBindings {
+@@ -363,6 +365,22 @@ impl HotkeyBindings {
          bindings
      }
  
@@ -788,59 +853,49 @@ index d967848..2843e11 100644
 +            .is_some_and(|section| section.is_present("ToggleFullscreen"));
 +        // Fresh/reset retail defaults give F11 to Taunt_7. Do not take a key
 +        // from an existing saved profile, or resurrect an explicit zero.
-+        if !configured && (self.command_at(0x7a).is_none()
-+            || (!saved_profile && self.command_at(0x7a) == Some(HotkeyCommand::Taunt(6)))) {
++        if !configured
++            && (self.command_at(0x7a).is_none()
++                || (!saved_profile && self.command_at(0x7a) == Some(HotkeyCommand::Taunt(6))))
++        {
 +            self.by_key.insert(0x7a, HotkeyCommand::ToggleFullscreen);
 +        }
 +    }
 +
-     pub(crate) fn command_at(&self, encoded: u16) -> Option<HotkeyCommand> {
-         self.by_key.get(&encoded).copied()
-     }
+     /// Formation Line's default key is F, which retail `KEYBOARDMD.INI` and
+     /// every profile saved from it give to Follow. Where the profile says
+     /// nothing about Formation Line and Follow still sits on F, Follow moves
 diff --git a/src/app/input/hotkeys/catalog.rs b/src/app/input/hotkeys/catalog.rs
-index 36fb6a7..b7bbf02 100644
+index a57aedec0..830088e8c 100644
 --- a/src/app/input/hotkeys/catalog.rs
 +++ b/src/app/input/hotkeys/catalog.rs
-@@ -29,12 +29,14 @@ macro_rules! command {
- }
- 
- pub(crate) fn registered_commands() -> &'static [CommandMetadata] {
--    #[cfg(any(feature = "verax", feature = "phobos"))]
-+    #[cfg(any(feature = "verax", feature = "phobos", all(feature = "wasm", target_arch = "wasm32")))]
-     {
-         use std::sync::OnceLock;
-         static ALL: OnceLock<Vec<CommandMetadata>> = OnceLock::new();
-         ALL.get_or_init(|| {
-             let mut all = RETAIL_COMMANDS.to_vec();
-+            #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
-+            all.extend_from_slice(&WEB_COMMANDS);
-             #[cfg(feature = "verax")]
-             all.extend_from_slice(&VERA_COMMANDS);
-             #[cfg(feature = "phobos")]
-@@ -42,7 +44,7 @@ pub(crate) fn registered_commands() -> &'static [CommandMetadata] {
-             all
-         })
-     }
--    #[cfg(not(any(feature = "verax", feature = "phobos")))]
-+    #[cfg(not(any(feature = "verax", feature = "phobos", all(feature = "wasm", target_arch = "wasm32"))))]
-     {
-         retail_commands()
-     }
-@@ -791,3 +793,9 @@ const PHOBOS_COMMANDS: [CommandMetadata; 11] = [
-     command!(HotkeyCommand::FireTacticalSw(9), "FireTacticalSW10", "TXT_FIRE_TACTICAL_SW_XX", "TXT_INTERFACE", "TXT_FIRE_TACTICAL_SW_XX_DESC", Some(10)),
-     command!(HotkeyCommand::ToggleSwSidebar, "Toggle Super Weapon Sidebar", "TXT_TOGGLE_SW_SIDEBAR", "TXT_INTERFACE", "TXT_TOGGLE_SW_SIDEBAR_DESC", None),
+@@ -33,6 +33,8 @@ pub(crate) fn registered_commands() -> &'static [CommandMetadata] {
+     static ALL: OnceLock<Vec<CommandMetadata>> = OnceLock::new();
+     ALL.get_or_init(|| {
+         let mut all = RETAIL_COMMANDS.to_vec();
++        #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
++        all.extend_from_slice(&WEB_COMMANDS);
+         all.extend_from_slice(&CAMERA_COMMANDS);
+         all.extend_from_slice(&SHORTCUT_COMMANDS);
+         #[cfg(feature = "verax")]
+@@ -991,3 +993,13 @@ const PHOBOS_COMMANDS: [CommandMetadata; 11] = [
+         None
+     ),
  ];
 +
 +#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 +const WEB_COMMANDS: [CommandMetadata; 1] = [command!(
-+    HotkeyCommand::ToggleFullscreen, "ToggleFullscreen", "VERA:ToggleFullscreen",
-+    "vera20k", "VERA:ToggleFullscreenDesc", None
++    HotkeyCommand::ToggleFullscreen,
++    "ToggleFullscreen",
++    "VERA:ToggleFullscreen",
++    "vera20k",
++    "VERA:ToggleFullscreenDesc",
++    None
 +)];
 diff --git a/src/app/input/keyboard.rs b/src/app/input/keyboard.rs
-index 2f0b1fb..9dcf001 100644
+index 6dc309908..e9c5accbf 100644
 --- a/src/app/input/keyboard.rs
 +++ b/src/app/input/keyboard.rs
-@@ -117,6 +117,42 @@ pub(crate) fn in_game_key_edge(
+@@ -165,6 +165,53 @@ pub(crate) fn in_game_key_edge(
      }
  }
  
@@ -849,17 +904,25 @@ index 2f0b1fb..9dcf001 100644
 +pub(crate) fn window_key(state: &mut AppState, event: &KeyEvent) -> bool {
 +    use crate::app::input::precedence::{InputLayer, ModalPage, ScreenPage};
 +    let allowed = match crate::app::input::precedence::input_layer(state) {
-+        InputLayer::Page(ModalPage::Keyboard) => state.frontend.keyboard_dialog.as_ref()
++        InputLayer::Page(ModalPage::Keyboard) => state
++            .frontend
++            .keyboard_dialog
++            .as_ref()
 +            .is_some_and(|dialog| !dialog.capture_focused),
-+        InputLayer::Screen(ScreenPage::MainMenu | ScreenPage::SinglePlayer |
-+            ScreenPage::MoviesAndCredits | ScreenPage::MovieList | ScreenPage::Campaign |
-+            ScreenPage::LauncherOptions | ScreenPage::Battlefield) => true,
++        InputLayer::Screen(
++            ScreenPage::MainMenu
++            | ScreenPage::SinglePlayer
++            | ScreenPage::MoviesAndCredits
++            | ScreenPage::MovieList
++            | ScreenPage::Campaign
++            | ScreenPage::LauncherOptions
++            | ScreenPage::Battlefield,
++        ) => true,
 +        InputLayer::Screen(ScreenPage::InGameShell(
-+            crate::ui::pause_menu::InGameMenuState::Menu |
-+            crate::ui::pause_menu::InGameMenuState::Options |
-+            crate::ui::pause_menu::InGameMenuState::Sound |
-+            crate::ui::pause_menu::InGameMenuState::MissionBriefing |
-+            crate::ui::pause_menu::InGameMenuState::Diplomacy
++            crate::ui::pause_menu::InGameMenuState::Menu
++            | crate::ui::pause_menu::InGameMenuState::Sound
++            | crate::ui::pause_menu::InGameMenuState::MissionBriefing
++            | crate::ui::pause_menu::InGameMenuState::Diplomacy,
 +        )) => true,
 +        // Text-entry pages and transitions keep ownership of their keys.
 +        _ => false,
@@ -870,8 +933,11 @@ index 2f0b1fb..9dcf001 100644
 +    let unmodified = event.key_without_modifiers();
 +    let key = hotkeys::binding_logical_key(&event.logical_key, &unmodified, event.location);
 +    if state.match_state.input.hotkey_bindings.resolve_event(
-+        key, event.location, state.platform.live_modifiers,
-+    ) != hotkeys::HotkeyResolution::Command(hotkeys::HotkeyCommand::ToggleFullscreen) {
++        key,
++        event.location,
++        state.platform.live_modifiers,
++    ) != hotkeys::HotkeyResolution::Command(hotkeys::HotkeyCommand::ToggleFullscreen)
++    {
 +        return false;
 +    }
 +    if event.state.is_pressed() && !event.repeat {
@@ -883,26 +949,31 @@ index 2f0b1fb..9dcf001 100644
  pub(crate) fn layout(state: &AppState) -> Option<KeyboardLayout> {
      layout_and_pointer(state).map(|(layout, _)| layout)
  }
-@@ -154,7 +190,13 @@ fn localized(state: &AppState, key: &str, parameter: Option<u8>) -> String {
-         .csf
-         .as_ref()
-         .and_then(|csf| csf.get(key))
--        .unwrap_or(key);
-+        .unwrap_or_else(|| match key {
-+            #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
-+            "VERA:ToggleFullscreen" => "全屏/退出全屏",
-+            #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
-+            "VERA:ToggleFullscreenDesc" => "切换全屏与窗口。若浏览器保留 F11，请重新绑定或使用网页全屏按钮。",
-+            _ => key,
-+        });
-     match parameter {
-         Some(value) => text
-             .replace("%2d", &format!("{value:2}"))
+@@ -199,7 +246,18 @@ fn layout_and_pointer(state: &AppState) -> Option<(KeyboardLayout, (i32, i32))>
+ /// A command's name, category or description. VERA's own (`VERA:`) come from
+ /// its language files; the game's from the CSF, else the key itself.
+ fn localized(state: &AppState, key: &str, parameter: Option<u8>) -> String {
+-    let text = if key.starts_with("VERA:") {
++    let text = if matches!(key, "VERA:ToggleFullscreen" | "VERA:ToggleFullscreenDesc") {
++        state
++            .process_assets
++            .csf
++            .as_ref()
++            .and_then(|csf| csf.get(key))
++            .map(str::to_owned)
++            .unwrap_or_else(|| match key {
++                "VERA:ToggleFullscreen" => "全屏/退出全屏".to_owned(),
++                _ => "切换全屏与窗口。若浏览器保留 F11，请重新绑定或使用网页全屏按钮。".to_owned(),
++            })
++    } else if key.starts_with("VERA:") {
+         crate::i18n::tr(key)
+     } else {
+         state
 diff --git a/src/app/loading/pump.rs b/src/app/loading/pump.rs
-index be32e9b..ab4cc7a 100644
+index 958ada9a1..12fe7b6ee 100644
 --- a/src/app/loading/pump.rs
 +++ b/src/app/loading/pump.rs
-@@ -386,6 +386,11 @@ impl LoadingRequest {
+@@ -396,6 +396,11 @@ impl LoadingRequest {
          }
      }
  
@@ -914,7 +985,7 @@ index be32e9b..ab4cc7a 100644
      pub(crate) fn selected_map_file(&self) -> &str {
          self.startup().selected_map_file()
      }
-@@ -1362,6 +1367,8 @@ fn prepare_session_for_loading(
+@@ -1385,6 +1390,8 @@ fn prepare_session_for_loading(
  }
  
  pub(crate) fn begin_loading(state: &mut AppState, request: LoadingRequest) {
@@ -924,10 +995,10 @@ index be32e9b..ab4cc7a 100644
          .frontend
          .multiplayer_shell_runtime
 diff --git a/src/app/mod.rs b/src/app/mod.rs
-index 603b792..105c1b5 100644
+index f026cdd65..98fe2c5cb 100644
 --- a/src/app/mod.rs
 +++ b/src/app/mod.rs
-@@ -54,6 +54,8 @@ pub(crate) mod diagnostics;
+@@ -64,6 +64,8 @@ pub(crate) mod diagnostics;
  /// Which screen the game opens on: the Display list's own translation between
  /// VERA's profile value and the window system's monitors.
  pub(crate) mod display_target;
@@ -936,8 +1007,178 @@ index 603b792..105c1b5 100644
  mod frame;
  pub mod frontend;
  mod game_data_check;
+diff --git a/src/app/persistence/commands.rs b/src/app/persistence/commands.rs
+index 0bfdf323a..665e8c85a 100644
+--- a/src/app/persistence/commands.rs
++++ b/src/app/persistence/commands.rs
+@@ -408,6 +408,8 @@ pub(crate) fn quickload(state: &mut AppState) {
+ pub(crate) struct PendingSavedGameLoad {
+     path: PathBuf,
+     presented: bool,
++    from_menu: bool,
++    from_browser: bool,
+ }
+ 
+ impl PendingSavedGameLoad {
+@@ -415,6 +417,8 @@ impl PendingSavedGameLoad {
+         Self {
+             path,
+             presented: false,
++            from_menu: false,
++            from_browser: false,
+         }
+     }
+ 
+@@ -431,7 +435,14 @@ impl PendingSavedGameLoad {
+ /// frame gives the browser a paint opportunity before synchronous restoration.
+ pub(crate) fn request_saved_game_load(state: &mut AppState, path: PathBuf) {
+     if state.persistence.pending_load.is_none() {
+-        state.persistence.pending_load = Some(PendingSavedGameLoad::new(path));
++        let mut pending = PendingSavedGameLoad::new(path);
++        pending.from_menu = state.frontend.screen == crate::ui::game_screen::GameScreen::MainMenu;
++        pending.from_browser = state
++            .match_state
++            .match_presentation
++            .saved_game_browser
++            .is_some();
++        state.persistence.pending_load = Some(pending);
+         state.platform.window.request_redraw();
+     }
+ }
+@@ -439,29 +450,62 @@ pub(crate) fn request_saved_game_load(state: &mut AppState, path: PathBuf) {
+ /// Called before ordinary frame service; the retained browser owns failure UI.
+ pub(crate) fn pump_saved_game_load(state: &mut AppState) -> Option<bool> {
+     let mut pending = state.persistence.pending_load.take()?;
+-    let Some(path) = pending.advance(|| {
+-        match crate::app::loading::pump::present_saved_game_loading(state) {
+-            Ok(presented) => presented,
+-            Err(error) => {
+-                // Like missing native progress artwork, presentation failure
+-                // must not make an otherwise loadable save inaccessible.
+-                log::warn!("Saved-game loading dialog presentation failed: {error:#}");
+-                true
++    if pending
++        .advance(|| {
++            match crate::app::loading::pump::present_saved_game_loading(state) {
++                Ok(presented) => presented,
++                Err(error) => {
++                    // Like missing native progress artwork, presentation failure
++                    // must not make an otherwise loadable save inaccessible.
++                    log::warn!("Saved-game loading dialog presentation failed: {error:#}");
++                    true
++                }
+             }
+-        }
+-    }) else {
++        })
++        .is_none()
++    {
+         let presented = pending.presented;
+         state.persistence.pending_load = Some(pending);
+         state.platform.window.request_redraw();
+         return Some(presented);
+     };
+-    let from_menu = state.frontend.screen == crate::ui::game_screen::GameScreen::MainMenu;
+-    let from_browser = state
+-        .match_state
+-        .match_presentation
+-        .saved_game_browser
+-        .is_some();
+-    let result = restore_save_file(state, path);
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    let pending = match crate::app::remote_assets::initial_library_for_saved_load(
++        state,
++        pending,
++        |state, pending, ready| {
++            if ready {
++                // Re-enter the same gate: one completion may only be one of
++                // several archives. No AssetManager lease crosses this wait.
++                state.persistence.pending_load = Some(pending);
++            } else {
++                finish_pending_load(
++                    state,
++                    pending,
++                    Err(crate::app::persistence::PreparedLoadError::Resources(
++                        "saved-game resource loading was cancelled or failed".into(),
++                    )),
++                );
++            }
++            state.platform.window.request_redraw();
++        },
++    ) {
++        Some(pending) => pending,
++        None => return Some(false),
++    };
++    let result = restore_save_file(state, &pending.path);
++    finish_pending_load(state, pending, result);
++    Some(false)
++}
++
++fn finish_pending_load(
++    state: &mut AppState,
++    pending: PendingSavedGameLoad,
++    result: Result<(), crate::app::persistence::PreparedLoadError>,
++) {
++    let path = pending.path.as_path();
++    let from_menu = pending.from_menu;
++    let from_browser = pending.from_browser;
+     if from_menu {
+         crate::app::App::finish_load_saved_game_from_menu(state, path, result);
+     } else if from_browser {
+@@ -473,7 +517,6 @@ pub(crate) fn pump_saved_game_load(state: &mut AppState) -> Option<bool> {
+         log::warn!("Load: {}: {error}", path.display());
+     }
+     state.platform.window.request_redraw();
+-    Some(false)
+ }
+ 
+ /// Both browser routes prepare the saved world's own resources, then publish
+@@ -483,6 +526,12 @@ pub(crate) fn try_load_save_file(
+     state: &mut AppState,
+     path: &Path,
+ ) -> Result<(), crate::app::persistence::PreparedLoadError> {
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    if !crate::app::remote_assets::saved_load_library_ready(state) {
++        return Err(crate::app::persistence::PreparedLoadError::Resources(
++            "saved-game resources are not resident; use request_saved_game_load".into(),
++        ));
++    }
+     if let Err(error) = crate::app::loading::pump::present_saved_game_loading(state) {
+         log::warn!("Saved-game loading dialog presentation failed: {error:#}");
+     }
+@@ -650,6 +699,30 @@ mod pending_load_tests {
+     use super::PendingSavedGameLoad;
+     use std::path::PathBuf;
+ 
++    #[test]
++    fn resource_wait_retains_path_origin_and_completed_presentation() {
++        for (from_menu, from_browser) in [(true, false), (false, true)] {
++            let mut pending = PendingSavedGameLoad::new(PathBuf::from("unchanged-slot.sav"));
++            pending.from_menu = from_menu;
++            pending.from_browser = from_browser;
++            assert!(pending.advance(|| true).is_none());
++            // Each archive completion hands the same request back to the pump.
++            // It must not become a new request or forget the caller's page.
++            for _ in 0..3 {
++                let handed_back = pending;
++                pending = handed_back;
++                assert_eq!(
++                    pending.advance(|| panic!("already presented")),
++                    Some(std::path::Path::new("unchanged-slot.sav"))
++                );
++                assert_eq!(
++                    (pending.from_menu, pending.from_browser),
++                    (from_menu, from_browser)
++                );
++            }
++        }
++    }
++
+     #[test]
+     fn restoration_waits_for_a_presented_loading_frame() {
+         for path in ["menu-save.bin", "in-game-save.sav"] {
 diff --git a/src/app/persistence/keyboard.rs b/src/app/persistence/keyboard.rs
-index 5fe29ef..3e02953 100644
+index 5fe29ef6d..3e029530d 100644
 --- a/src/app/persistence/keyboard.rs
 +++ b/src/app/persistence/keyboard.rs
 @@ -14,16 +14,32 @@ fn read(root: &Path) -> Option<Vec<u8>> {
@@ -989,10 +1230,10 @@ index 5fe29ef..3e02953 100644
      // options sharing VERA.INI survive; a failed save retains current bindings.
      if let Err(error) = save(root, &defaults) {
 diff --git a/src/app/persistence/options_profile.rs b/src/app/persistence/options_profile.rs
-index 3182044..eff8910 100644
+index eb20a4a58..596425d0a 100644
 --- a/src/app/persistence/options_profile.rs
 +++ b/src/app/persistence/options_profile.rs
-@@ -125,8 +125,8 @@ pub(crate) struct RetailOptionsProfile {
+@@ -143,8 +143,8 @@ pub(crate) struct RetailOptionsProfile {
      pub(crate) sidebar: crate::ui::main_menu_dialogs::options::SidebarSize,
      /// `[VERA] YROriginalStyle=`: whether the startup splash, the menu movie,
      /// the offline Skirmish background and the LAN/WOL lobby backgrounds use
@@ -1003,7 +1244,7 @@ index 3182044..eff8910 100644
      /// [`LauncherCheckboxId::YrOriginalStyle`](crate::ui::main_menu_dialogs::options::LauncherCheckboxId::YrOriginalStyle).
      pub(crate) yr_original_style: bool,
      /// `[VERA] SkipIntro=`: start straight at the main menu, without the logo
-@@ -264,7 +264,10 @@ impl Default for RetailOptionsProfile {
+@@ -314,7 +314,10 @@ impl Default for RetailOptionsProfile {
          // Retail provenance: Options profile defaults —
          // `OptionsClass__SetDefaults` @ `0x005FA350`.
          Self {
@@ -1015,16 +1256,32 @@ index 3182044..eff8910 100644
              difficulty: 1,
              // Native relies on the static object's zero initialization for
              // this one persisted field rather than storing it in the body.
-@@ -301,7 +304,7 @@ impl Default for RetailOptionsProfile {
+@@ -349,7 +352,7 @@ impl Default for RetailOptionsProfile {
              zoom: crate::ui::main_menu_dialogs::options::Zoom::Auto,
              original_shape: false,
              sidebar: crate::ui::main_menu_dialogs::options::SidebarSize::Normal,
 -            yr_original_style: false,
 +            yr_original_style: true,
              skip_intro: false,
-             render_interpolation: false,
+             show_string_keys: false,
              mouse_wheel_zoom: false,
-@@ -1509,7 +1512,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -374,7 +377,14 @@ impl Default for RetailOptionsProfile {
+             health_bars: crate::ui::main_menu_dialogs::options::HealthBarMode::Vanilla,
+             color_vision: crate::ui::main_menu_dialogs::options::ColorVisionMode::Off,
+             chat_translation: Default::default(),
+-            language: None,
++            // Toy is the Simplified Chinese edition. A saved Language choice
++            // still overrides this constructor default in the profile reader.
++            language: {
++                #[cfg(target_arch = "wasm32")]
++                { crate::web::toy_single_player_menu().then(|| "zh-CN".to_owned()) }
++                #[cfg(not(target_arch = "wasm32"))]
++                { None }
++            },
+             skipped_update: String::new(),
+             online_name: String::new(),
+             online_locale: 0,
+@@ -1591,7 +1601,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
          assert_eq!(defaults.retained_profile.zoom, Zoom::Auto);
          assert!(!defaults.retained_profile.original_shape);
          assert_eq!(defaults.retained_profile.sidebar, SidebarSize::Normal);
@@ -1033,7 +1290,7 @@ index 3182044..eff8910 100644
          // Shift + left click queues one copy, as in gamemd, until it is ticked.
          assert!(!defaults.retained_profile.shift_queue);
          // Internet shows TXT_APIMISSING, as on retail, until it is ticked.
-@@ -1530,7 +1533,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -1612,7 +1622,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
          assert_eq!(load.retained_profile.zoom, Zoom::Percent(200));
          assert!(load.retained_profile.original_shape);
          assert_eq!(load.retained_profile.sidebar, SidebarSize::Large);
@@ -1042,7 +1299,7 @@ index 3182044..eff8910 100644
          assert!(!load.retained_profile.skip_intro);
          assert!(load.retained_profile.shift_queue);
          assert!(load.retained_profile.wol_test_service);
-@@ -1936,12 +1939,13 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -2104,12 +2114,13 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
      }
  
      #[test]
@@ -1062,7 +1319,7 @@ index 3182044..eff8910 100644
  
          for value in ["yes", "no"] {
              let ignored = load_snapshot(
-@@ -1949,18 +1953,18 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+@@ -2117,18 +2128,18 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
                  format!("[VERA]\nRA2Look={value}\n").as_bytes(),
              );
              assert!(
@@ -1086,10 +1343,10 @@ index 3182044..eff8910 100644
      }
  
 diff --git a/src/app/process_assets.rs b/src/app/process_assets.rs
-index 3a88467..70f7cd4 100644
+index 78bbb4f5d..6cae382df 100644
 --- a/src/app/process_assets.rs
 +++ b/src/app/process_assets.rs
-@@ -508,6 +508,50 @@ impl ProcessAssets {
+@@ -603,6 +603,50 @@ impl ProcessAssets {
          self.manager.as_ref()
      }
  
@@ -1141,7 +1398,7 @@ index 3a88467..70f7cd4 100644
      /// YRO archives, and its PKT titles resolve through the process CSF. Both
      /// fields live on this owner, so the pair is borrowed together.
 diff --git a/src/app/radar_movie.rs b/src/app/radar_movie.rs
-index b3d1d41..2d1b8bb 100644
+index db76e3800..c3142a2e4 100644
 --- a/src/app/radar_movie.rs
 +++ b/src/app/radar_movie.rs
 @@ -180,12 +180,41 @@ pub(crate) fn enqueue(state: &mut AppState, index: i32, pause_simulation: bool)
@@ -1192,7 +1449,7 @@ index b3d1d41..2d1b8bb 100644
          return false;
      };
 diff --git a/src/app/shell_campaign.rs b/src/app/shell_campaign.rs
-index 7190080..b71ee7f 100644
+index 71900800f..b71ee7f40 100644
 --- a/src/app/shell_campaign.rs
 +++ b/src/app/shell_campaign.rs
 @@ -282,6 +282,10 @@ impl App {
@@ -1207,10 +1464,10 @@ index 7190080..b71ee7f 100644
              let Some(assets) = state.process_assets.manager() else {
                  return Ok(None);
 diff --git a/src/app/shell_main_menu.rs b/src/app/shell_main_menu.rs
-index 24483cd..d2d8af7 100644
+index 656aab654..634be19ab 100644
 --- a/src/app/shell_main_menu.rs
 +++ b/src/app/shell_main_menu.rs
-@@ -2024,6 +2024,10 @@ impl App {
+@@ -2203,6 +2203,10 @@ impl App {
      ) {
          use crate::ui::main_menu_shell::MainMenuShellAction;
  
@@ -1222,19 +1479,9 @@ index 24483cd..d2d8af7 100644
              MainMenuShellAction::None => {}
              // The original pops a confirm message box here; it does NOT quit on
 diff --git a/src/app/shell_movies_credits.rs b/src/app/shell_movies_credits.rs
-index b487b37..2b0cf2b 100644
+index 882eb965e..18678b915 100644
 --- a/src/app/shell_movies_credits.rs
 +++ b/src/app/shell_movies_credits.rs
-@@ -5,8 +5,8 @@
- 
- use crate::sim::trigger_runtime::ThemeRequest;
- use crate::ui::shell::list::ListMetrics;
--use std::sync::Arc;
- use crate::util::time::Instant;
-+use std::sync::Arc;
- 
- use super::{App, AppState};
- use crate::app::frontend::credits_roll::{
 @@ -241,6 +241,35 @@ impl App {
  
      /// Play_Movie `0x005BED40` from the shell.
@@ -1246,7 +1493,7 @@ index b487b37..2b0cf2b 100644
 +                && state
 +                    .match_state
 +                    .sim_runtime
-+                    .as_ref()
++                    .runtime()
 +                    .is_some_and(|r| r.simulation.session().game_mode_nonzero());
 +            if !native_skips && super::remote_assets::movie_missing(state, &file) {
 +                let name = name.to_owned();
@@ -1280,7 +1527,7 @@ index b487b37..2b0cf2b 100644
          let Some((bytes, source)) = resolved else {
              // No .BIK (and no VQA decoder is needed: retail YR ships none):
              // Play_Movie returns with no visible or audible change.
-@@ -388,7 +419,7 @@ impl App {
+@@ -385,7 +416,7 @@ impl App {
          }
      }
  
@@ -1289,11 +1536,132 @@ index b487b37..2b0cf2b 100644
          match return_to {
              // The frame loop presents the splash, then starts the pending
              // intro, then paints the shell (`App::render_frame`).
+@@ -416,19 +447,24 @@ impl App {
+         }
+     }
+ 
+-    /// Only a bare Escape release (`Keyboard::Get() == 0x081B`) aborts a
+-    /// movie; every other key and mouse event is consumed and ignored.
++    /// Retail uses a bare Escape release (`Keyboard::Get() == 0x081B`).
++    /// Web also accepts bare Space release, only on the fullscreen movie route.
+     pub(super) fn fullscreen_movie_key(
+         state: &mut AppState,
+         code: winit::keyboard::KeyCode,
+         pressed: bool,
+     ) {
+         let modifiers = state.platform.live_modifiers;
+-        let bare = !(modifiers.shift_key() || modifiers.control_key() || modifiers.alt_key());
+-        if code == winit::keyboard::KeyCode::Escape
+-            && !pressed
+-            && bare
+-            && let Some(movie) = state.frontend.fullscreen_movie.as_mut()
++        if fullscreen_movie_skip_key(
++            code,
++            pressed,
++            modifiers,
++            cfg!(all(
++                feature = "wasm",
++                target_arch = "wasm32",
++                target_os = "unknown"
++            )),
++        ) && let Some(movie) = state.frontend.fullscreen_movie.as_mut()
+         {
+             movie.abort();
+             state.platform.window.request_redraw();
+@@ -528,3 +564,88 @@ impl App {
+         }
+     }
+ }
++
++// Kept separate so native tests exercise both platform policies without a GPU.
++fn fullscreen_movie_skip_key(
++    code: winit::keyboard::KeyCode,
++    pressed: bool,
++    modifiers: winit::keyboard::ModifiersState,
++    web: bool,
++) -> bool {
++    use winit::keyboard::KeyCode;
++    let retail_bare = !(modifiers.shift_key() || modifiers.control_key() || modifiers.alt_key());
++    !pressed
++        && retail_bare
++        && (code == KeyCode::Escape || (web && code == KeyCode::Space && !modifiers.super_key()))
++}
++
++#[cfg(test)]
++mod fullscreen_movie_skip_tests {
++    use super::fullscreen_movie_skip_key;
++    use winit::keyboard::{KeyCode, ModifiersState};
++
++    #[test]
++    fn space_is_web_only_and_release_only() {
++        let bare = ModifiersState::empty();
++        assert!(fullscreen_movie_skip_key(KeyCode::Space, false, bare, true));
++        assert!(!fullscreen_movie_skip_key(KeyCode::Space, true, bare, true));
++        assert!(!fullscreen_movie_skip_key(
++            KeyCode::Space,
++            false,
++            bare,
++            false
++        ));
++        for modifier in [
++            ModifiersState::SHIFT,
++            ModifiersState::CONTROL,
++            ModifiersState::ALT,
++            ModifiersState::SUPER,
++        ] {
++            assert!(!fullscreen_movie_skip_key(
++                KeyCode::Space,
++                false,
++                modifier,
++                true
++            ));
++        }
++    }
++
++    #[test]
++    fn escape_policy_and_other_keys_are_unchanged() {
++        for web in [false, true] {
++            assert!(fullscreen_movie_skip_key(
++                KeyCode::Escape,
++                false,
++                ModifiersState::empty(),
++                web
++            ));
++            assert!(!fullscreen_movie_skip_key(
++                KeyCode::Escape,
++                true,
++                ModifiersState::empty(),
++                web
++            ));
++            assert!(!fullscreen_movie_skip_key(
++                KeyCode::Escape,
++                false,
++                ModifiersState::SHIFT,
++                web
++            ));
++            // Preserve the retail Escape policy, which did not test Super.
++            assert!(fullscreen_movie_skip_key(
++                KeyCode::Escape,
++                false,
++                ModifiersState::SUPER,
++                web
++            ));
++            for code in [KeyCode::Enter, KeyCode::KeyA, KeyCode::F11] {
++                assert!(!fullscreen_movie_skip_key(
++                    code,
++                    false,
++                    ModifiersState::empty(),
++                    web
++                ));
++            }
++        }
++    }
++}
 diff --git a/src/app/shell_random_map.rs b/src/app/shell_random_map.rs
-index 303fa65..ecaafeb 100644
+index 9777a73b5..3897530c9 100644
 --- a/src/app/shell_random_map.rs
 +++ b/src/app/shell_random_map.rs
-@@ -604,18 +604,29 @@ pub(super) fn prepare_random_map_generation(
+@@ -818,18 +818,27 @@ pub(super) fn prepare_random_map_generation(
  
  #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
  pub(super) fn spawn_random_map_generation_worker(
@@ -1301,14 +1669,14 @@ index 303fa65..ecaafeb 100644
 -    _settings: crate::map::rmg::RmgSettings,
 -    _resolved_inputs: crate::map::rmg::build::ResolvedTheaterInputs,
 -    _blocks: crate::map::rmg::theater_blocks::TheaterTileBlocks,
--    _tech_types: Vec<crate::map::rmg::phases::tech_buildings::TechType>,
+-    _objects: RandomMapObjects,
 -    _shared_cell_dummy: crate::map::resolved_terrain::SharedCellDummy,
 -    _map_storage_decision: RandomMapStorageDecision,
 +    options: crate::map::rmg::RmgOptions,
 +    settings: crate::map::rmg::RmgSettings,
 +    resolved_inputs: crate::map::rmg::build::ResolvedTheaterInputs,
 +    blocks: crate::map::rmg::theater_blocks::TheaterTileBlocks,
-+    tech_types: Vec<crate::map::rmg::phases::tech_buildings::TechType>,
++    objects: RandomMapObjects,
 +    shared_cell_dummy: crate::map::resolved_terrain::SharedCellDummy,
 +    map_storage_decision: RandomMapStorageDecision,
  ) -> std::io::Result<std::sync::mpsc::Receiver<RandomMapUpdate>> {
@@ -1322,19 +1690,17 @@ index 303fa65..ecaafeb 100644
 +    let (sender, receiver) = std::sync::mpsc::channel();
 +    map_storage_decision.apply_resize_to(&shared_cell_dummy);
 +    let _ = sender.send(RandomMapUpdate::Started);
-+    let generated = crate::map::rmg::build::generate_map(
-+        &options,
-+        &settings,
-+        &resolved_inputs,
-+        &blocks,
-+        &tech_types,
-+    );
++    let generated = objects.generate(|objects| {
++        crate::map::rmg::build::generate_map(
++            &options, &settings, &resolved_inputs, &blocks, objects,
++        )
++    });
 +    let _ = sender.send(RandomMapUpdate::Finished(Box::new(generated)));
 +    Ok(receiver)
  }
  
  #[cfg(not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")))]
-@@ -854,6 +865,39 @@ impl App {
+@@ -1172,6 +1181,39 @@ impl App {
          options: &crate::map::rmg::RmgOptions,
          accept_on_finish: bool,
      ) -> bool {
@@ -1375,74 +1741,37 @@ index 303fa65..ecaafeb 100644
          // immediately before generator construction (0x00595BC0).
          let mut generation_options = options.clone();
 diff --git a/src/app/shell_skirmish.rs b/src/app/shell_skirmish.rs
-index 8bf07da..19b891d 100644
+index 03e4dc51f..200038090 100644
 --- a/src/app/shell_skirmish.rs
 +++ b/src/app/shell_skirmish.rs
-@@ -9,18 +9,6 @@ impl App {
-         crate::app::frontend::shell_layout::skirmish_layout(state)
-     }
- 
--    /// Whether the selected map has a setup for Load Setup.
--    pub(crate) fn skirmish_setup_saved(state: &AppState) -> bool {
--        state
--            .frontend
--            .multiplayer_shell_runtime
--            .saved_setup(
--                &state.frontend.skirmish_shell_state,
--                state.frontend.scenario_catalog.shell_maps(),
--            )
--            .is_some()
--    }
--
-     fn skirmish_choose_map_layout(
-         state: &AppState,
-     ) -> crate::ui::skirmish_shell::ChooseMapModalLayout {
-@@ -271,22 +259,6 @@ impl App {
-                     crate::app::frontend::shell_transition::ShellExitThen::SkirmishChooseMap,
+@@ -364,12 +364,22 @@ impl App {
                  );
              }
--            crate::ui::skirmish_shell::SkirmishShellAction::SaveSetup => {
--                state.frontend.multiplayer_shell_runtime.save_setup(
--                    &state.frontend.skirmish_shell_state,
--                    state.frontend.scenario_catalog.shell_maps(),
--                );
--            }
--            crate::ui::skirmish_shell::SkirmishShellAction::LoadSetup => {
--                let maps = state.frontend.scenario_catalog.shell_maps();
--                if let Some(setup) = state
--                    .frontend
--                    .multiplayer_shell_runtime
--                    .saved_setup(&state.frontend.skirmish_shell_state, maps)
--                {
--                    setup.apply(&mut state.frontend.skirmish_shell_state, maps);
--                }
--            }
-             crate::ui::skirmish_shell::SkirmishShellAction::None
-             | crate::ui::skirmish_shell::SkirmishShellAction::SelectColor(_)
-             | crate::ui::skirmish_shell::SkirmishShellAction::SelectMap(_) => {}
-@@ -1436,16 +1408,11 @@ impl App {
-             Self::drain_skirmish_shell_ui_sounds(state);
-             return;
-         }
--        // Load Setup stays disabled until the selected map has a saved setup.
--        let load_setup_enabled = Self::skirmish_setup_saved(state);
-         state
-             .frontend
-             .skirmish_shell_state
-             .pressed_owner_draw_button =
--            crate::ui::skirmish_shell::hit_test_owner_draw_button(&layout, x, y).filter(|button| {
--                *button != crate::ui::skirmish_shell::OwnerDrawButton::LoadSetup
--                    || load_setup_enabled
--            });
-+            crate::ui::skirmish_shell::hit_test_owner_draw_button(&layout, x, y);
-         if state
-             .frontend
-             .skirmish_shell_state
+             crate::ui::skirmish_shell::SkirmishShellAction::SaveSetup => {
++                if crate::app::frontend::shell_layout::main_menu_profile()
++                    == crate::ui::main_menu_shell::MainMenuProfile::ToySinglePlayer
++                {
++                    return;
++                }
+                 state.frontend.multiplayer_shell_runtime.save_setup(
+                     &state.frontend.skirmish_shell_state,
+                     state.frontend.scenario_catalog.shell_maps(),
+                 );
+             }
+             crate::ui::skirmish_shell::SkirmishShellAction::LoadSetup => {
++                if crate::app::frontend::shell_layout::main_menu_profile()
++                    == crate::ui::main_menu_shell::MainMenuProfile::ToySinglePlayer
++                {
++                    return;
++                }
+                 let maps = state.frontend.scenario_catalog.shell_maps();
+                 if let Some(setup) = state
+                     .frontend
 diff --git a/src/assets/asset_manager.rs b/src/assets/asset_manager.rs
-index cfa4c0a..8ad9b3d 100644
+index a38c242d4..d17a687b6 100644
 --- a/src/assets/asset_manager.rs
 +++ b/src/assets/asset_manager.rs
-@@ -462,6 +462,109 @@ impl AssetManager {
+@@ -468,6 +468,109 @@ impl AssetManager {
          &self.ini_roots
      }
  
@@ -1549,10 +1878,10 @@ index cfa4c0a..8ad9b3d 100644
 +        )
 +    }
 +
-     /// Read-only INI tooling without a complete retail installation. No game
-     /// archives are implicitly registered; the probe may explicitly use the
-     /// existing load_all_disk_mixes widening. Not a gameplay constructor.
-@@ -665,6 +768,43 @@ impl AssetManager {
+     /// Whether startup mounted Ares's `ares.mix` from the installation or the
+     /// mod. It makes Ares play in every game (`rules::ares_switch`). A build
+     /// without the `ares` feature does not mount it yet.
+@@ -709,6 +812,43 @@ impl AssetManager {
              let Some(pair) = self.audio_pairs.first() else {
                  return Ok(None);
              };
@@ -1597,10 +1926,10 @@ index cfa4c0a..8ad9b3d 100644
                  return Ok(None);
              };
 diff --git a/src/assets/audio_bag.rs b/src/assets/audio_bag.rs
-index 4c445a7..fea0873 100644
+index ab90a9176..7ad7a9396 100644
 --- a/src/assets/audio_bag.rs
 +++ b/src/assets/audio_bag.rs
-@@ -97,6 +97,7 @@ pub struct AudioIndex {
+@@ -101,6 +101,7 @@ pub struct AudioIndex {
      entries: Vec<AudioBagEntry>,
      /// Backing files, retained independently: offsets stay relative to their BAG.
      bag_data: Vec<Vec<u8>>,
@@ -1608,7 +1937,7 @@ index 4c445a7..fea0873 100644
      /// Parallel to entries; constructed by parsing or the sole merge owner below.
      entry_bags: Vec<usize>,
      #[cfg(feature = "ares")]
-@@ -118,6 +119,16 @@ impl AudioIndex {
+@@ -122,6 +123,16 @@ impl AudioIndex {
          Self::parse(idx_data, bag_data, IndexLayout::Stock)
      }
  
@@ -1625,15 +1954,15 @@ index 4c445a7..fea0873 100644
      /// Installed Ares AudioBag::Open1005AA00, selected by Audio_Load4011C0.
      /// See tools/rules_oracle/ares_audio_bags.md and its executed controls.
      #[cfg(feature = "ares")]
-@@ -205,6 +216,7 @@ impl AudioIndex {
-         Some(Self {
+@@ -210,6 +221,7 @@ impl AudioIndex {
+             id: next_index_id(),
              entries,
              bag_data: vec![bag_data],
 +            deferred_bag_len: None,
              entry_bags: vec![0; entry_count],
              #[cfg(feature = "ares")]
              layout,
-@@ -230,6 +242,7 @@ impl AudioIndex {
+@@ -236,6 +248,7 @@ impl AudioIndex {
              entries,
              entry_bags,
              bag_data: files,
@@ -1641,7 +1970,7 @@ index 4c445a7..fea0873 100644
              layout: IndexLayout::Ares,
          }
      }
-@@ -279,6 +292,9 @@ impl AudioIndex {
+@@ -285,6 +298,9 @@ impl AudioIndex {
  
      /// Exact binary search by uppercase name.
      fn get_exact(&self, name: &str) -> Option<(&AudioBagEntry, &[u8])> {
@@ -1652,7 +1981,7 @@ index 4c445a7..fea0873 100644
          let entry = &self.entries[idx];
          let start = entry.offset as usize;
 diff --git a/src/assets/mix_archive.rs b/src/assets/mix_archive.rs
-index 9a91f01..63b6bcd 100644
+index 9a91f010e..63b6bcd03 100644
 --- a/src/assets/mix_archive.rs
 +++ b/src/assets/mix_archive.rs
 @@ -207,6 +207,14 @@ impl std::ops::Deref for SharedBytes {
@@ -1671,7 +2000,7 @@ index 9a91f01..63b6bcd 100644
      ///
      /// Detects old vs new format by checking the first u16:
 diff --git a/src/assets/mod.rs b/src/assets/mod.rs
-index bf717b2..c8b92d2 100644
+index bf717b26f..c8b92d2b4 100644
 --- a/src/assets/mod.rs
 +++ b/src/assets/mod.rs
 @@ -30,6 +30,7 @@ pub mod bink_decode;
@@ -1683,26 +2012,26 @@ index bf717b2..c8b92d2 100644
  pub mod fnt_file;
  pub mod format_sniff;
 diff --git a/src/audio/music.rs b/src/audio/music.rs
-index f18b39c..1850335 100644
+index 53a31a59d..fba5c15de 100644
 --- a/src/audio/music.rs
 +++ b/src/audio/music.rs
-@@ -126,6 +126,7 @@ pub struct MusicPlayer {
-     /// rodio mixer device sink — must be kept alive or all audio stops.
-     _device: MusicOutput,
+@@ -131,6 +131,7 @@ pub struct MusicPlayer {
+     /// The track was playing on a device that went away: it reads as finished.
+     track_cut: bool,
      current_player: Option<Player>,
 +    pending_remote: Option<String>,
      volume: f64,
      /// The Theme stream's own `+0x10` interp (`stream+0x14 -> +0x10`), built
      /// by the stream constructor at rate `0x10624D` (1000 ms from full to
-@@ -161,6 +162,7 @@ impl MusicPlayer {
-         Self {
-             _device: device,
+@@ -218,6 +219,7 @@ impl MusicPlayer {
+             health: Default::default(),
+             track_cut: false,
              current_player: None,
 +            pending_remote: None,
              volume: DEFAULT_SCORE_VOLUME,
              own: VolumeInterp::new(VOLUME_SCALE, 0),
              focus_output_scale: 1.0,
-@@ -175,6 +177,9 @@ impl MusicPlayer {
+@@ -232,6 +234,9 @@ impl MusicPlayer {
      }
  
      pub(crate) fn state(&self) -> MusicOutputState {
@@ -1710,9 +2039,9 @@ index f18b39c..1850335 100644
 +            return MusicOutputState::Playing;
 +        }
          match self.current_player.as_ref() {
-             Some(player) if player.empty() => MusicOutputState::Finished,
+             Some(player) if player.empty() || self.track_cut => MusicOutputState::Finished,
              Some(_) if self.own.moving() => MusicOutputState::Ramping,
-@@ -184,9 +189,17 @@ impl MusicPlayer {
+@@ -241,9 +246,17 @@ impl MusicPlayer {
      }
  
      pub(crate) fn submit(&mut self, prepared: PreparedTrack) -> bool {
@@ -1730,7 +2059,7 @@ index f18b39c..1850335 100644
          if let Some(player) = self.current_player.take() {
              player.stop();
          }
-@@ -208,11 +221,28 @@ impl MusicPlayer {
+@@ -266,11 +279,28 @@ impl MusicPlayer {
      }
  
      pub fn stop(&mut self) {
@@ -1760,10 +2089,10 @@ index f18b39c..1850335 100644
      /// (`0x00408270`) and resumes them afterwards (`0x00408230`), so the
      /// theme continues from where it stopped rather than restarting.
 diff --git a/src/audio/sfx.rs b/src/audio/sfx.rs
-index 2fae6eb..8721aa9 100644
+index c59902e6c..62940600c 100644
 --- a/src/audio/sfx.rs
 +++ b/src/audio/sfx.rs
-@@ -1378,6 +1378,9 @@ fn open_sfx_sink() -> Result<SfxOutput, String> {
+@@ -1400,6 +1400,9 @@ fn open_sfx_sink() -> Result<SfxOutput, String> {
  }
  
  impl SfxPlayer {
@@ -1772,9 +2101,9 @@ index 2fae6eb..8721aa9 100644
 +    }
      /// Create a new SfxPlayer. Returns None if audio output cannot be opened.
      pub fn new() -> Option<Self> {
-         let device = open_sfx_sink()
+         #[cfg(not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")))]
 diff --git a/src/audio/theme.rs b/src/audio/theme.rs
-index 2193e3e..9db433c 100644
+index 5639db82d..0a4cb8d4b 100644
 --- a/src/audio/theme.rs
 +++ b/src/audio/theme.rs
 @@ -135,6 +135,7 @@ pub(crate) struct ThemeGates {
@@ -1819,7 +2148,7 @@ index 2193e3e..9db433c 100644
      /// Every sample has been pulled.
      pub(crate) fn exhausted(&self) -> bool {
          self.pulled >= self.pcm.len()
-@@ -947,7 +961,13 @@ impl ThemeRuntime {
+@@ -950,7 +964,13 @@ impl ThemeRuntime {
  /// its first piece here (see [`PreparedTrack`]).
  fn prepare_track(track_name: &str, assets: &AssetManager) -> Option<PreparedTrack> {
      for filename in [format!("{track_name}.wav"), format!("{track_name}.aud")] {
@@ -1834,11 +2163,183 @@ index 2193e3e..9db433c 100644
              continue;
          };
  
+diff --git a/src/i18n/mod.rs b/src/i18n/mod.rs
+index ed34d803b..e7db5fce0 100644
+--- a/src/i18n/mod.rs
++++ b/src/i18n/mod.rs
+@@ -1459,6 +1459,26 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn toy_reviewed_chinese_survives_csf_and_language_round_trip() {
++        let chinese = include_str!("vera20k.zh-CN.ini");
++        let mut catalog = catalog_with("zh-CN", chinese);
++        let mut csf = test_csf(&[("VERA:CustomEndGameMovie", "Old English Label"),
++            ("CUSTOM:UserTranslation", "用户自定义翻译")]);
++        apply_catalog(&catalog, &mut csf, false);
++        assert_eq!(csf.text("VERA:CustomEndGameMovie"), "完整播放电脑战败动画");
++        assert_eq!(csf.text("VERA:HouseColorStrength"), "队伍颜色强度");
++        assert_eq!(csf.text("VERA:NoStolenTech"), "禁用渗透科技单位");
++        assert_eq!(csf.text("CUSTOM:UserTranslation"), "用户自定义翻译");
++        catalog.selected = catalog.languages[0].clone();
++        apply_catalog(&catalog, &mut csf, false);
++        assert_eq!(csf.text("VERA:CustomEndGameMovie"), "Custom End Game Movie");
++        assert_eq!(csf.text("CUSTOM:UserTranslation"), "用户自定义翻译");
++        catalog.selected = catalog.languages[1].clone();
++        apply_catalog(&catalog, &mut csf, false);
++        assert_eq!(csf.text("VERA:CustomEndGameMovie"), "完整播放电脑战败动画");
++    }
++
+     #[test]
+     fn the_chosen_language_translates_the_game_and_english_fills_gaps() {
+         let file = "[Strings]\nGUI:Ok=确定\nVERA:Pausing=正在暂停...\n";
+diff --git a/src/i18n/vera20k.zh-CN.ini b/src/i18n/vera20k.zh-CN.ini
+index 63145ffd0..5bb6464c2 100644
+--- a/src/i18n/vera20k.zh-CN.ini
++++ b/src/i18n/vera20k.zh-CN.ini
+@@ -127,37 +127,37 @@ VERA:OptionsArtworkMissing=无法加载原版选项页的美术资源。
+ 
+ ; 选项：VERA 自己的控件名称，以及它们的状态行说明。
+ VERA:Zoom=缩放
+-VERA:ZoomHelp=战斗画面的大小。“自动”会为你的屏幕选择最合适的大小。
++VERA:ZoomHelp=调整战场画面的大小。自动模式会为当前屏幕选择合适的尺寸。
+ VERA:Display=显示器
+-VERA:DisplayHelp=游戏在哪个屏幕上打开。“自动”跟随系统。
++VERA:DisplayHelp=选择游戏在哪个屏幕上打开。自动模式跟随系统设置。
+ VERA:HouseColorStrength=队伍颜色强度
+-VERA:HouseColorStrengthHelp=队伍颜色的醒目程度，从 1（原版色带）到 10（最鲜明）。下一场战斗生效。
++VERA:HouseColorStrengthHelp=调整队伍颜色的醒目程度，1为原版，10最醒目。下场战斗生效。
+ VERA:FullScreen=全屏
+-VERA:FullScreenHelp=占满整个屏幕。取消勾选则在窗口中游戏。
++VERA:FullScreenHelp=铺满整个屏幕。取消勾选后以窗口模式运行。
+ VERA:SetWindowSize=设置窗口大小
+ VERA:SetWindowSizeHelp=将窗口恢复为游戏启动时的大小。
+-VERA:OriginalShape=原版 4:3 比例
+-VERA:OriginalShapeHelp=战斗保持原版的 4:3 比例，宽屏两侧留黑边。
+-VERA:YrOriginalStyle=原版尤里的复仇风格
+-VERA:YrOriginalStyleHelp=使用尤里的复仇的载入画面和菜单动画，以及遭遇战和多人游戏大厅的背景。
+-VERA:ShiftQueue=Shift 点击批量排队
+-VERA:ShiftQueueHelp=单位图标：Shift 点击一次排队多个，Ctrl 点击无限建造，Alt 点击下一个建造，Shift 右键全部取消。
++VERA:OriginalShape=原版4:3比例
++VERA:OriginalShapeHelp=战场保持原版4:3比例，宽屏两侧显示黑边。
++VERA:YrOriginalStyle=原版尤里复仇风格
++VERA:YrOriginalStyleHelp=使用《尤里的复仇》的载入画面、菜单动画，以及遭遇战和多人大厅背景。
++VERA:ShiftQueue=Shift点击批量生产
++VERA:ShiftQueueHelp=单位图标：Shift点击批量生产，Ctrl点击无限生产，Alt点击优先生产，Shift右键取消全部。
+ VERA:AutoRepair=自动维修
+ VERA:AutoRepairHelp=受损的己方建筑会自动开始维修，费用与手动维修相同。
+ VERA:TerrainDeformation=地形变形
+ VERA:TerrainDeformationHelp=爆炸会像泰伯利亚之日那样在空地上炸出凹坑，核弹会留下弹坑。联机时所有玩家需要相同设置。
+-VERA:CustomEndGameBanner=自定义结局横幅
+-VERA:CustomEndGameBannerHelp=显示规则为你的国家设定的胜利或失败图片和音乐。取消勾选则使用标准横幅。
++VERA:CustomEndGameBanner=自定义胜负画面
++VERA:CustomEndGameBannerHelp=在战场上显示规则为所属国家指定的胜利或失败图片，并播放对应音乐。取消勾选则使用标准画面和音乐。
+ VERA:CustomEndGameScore=自定义结算画面
+-VERA:CustomEndGameScoreHelp=结算画面也使用该国家图片和音乐。取消勾选则使用标准结算画面。
+-VERA:CustomEndGameMovie=自定义结局动画
+-VERA:CustomEndGameMovieHelp=仅限遭遇战：被击败的电脑指挥官的片段播完后再显示结果。取消勾选则打断片段。
++VERA:CustomEndGameScoreHelp=将所属国家的图片用作结算画面背景，并播放对应音乐。取消勾选则使用标准结算画面。
++VERA:CustomEndGameMovie=完整播放电脑战败动画
++VERA:CustomEndGameMovieHelp=等待被击败电脑指挥官的失败动画播放完毕，再显示胜负画面和结算界面。仅限遭遇战。取消勾选则立即显示，并中断动画。
+ VERA:Sidebar=侧边栏
+-VERA:SidebarHelp=战斗中侧边栏和底栏的大小。
++VERA:SidebarHelp=调整战斗中侧边栏和底栏的大小。
+ VERA:HealthBars=生命条
+-VERA:HealthBarsHelp=“原版”：悬停和选中的单位；“所有单位”：每个玩家单位；“非满血”：其中受损的单位。
+-VERA:VeraIcon=VERA 图标
+-VERA:VeraIconHelp=在游戏窗口、任务栏和程序坞上显示 VERA 自己的图标，而不是红色警戒 2 的红星。
++VERA:HealthBarsHelp=设置单位何时显示生命条。原版：鼠标指向或已选中的单位；全部单位：所有可见单位；仅非满血：隐藏满血单位的生命条。
++VERA:VeraIcon=VERA图标
++VERA:VeraIconHelp=在游戏窗口、任务栏和程序坞中使用VERA图标，替代红色警戒2的红星。
+ VERA:HdRadar=高清雷达
+ VERA:HdRadarHelp=侧边栏放大时以屏幕的完整分辨率绘制雷达，让每个地图格子都清晰可见。
+ VERA:SmoothSidebar=平滑侧边栏
+@@ -168,12 +168,12 @@ VERA:HdMapPreviews=高清地图预览
+ VERA:HdMapPreviewsHelp=在游戏设置中显示整张地图的清晰图片，首次显示时绘制。取消勾选则使用地图自带的预览图。
+ VERA:DetailedEvaText=详细 EVA 文字
+ VERA:DetailedEvaTextHelp=在每条 EVA 提示中写出对应单位或建筑的名称。
+-VERA:RightClickOrders=右键下令
+-VERA:RightClickOrdersHelp=左键选择；右键下达命令。
++VERA:RightClickOrders=右键下达指令
++VERA:RightClickOrdersHelp=左键选择，右键下达指令。
+ VERA:MouseWheelZoom=鼠标滚轮缩放
+-VERA:MouseWheelZoomHelp=用鼠标滚轮放大或缩小战斗画面，按下滚轮可重置。关闭后恢复正常视距。
+-VERA:LockCursor=鼠标锁定在窗口内
+-VERA:LockCursorHelp=让鼠标保持在游戏窗口内。按 Ctrl+Alt+L 可释放，直到你再次点击游戏画面。
++VERA:MouseWheelZoomHelp=使用鼠标滚轮缩放战场。关闭后恢复正常视距。
++VERA:LockCursor=锁定鼠标到窗口
++VERA:LockCursorHelp=将鼠标限制在游戏窗口内。Ctrl+Alt+L可临时释放，再次点击游戏后恢复锁定。
+ VERA:PerformanceStats=性能统计
+ VERA:PerformanceStatsHelp=在左上角显示帧率以及 CPU 和 GPU 负载。每次启动时关闭；按 Ctrl+Alt+F 也可切换。
+ VERA:ShowStringKeys=显示字符串键 (Ctrl+Alt+K)
+@@ -193,10 +193,10 @@ VERA:RelationColors=阵营关系配色
+ VERA:RelationColorsDesc=按敌我关系给单位、建筑、小地图圆点和超级武器计时器统一上色：自己蓝色、盟友绿色、敌人红色，中立与被动阵营保持原样；再按一次恢复真实的玩家颜色（仅本机显示）
+ VERA:PrimaryRotationOn=主要工厂轮换已开启：{count} 座工厂
+ VERA:PrimaryRotationOff=主要工厂轮换已关闭
+-VERA:SkipIntro=跳过片头
+-VERA:SkipIntroHelp=直接进入主菜单，不播放标志动画、启动画面或首次启动的片头动画。下次启动时生效。
++VERA:SkipIntro=跳过开场
++VERA:SkipIntroHelp=启动时直接进入主菜单，跳过标志、启动图片和首次启动动画。下次启动生效。
+ VERA:CheckForUpdates=检查更新
+-VERA:CheckForUpdatesHelp=立即检查是否有更新的 VERA20K，包括你跳过的版本。
++VERA:CheckForUpdatesHelp=立即检查VERA20K新版本，包括此前跳过的版本。
+ ; 缩放列表的各行：缩放比例，以及战斗画面的游戏像素大小。
+ VERA:ZoomAuto=自动 ({width}x{height})
+ VERA:ZoomPercent={percent}% ({width}x{height})
+@@ -205,12 +205,12 @@ VERA:DisplayAuto=自动
+ VERA:DisplayScreen=屏幕 {number}：{width}x{height}
+ VERA:DisplayScreenRate=屏幕 {number}：{width}x{height} {rate}Hz
+ ; 侧边栏和生命条列表的各行。
+-VERA:SidebarNormal=正常
++VERA:SidebarNormal=标准
+ VERA:SidebarLarge=大
+-VERA:SidebarExtraLarge=特大
++VERA:SidebarExtraLarge=超大
+ VERA:HealthBarsOriginal=原版
+-VERA:HealthBarsAll=所有单位
+-VERA:HealthBarsNotFull=所有单位，非满血
++VERA:HealthBarsAll=全部单位
++VERA:HealthBarsNotFull=仅非满血单位
+ ; 原版没有名称的两个页面的名称，以及每个页面按钮的状态行说明。Browser 结尾的是浏览器版本的说明，该版本没有高清地图预览和更新程序。
+ VERA:Controls=操作
+ VERA:DeveloperOptions=开发者选项
+@@ -387,10 +387,10 @@ VERA:CameraRightDesc=按住时向右滚动镜头（默认情况下方向键也
+ ; 键盘选项中 VERA 自己的按键。名称沿用选项页面中同一设置的标题（VERA:PerformanceStats、VERA:LockCursor 和 VERA:FullScreen），以下是它们的说明。
+ VERA:PerformanceStatsDesc=在任何界面显示或隐藏性能统计
+ VERA:LockCursorDesc=在任何界面让鼠标保持在游戏窗口内，或将其释放（Scroll Lock 键也可以）
+-VERA:FullScreenDesc=在任何界面切换全屏和窗口
++VERA:FullScreenDesc=切换全屏与窗口模式。如果浏览器占用F11，请重新绑定快捷键或使用网页全屏按钮。
+ ; VeraX 版本：键盘选项中的自动装载命令及其说明。
+ VERA:AutoLoad=自动装载
+-VERA:AutoLoadDesc=将选中的步兵和车辆装进附近的运输工具
++VERA:AutoLoadDesc=将选中的步兵和车辆装入附近的运输载具。
+ ; 键盘选项中的阵型线按键及其说明。
+ VERA:FormationLine=阵型线
+ VERA:FormationLineDesc=按住此键并用鼠标左键拖动画出一条线，选中的单位会沿线散开；同时按住 Shift 则拖出一个方阵
+@@ -471,7 +471,7 @@ VERA:InGameAllying=游戏中结盟
+ VERA:NoYuri=禁用尤里
+ VERA:NoFrance=禁用法国
+ VERA:NoSpy=禁用间谍
+-VERA:NoStolenTech=禁用窃取科技
++VERA:NoStolenTech=禁用渗透科技单位
+ VERA:ChooseMap=选择地图
+ ; 局域网和在线游戏房间：玩家列表的页码行，显示本页的玩家范围和玩家总数。
+ VERA:RosterPage=玩家 {first}-{last}（共 {total} 名）
+@@ -650,7 +650,7 @@ VERA:IoUnreadable=无法读取该文件
+ VERA:IoOsError={text}（系统错误 {code}）
+ 
+ ; 结果卡片的按钮，在地图无法载入或对局无法开始时显示。
+-VERA:BackToMenu=返回菜单
++VERA:BackToMenu=返回主菜单
+ ; 启动错误卡片上的“导入游戏文件”按钮（Android）和它打开的对话框：按钮、要选择什么、以 MB 为单位的复制进度和复制结果（{reason} 是失败原因，例如 NoFolderPicker），然后是它列出的路径。
+ VERA:ImportGameFiles=导入游戏文件
+ VERA:ChooseFolder=选择文件夹
 diff --git a/src/render/gpu.rs b/src/render/gpu.rs
-index 8b9f017..d965355 100644
+index 3e4256d71..a18d68c18 100644
 --- a/src/render/gpu.rs
 +++ b/src/render/gpu.rs
-@@ -244,11 +244,19 @@ impl GpuContext {
+@@ -253,11 +253,19 @@ impl GpuContext {
          // default options, which can succeed where this request fails.
          #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
          let instance: wgpu::Instance = {
@@ -1860,7 +2361,7 @@ index 8b9f017..d965355 100644
                      power_preference: wgpu::PowerPreference::HighPerformance,
                      compatible_surface: None,
 diff --git a/src/rules/theme_ini.rs b/src/rules/theme_ini.rs
-index 44581c0..085a96d 100644
+index 44581c095..085a96d75 100644
 --- a/src/rules/theme_ini.rs
 +++ b/src/rules/theme_ini.rs
 @@ -113,10 +113,13 @@ fn scan_catalog_availability(entries: &mut [ThemeEntry], assets: &AssetManager)
@@ -1879,29 +2380,23 @@ index 44581c0..085a96d 100644
      }
  }
 diff --git a/src/ui/main_menu_dialogs/options.rs b/src/ui/main_menu_dialogs/options.rs
-index b6863ac..615a67d 100644
+index f176bd244..4387571aa 100644
 --- a/src/ui/main_menu_dialogs/options.rs
 +++ b/src/ui/main_menu_dialogs/options.rs
-@@ -738,7 +738,7 @@ impl Default for LauncherOptionsValues {
+@@ -916,7 +916,7 @@ impl Default for LauncherOptionsValues {
              show_hidden: false,
              full_screen: false,
              original_shape: false,
 -            yr_original_style: false,
 +            yr_original_style: true,
-             render_interpolation: false,
              mouse_wheel_zoom: false,
              right_click_orders: false,
+             lock_cursor: false,
 diff --git a/src/ui/main_menu_shell/layout.rs b/src/ui/main_menu_shell/layout.rs
-index 86d22b7..6f4f89b 100644
+index 8f15bc2f8..02039474b 100644
 --- a/src/ui/main_menu_shell/layout.rs
 +++ b/src/ui/main_menu_shell/layout.rs
-@@ -57,11 +57,26 @@ pub struct MainMenuShellLayout {
-     pub tooltip_line: RectPx,
-     /// Static `0x71C` window rect (the animated SDWRNANM monitor).
-     pub warning_monitor: RectPx,
--    pub buttons: [MainMenuButtonRect; 6],
-+    pub buttons: Vec<MainMenuButtonRect>,
-     pub right_panel: RightPanelRects,
+@@ -63,6 +63,22 @@ pub struct MainMenuShellLayout {
      pub lower_strip: RectPx,
  }
  
@@ -1910,7 +2405,8 @@ index 86d22b7..6f4f89b 100644
 +    /// buttons into the original rows. Exit keeps its bottom anchor.
 +    pub fn with_profile(mut self, profile: super::MainMenuProfile) -> Self {
 +        let rows: Vec<_> = self.buttons.iter().map(|button| button.rect).collect();
-+        self.buttons.retain(|button| profile.allows_control(button.id));
++        self.buttons
++            .retain(|button| profile.allows_control(button.id));
 +        for (row, button) in self.buttons.iter_mut().enumerate() {
 +            if button.id != MainMenuControlId::ExitGame0x3ee {
 +                button.rect = rows[row];
@@ -1923,17 +2419,8 @@ index 86d22b7..6f4f89b 100644
  fn movie_origin(screen_w: i32, screen_h: i32) -> (i32, i32) {
      let x = if screen_w <= SHELL_BASE_W {
          0
-@@ -245,7 +260,7 @@ pub fn compute_layout(screen_w: u32, screen_h: u32) -> MainMenuShellLayout {
-         version_line,
-         tooltip_line,
-         warning_monitor: rect_for(&laid, WARNING_MONITOR_CONTROL),
--        buttons: [
-+        buttons: vec![
-             MainMenuButtonRect {
-                 id: MainMenuControlId::SinglePlayer0x683,
-                 rect: rect_for(&laid, 0x0683),
 diff --git a/src/ui/main_menu_shell/mod.rs b/src/ui/main_menu_shell/mod.rs
-index ea110b9..1841b01 100644
+index ea110b9f2..1841b0186 100644
 --- a/src/ui/main_menu_shell/mod.rs
 +++ b/src/ui/main_menu_shell/mod.rs
 @@ -10,7 +10,7 @@ pub use layout::{
@@ -1946,7 +2433,7 @@ index ea110b9..1841b01 100644
      return_code_for_action, tooltip_csf_key_for_control,
  };
 diff --git a/src/ui/main_menu_shell/state.rs b/src/ui/main_menu_shell/state.rs
-index 4c13e5e..22c227f 100644
+index 4c13e5eb9..22c227fb1 100644
 --- a/src/ui/main_menu_shell/state.rs
 +++ b/src/ui/main_menu_shell/state.rs
 @@ -68,6 +68,33 @@ pub struct MainMenuShellState {
@@ -2044,7 +2531,7 @@ index 4c13e5e..22c227f 100644
 +    }
 +}
 diff --git a/src/ui/shell/in_game_shell.rs b/src/ui/shell/in_game_shell.rs
-index a8f5cd0..c958955 100644
+index f09d81568..087d12210 100644
 --- a/src/ui/shell/in_game_shell.rs
 +++ b/src/ui/shell/in_game_shell.rs
 @@ -7,6 +7,72 @@
@@ -2144,10 +2631,10 @@ index a8f5cd0..c958955 100644
          // 0x0072FCC2..0x0072FE33: all column rectangles use CREDITS width.
          let column_x = width - sizes.credits[0];
 diff --git a/src/ui/shell/modal.rs b/src/ui/shell/modal.rs
-index bad22e9..a0afe47 100644
+index 9a8eaf78c..0921f2f4d 100644
 --- a/src/ui/shell/modal.rs
 +++ b/src/ui/shell/modal.rs
-@@ -360,6 +360,22 @@ pub fn message_box_layout_on(
+@@ -305,6 +305,22 @@ pub fn message_box_layout_on(
      }
  }
  
@@ -2167,10 +2654,10 @@ index bad22e9..a0afe47 100644
 +    }
 +}
 +
- pub fn body_ok_layout(screen_w: i32, screen_h: i32) -> BodyOkLayout {
-     let layout = message_box_layout(ModalKind::BodyOk, screen_w, screen_h);
-     BodyOkLayout {
-@@ -1243,4 +1259,22 @@ mod tests {
+ /// The box in the coordinates [`message_box_layout_on`] maps it from.
+ pub fn message_box_base(
+     kind: ModalKind,
+@@ -1438,4 +1454,22 @@ mod tests {
          }
          assert_eq!(checked, 27);
      }
@@ -2194,7 +2681,7 @@ index bad22e9..a0afe47 100644
 +    }
  }
 diff --git a/src/ui/shell/saved_file_input.rs b/src/ui/shell/saved_file_input.rs
-index 9f71af5..d2027ec 100644
+index 53de24fb2..5bab6d383 100644
 --- a/src/ui/shell/saved_file_input.rs
 +++ b/src/ui/shell/saved_file_input.rs
 @@ -97,7 +97,7 @@ fn hit<I>(
@@ -2206,7 +2693,7 @@ index 9f71af5..d2027ec 100644
      } else {
          SeedListGeometry::new(
              layout.list,
-@@ -340,7 +340,7 @@ mod tests {
+@@ -341,7 +341,7 @@ mod tests {
              affirmative: "OK".into(),
              negative: None,
          };
@@ -2215,7 +2702,7 @@ index 9f71af5..d2027ec 100644
          browser.prompt = Some(prompt);
          let limits = (Duration::from_millis(500), 4, 4);
          let on_ok = (ok.x + 2, ok.y + 2);
-@@ -480,4 +480,60 @@ mod tests {
+@@ -481,4 +481,60 @@ mod tests {
          );
          assert_eq!(browser.top_index, 2);
      }
@@ -2277,130 +2764,43 @@ index 9f71af5..d2027ec 100644
 +    }
  }
 diff --git a/src/ui/skirmish_shell/layout.rs b/src/ui/skirmish_shell/layout.rs
-index 87d8207..0baed68 100644
+index 288d298eb..22d4c9ce5 100644
 --- a/src/ui/skirmish_shell/layout.rs
 +++ b/src/ui/skirmish_shell/layout.rs
-@@ -212,8 +212,6 @@ pub struct SkirmishShellLayout {
-     pub choose_map_button: RectPx,
-     /// VERA's Save Setup and Load Setup, on the two empty tiles under Choose
-     /// Map; gamemd's `0x102` has no such buttons.
--    pub save_setup_button: RectPx,
--    pub load_setup_button: RectPx,
-     pub back_button: RectPx,
-     pub map_preview: RectPx,
-     pub column_labels: SkirmishColumnLabelRects,
-@@ -387,8 +385,6 @@ pub fn translate_layout(mut layout: SkirmishShellLayout, dx: i32, dy: i32) -> Sk
-     layout.right_panel_text.map_label = layout.right_panel_text.map_label.translate(dx, dy);
-     layout.start_button = layout.start_button.translate(dx, dy);
-     layout.choose_map_button = layout.choose_map_button.translate(dx, dy);
--    layout.save_setup_button = layout.save_setup_button.translate(dx, dy);
--    layout.load_setup_button = layout.load_setup_button.translate(dx, dy);
-     layout.back_button = layout.back_button.translate(dx, dy);
-     layout.map_preview = layout.map_preview.translate(dx, dy);
-     layout.column_labels.players = layout.column_labels.players.translate(dx, dy);
-@@ -680,9 +676,6 @@ pub fn compute_layout(screen_w: u32, screen_h: u32) -> SkirmishShellLayout {
-             screen_w, screen_h, start_base, panel, SDBTNANM_W,
-         ),
-         choose_map_button,
--        // Every panel keeps them above Back: it has six tiles at 640x480.
--        save_setup_button: choose_map_button.translate(0, SDBTNBKGD_H),
--        load_setup_button: choose_map_button.translate(0, 2 * SDBTNBKGD_H),
-         back_button: back_rect(screen_w, panel),
-         map_preview: right_static(
-             AnchorRule::RightAnchor,
-@@ -1195,8 +1188,6 @@ impl ScaledRects for SkirmishShellLayout {
-             right_panel_text: self.right_panel_text.scaled_rects(scale),
-             start_button: self.start_button.scaled_rects(scale),
-             choose_map_button: self.choose_map_button.scaled_rects(scale),
--            save_setup_button: self.save_setup_button.scaled_rects(scale),
--            load_setup_button: self.load_setup_button.scaled_rects(scale),
-             back_button: self.back_button.scaled_rects(scale),
-             map_preview: self.map_preview.scaled_rects(scale),
-             column_labels: self.column_labels.scaled_rects(scale),
-@@ -1422,9 +1413,6 @@ mod tests {
-         let layout = compute_layout(640, 480);
-         assert_eq!(layout.start_button, RectPx::new(484, 241, 156, 42));
-         assert_eq!(layout.choose_map_button, RectPx::new(484, 283, 156, 42));
--        // VERA's Save Setup and Load Setup fill the two tiles above Back.
--        assert_eq!(layout.save_setup_button, RectPx::new(484, 325, 156, 42));
--        assert_eq!(layout.load_setup_button, RectPx::new(484, 367, 156, 42));
-         assert_eq!(layout.map_preview, RectPx::new(484, 37, 144, 112));
-         assert_eq!(layout.back_button, RectPx::new(484, 409, 156, 42));
-     }
-diff --git a/src/ui/skirmish_shell/state.rs b/src/ui/skirmish_shell/state.rs
-index a03b768..dc99c1f 100644
---- a/src/ui/skirmish_shell/state.rs
-+++ b/src/ui/skirmish_shell/state.rs
-@@ -81,9 +81,6 @@ use super::layout::{ChooseMapModalButton, ColorComboId, SkirmishCheckboxId, Skir
- pub enum OwnerDrawButton {
-     StartGame0x617,
-     ChooseMap0x5aa,
--    /// VERA's Save Setup and Load Setup ([`SkirmishSavedSetup`]).
--    SaveSetup,
--    LoadSetup,
-     Back0x5c0,
+@@ -516,6 +516,16 @@ fn centered_fixed_shell_offset(screen_w: u32, screen_h: u32) -> (i32, i32) {
+     )
  }
  
-@@ -93,8 +90,6 @@ pub enum SkirmishShellAction {
-     StartGame,
-     BackOrExit,
-     ChooseMap,
--    SaveSetup,
--    LoadSetup,
-     SelectColor(ColorComboId),
-     SelectMap(usize),
- }
-diff --git a/src/ui/skirmish_shell/state/hit_test.rs b/src/ui/skirmish_shell/state/hit_test.rs
-index 836302c..04b4b89 100644
---- a/src/ui/skirmish_shell/state/hit_test.rs
-+++ b/src/ui/skirmish_shell/state/hit_test.rs
-@@ -157,12 +157,6 @@ pub fn status_help_key_for_hover(target: SkirmishHoverTarget) -> Option<&'static
-         SkirmishHoverTarget::OwnerDrawButton(OwnerDrawButton::ChooseMap0x5aa) => {
-             Some("STT:SkirmishButtonChooseMap")
-         }
--        SkirmishHoverTarget::OwnerDrawButton(OwnerDrawButton::SaveSetup) => {
--            Some("VERA:SaveSetupHelp")
--        }
--        SkirmishHoverTarget::OwnerDrawButton(OwnerDrawButton::LoadSetup) => {
--            Some("VERA:LoadSetupHelp")
--        }
-         SkirmishHoverTarget::OwnerDrawButton(OwnerDrawButton::Back0x5c0) => {
-             Some("STT:SkirmishButtonBack")
-         }
-@@ -349,8 +343,6 @@ pub fn action_for_owner_draw_button(button: OwnerDrawButton) -> SkirmishShellAct
-     match button {
-         OwnerDrawButton::StartGame0x617 => SkirmishShellAction::StartGame,
-         OwnerDrawButton::ChooseMap0x5aa => SkirmishShellAction::ChooseMap,
--        OwnerDrawButton::SaveSetup => SkirmishShellAction::SaveSetup,
--        OwnerDrawButton::LoadSetup => SkirmishShellAction::LoadSetup,
-         OwnerDrawButton::Back0x5c0 => SkirmishShellAction::BackOrExit,
-     }
- }
-@@ -366,12 +358,6 @@ pub fn hit_test_owner_draw_button(
-     if layout.choose_map_button.contains(x, y) {
-         return Some(OwnerDrawButton::ChooseMap0x5aa);
-     }
--    if layout.save_setup_button.contains(x, y) {
--        return Some(OwnerDrawButton::SaveSetup);
--    }
--    if layout.load_setup_button.contains(x, y) {
--        return Some(OwnerDrawButton::LoadSetup);
--    }
-     if layout.back_button.contains(x, y) {
-         return Some(OwnerDrawButton::Back0x5c0);
-     }
-@@ -412,9 +398,6 @@ pub fn apply_action(
-         SkirmishShellAction::StartGame => SkirmishShellAction::StartGame,
-         SkirmishShellAction::BackOrExit => SkirmishShellAction::BackOrExit,
-         SkirmishShellAction::ChooseMap => SkirmishShellAction::ChooseMap,
--        // The app owns the saved setups.
--        SkirmishShellAction::SaveSetup => SkirmishShellAction::SaveSetup,
--        SkirmishShellAction::LoadSetup => SkirmishShellAction::LoadSetup,
-         SkirmishShellAction::SelectMap(idx) => {
-             accept_selected_map(state, maps, idx);
-             SkirmishShellAction::None
++impl SkirmishShellLayout {
++    /// Toy retains setup persistence, but exposes no Save/Load Setup controls.
++    /// Filter shared geometry so hidden tiles cannot capture pointer input.
++    pub fn without_setup_entries(mut self) -> Self {
++        self.save_setup_button = RectPx::new(0, 0, 0, 0);
++        self.load_setup_button = RectPx::new(0, 0, 0, 0);
++        self
++    }
++}
++
+ pub fn translate_layout(mut layout: SkirmishShellLayout, dx: i32, dy: i32) -> SkirmishShellLayout {
+     layout.screen = layout.screen.translate(dx, dy);
+     layout.right_panel = layout.right_panel.translate(dx, dy);
+diff --git a/src/ui/skirmish_shell/state.rs b/src/ui/skirmish_shell/state.rs
+index 343f13521..84ea4aa4d 100644
+--- a/src/ui/skirmish_shell/state.rs
++++ b/src/ui/skirmish_shell/state.rs
+@@ -60,8 +60,8 @@ pub use random_map_extras::{
+ };
+ pub use random_map_setup::{
+     ADVANCED_RANGE, AcceptOutcome, CUSTOM_PRESET_SLOTS, MainRngRanged, PLAYERS_RANGE,
+-    RandomMapPreset, RandomMapSetupModalState,
+-    SETUP_COMBO_ROWS, SetupCombo, SetupComboItem, setup_combo_items,
++    RandomMapPreset, RandomMapSetupModalState, SETUP_COMBO_ROWS, SetupCombo, SetupComboItem,
++    setup_combo_items,
+ };
+ pub use saved_seed_browser::{
+     SAVED_SEED_DESCRIPTION_MAX_UNITS, SavedSeedBrowserRow, SavedSeedBrowserState,
 diff --git a/src/ui/skirmish_shell/state/saved_seed_browser.rs b/src/ui/skirmish_shell/state/saved_seed_browser.rs
-index 6d68358..46035ca 100644
+index 173090cbe..231cb3f89 100644
 --- a/src/ui/skirmish_shell/state/saved_seed_browser.rs
 +++ b/src/ui/skirmish_shell/state/saved_seed_browser.rs
 @@ -43,28 +43,38 @@ pub struct SavedSeedPrompt<I = NativeFileName> {
@@ -2452,19 +2852,28 @@ index 6d68358..46035ca 100644
              Some(SavedSeedControl::Action)
          } else if no.is_some_and(|rect| rect.contains(x, y)) {
 diff --git a/src/ui/skirmish_shell/state/tests.rs b/src/ui/skirmish_shell/state/tests.rs
-index 147c8d0..7b51ec1 100644
+index 92f64f601..343b375ac 100644
 --- a/src/ui/skirmish_shell/state/tests.rs
 +++ b/src/ui/skirmish_shell/state/tests.rs
-@@ -2518,3 +2518,26 @@ fn saved_setup_keeps_computer_rows_scrolled_out_of_view() {
-     assert_eq!(loaded.opponents[28].row_type, SkirmishAiRowType::Hard);
+@@ -2606,6 +2606,54 @@ fn saved_setup_keeps_computer_rows_scrolled_out_of_view() {
      assert_eq!(SkirmishSavedSetup::capture(&loaded, &maps), saved);
  }
-+
+ 
 +/// Removing a caption alone leaves invisible clickable setup controls. The
-+/// local build removes their production mouse/hover/action identities too.
++/// Toy layout removes their production mouse/hover targets too.
 +#[test]
 +fn stripped_setup_tiles_are_inert_and_neighbor_buttons_keep_their_actions() {
-+    let layout = compute_layout(800, 600);
++    let original = compute_layout(800, 600);
++    let layout = original.clone().without_setup_entries();
++    assert_eq!(layout.team_starts_button, original.team_starts_button);
++    assert_eq!(
++        hit_test_owner_draw_button(
++            &original,
++            original.save_setup_button.x + 1,
++            original.save_setup_button.y + 1
++        ),
++        Some(OwnerDrawButton::SaveSetup),
++    );
 +    let shell = SkirmishShellState::default();
 +    for row in [1, 2] {
 +        let empty = layout.choose_map_button.translate(0, row * 42);
@@ -2474,16 +2883,35 @@ index 147c8d0..7b51ec1 100644
 +        assert_eq!(hovered_shell_control(&layout, &shell, &[], x, y), None);
 +    }
 +    for (rect, button, action) in [
-+        (layout.start_button, OwnerDrawButton::StartGame0x617, SkirmishShellAction::StartGame),
-+        (layout.choose_map_button, OwnerDrawButton::ChooseMap0x5aa, SkirmishShellAction::ChooseMap),
-+        (layout.back_button, OwnerDrawButton::Back0x5c0, SkirmishShellAction::BackOrExit),
++        (
++            layout.start_button,
++            OwnerDrawButton::StartGame0x617,
++            SkirmishShellAction::StartGame,
++        ),
++        (
++            layout.choose_map_button,
++            OwnerDrawButton::ChooseMap0x5aa,
++            SkirmishShellAction::ChooseMap,
++        ),
++        (
++            layout.back_button,
++            OwnerDrawButton::Back0x5c0,
++            SkirmishShellAction::BackOrExit,
++        ),
 +    ] {
-+        assert_eq!(hit_test_owner_draw_button(&layout, rect.x + 1, rect.y + 1), Some(button));
++        assert_eq!(
++            hit_test_owner_draw_button(&layout, rect.x + 1, rect.y + 1),
++            Some(button)
++        );
 +        assert_eq!(action_for_owner_draw_button(button), action);
 +    }
 +}
++
+ #[test]
+ fn a_scrolling_start_list_keeps_the_face_width_for_its_captions() {
+     // Ten starts give the Start list eleven rows, two past its nine, so it
 diff --git a/src/util/file_system.rs b/src/util/file_system.rs
-index ac07c78..af31e1e 100644
+index ac07c78b4..af31e1ead 100644
 --- a/src/util/file_system.rs
 +++ b/src/util/file_system.rs
 @@ -102,6 +102,16 @@ mod memory {
@@ -2534,19 +2962,19 @@ index ac07c78..af31e1e 100644
  
      #[test]
 diff --git a/src/web.rs b/src/web.rs
-index 5375a0c..29c78df 100644
+index b6282d258..d8ac81568 100644
 --- a/src/web.rs
 +++ b/src/web.rs
-@@ -1,7 +1,7 @@
- //! Browser host boundary. App remains the owner of the frontend and match lifecycle.
- pub(crate) mod ime;
+@@ -3,7 +3,7 @@ pub(crate) mod ime;
+ #[cfg(feature = "wasm-threads")]
+ pub(crate) mod sim_worker;
  
 -use std::cell::RefCell;
 +use std::cell::{Cell, RefCell};
  use wasm_bindgen::prelude::*;
  
  // The host awaits `initThreadPool(workers)` after `init()`, before any
-@@ -10,6 +10,7 @@ use wasm_bindgen::prelude::*;
+@@ -12,6 +12,7 @@ use wasm_bindgen::prelude::*;
  pub use wasm_bindgen_rayon::init_thread_pool;
  
  thread_local! {
@@ -2554,7 +2982,7 @@ index 5375a0c..29c78df 100644
      static CANVAS: RefCell<Option<web_sys::HtmlCanvasElement>> = const { RefCell::new(None) };
      static STATUS: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
      static WRITE: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
-@@ -25,6 +26,21 @@ thread_local! {
+@@ -27,6 +28,23 @@ thread_local! {
      static SFX: RefCell<Option<crate::audio::sfx::SfxPlayer>> = const { RefCell::new(None) };
  }
  
@@ -2563,7 +2991,9 @@ index 5375a0c..29c78df 100644
 +#[wasm_bindgen]
 +pub fn configure_toy_menu(single_player: bool) -> Result<(), JsValue> {
 +    if started() {
-+        return Err(JsValue::from_str("Configure the Toy menu before starting the engine"));
++        return Err(JsValue::from_str(
++            "Configure the Toy menu before starting the engine",
++        ));
 +    }
 +    TOY_SINGLE_PLAYER_MENU.with(|slot| slot.set(single_player));
 +    Ok(())
@@ -2576,10 +3006,26 @@ index 5375a0c..29c78df 100644
  pub(crate) fn canvas() -> web_sys::HtmlCanvasElement {
      CANVAS.with(|slot| {
          slot.borrow()
-@@ -34,6 +50,17 @@ pub(crate) fn canvas() -> web_sys::HtmlCanvasElement {
+@@ -36,6 +54,33 @@ pub(crate) fn canvas() -> web_sys::HtmlCanvasElement {
      })
  }
  
++/// Observe the document, not winit's canvas-only fullscreen bookkeeping.
++pub(crate) fn fullscreen_active() -> bool {
++    web_sys::window()
++        .and_then(|window| window.document())
++        .and_then(|document| document.fullscreen_element())
++        .is_some()
++}
++
++/// The menu uses a desired state; the existing host callback retains ownership
++/// of asynchronous requests, permission failures, keyboard lock and progress UI.
++pub(crate) fn set_fullscreen(active: bool) {
++    if fullscreen_active() != active {
++        toggle_fullscreen();
++    }
++}
++
 +/// The host performs the asynchronous Fullscreen API request in this key gesture.
 +pub(crate) fn toggle_fullscreen() {
 +    use wasm_bindgen::JsCast;
@@ -2594,7 +3040,7 @@ index 5375a0c..29c78df 100644
  pub(crate) fn status(message: &str) {
      let callback = STATUS.with(|slot| slot.borrow().clone());
      if let Some(callback) = callback {
-@@ -95,6 +122,7 @@ pub(crate) fn spawn_finished(report: &str) {
+@@ -97,6 +142,7 @@ pub(crate) fn spawn_finished(report: &str) {
  }
  
  pub(crate) fn engine_exited() {
@@ -2602,18 +3048,20 @@ index 5375a0c..29c78df 100644
      crate::audio::web_output::pause();
      remove_spawn_files();
      ime::remove();
-@@ -120,7 +148,9 @@ fn request_spawn_action(action: crate::app::SpawnAction) -> Result<(), JsValue>
+@@ -122,7 +168,11 @@ fn request_spawn_action(action: crate::app::SpawnAction) -> Result<(), JsValue>
  }
  
  /// Run the event loop's next pass now, even while it waits.
 -fn wake() {
-+pub(crate) fn started() -> bool { LIFECYCLE.with(|slot| slot.borrow().started()) }
++pub(crate) fn started() -> bool {
++    LIFECYCLE.with(|slot| slot.borrow().started())
++}
 +
 +pub(crate) fn wake() {
      WAKE.with(|slot| {
          if let Some(proxy) = slot.borrow().as_ref() {
              let _ = proxy.send_event(());
-@@ -166,7 +196,7 @@ pub fn initialize() {
+@@ -181,7 +231,7 @@ pub fn initialize() {
      crate::util::file_system::set_persistence_callbacks(
          |path, bytes, modified_ms| {
              WRITE.with(|slot| {
@@ -2622,7 +3070,7 @@ index 5375a0c..29c78df 100644
                      return;
                  }
                  if let Some(callback) = slot.borrow().as_ref() {
-@@ -183,7 +213,7 @@ pub fn initialize() {
+@@ -198,7 +248,7 @@ pub fn initialize() {
          },
          |path| {
              REMOVE.with(|slot| {
@@ -2631,7 +3079,7 @@ index 5375a0c..29c78df 100644
                      return;
                  }
                  if let Some(callback) = slot.borrow().as_ref() {
-@@ -194,6 +224,10 @@ pub fn initialize() {
+@@ -209,6 +259,10 @@ pub fn initialize() {
      );
  }
  
@@ -2642,16 +3090,21 @@ index 5375a0c..29c78df 100644
  fn relative_path(name: &str) -> Result<(), JsValue> {
      if name.is_empty()
          || name.starts_with('/')
-@@ -280,7 +314,7 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
+@@ -295,7 +349,12 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
  }
  
  #[wasm_bindgen]
 -pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result<(), JsValue> {
-+pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64, deleted: bool) -> Result<(), JsValue> {
++pub fn restore_user_file(
++    path: &str,
++    bytes: Vec<u8>,
++    modified_ms: f64,
++    deleted: bool,
++) -> Result<(), JsValue> {
      if !LIFECYCLE.with(|slot| slot.borrow().idle()) {
          return Err(JsValue::from_str(
              "Restore user data before starting or after the engine exited",
-@@ -291,14 +325,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
+@@ -306,14 +365,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
      if path.starts_with("/replays/") {
          return Ok(());
      }
@@ -2673,21 +3126,19 @@ index 5375a0c..29c78df 100644
      Ok(())
  }
  
-@@ -337,9 +375,10 @@ pub fn start_game(
-     run(
+@@ -363,7 +426,10 @@ pub fn start_game(
          canvas,
          on_status,
--        crate::app::App::new(
+         crate::app::App::new(
 -            crate::app::frontend::startup_options::RetailStartupOptions::default(),
--        ),
-+        crate::app::App::new(crate::app::frontend::startup_options::RetailStartupOptions {
-+            campaign_speed_control: true,
-+            ..Default::default()
-+        }),
++            crate::app::frontend::startup_options::RetailStartupOptions {
++                campaign_speed_control: true,
++                ..Default::default()
++            },
+         ),
          false,
      )
- }
-@@ -415,10 +454,12 @@ pub fn probe(map_name: Option<String>) -> Result<String, JsValue> {
+@@ -443,10 +509,12 @@ pub fn probe(map_name: Option<String>) -> Result<String, JsValue> {
  }
  
  fn install_config() {
@@ -2704,3 +3155,13 @@ index 5375a0c..29c78df 100644
  }
  
  fn run(
+@@ -473,7 +541,8 @@ fn run(
+     WAKE.with(|slot| *slot.borrow_mut() = Some(event_loop.create_proxy()));
+     CANVAS.with(|slot| *slot.borrow_mut() = Some(canvas));
+     STATUS.with(|slot| *slot.borrow_mut() = Some(on_status));
+-    status(&crate::i18n::tr("VERA:StartingEngine"));
++    // This integration treats status tokens as a host protocol; the launcher localizes its UI.
++    status("Starting engine");
+     event_loop.spawn_app(app);
+     Ok(())
+ }

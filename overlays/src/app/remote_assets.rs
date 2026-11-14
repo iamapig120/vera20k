@@ -313,19 +313,41 @@ fn archive_request(
     name: &str,
     after: Box<dyn FnOnce(&mut AppState, bool)>,
 ) {
+    archive_request_with_policy(state, kind, name, false, after);
+}
+
+// Saved loads keep the current world and its browser on resource failure.
+fn initial_library_error(state: &mut AppState, error: String, preserve_page: bool) {
+    if preserve_page {
+        log::warn!("Saved-game resources: {error}");
+    } else {
+        incompatible(state, error);
+    }
+}
+
+fn archive_request_with_policy(
+    state: &mut AppState,
+    kind: &str,
+    name: &str,
+    preserve_page: bool,
+    after: Box<dyn FnOnce(&mut AppState, bool)>,
+) {
     let Some(root) = state
         .platform
         .game_config
         .as_ref()
         .map(|c| c.paths.ra2_dir.clone())
     else {
+        after(state, false);
         return;
     };
     let Some(path) = crate::util::case_insensitive_path::find(&root, name) else {
-        incompatible(
+        initial_library_error(
             state,
             format!("Missing bootstrap archive placeholder: {name}"),
+            preserve_page,
         );
+        after(state, false);
         return;
     };
     let previous = crate::util::file_system::read_shared(&path).ok();
@@ -340,7 +362,8 @@ fn archive_request(
                 crate::util::file_system::import_shared_file(path, bytes);
                 if audio {
                     if let Err(error) = state.process_assets.complete_initial_library(&root, true) {
-                        incompatible(state, error);
+                        initial_library_error(state, error, preserve_page);
+                        after(state, false);
                         return;
                     }
                     crate::assets::deferred_assets::mark_audio_ready();
@@ -459,13 +482,49 @@ pub(super) fn initial_library<T: 'static>(
     input: T,
     resume: impl FnOnce(&mut AppState, T, bool) + 'static,
 ) -> Option<T> {
+    initial_library_with_policy(state, input, false, resume)
+}
+
+pub(super) fn initial_library_for_saved_load<T: 'static>(
+    state: &mut AppState,
+    input: T,
+    resume: impl FnOnce(&mut AppState, T, bool) + 'static,
+) -> Option<T> {
+    if saved_load_library_ready(state) {
+        return Some(input);
+    }
+    initial_library_with_policy(state, input, true, resume)
+}
+
+/// Synchronous diagnostic callers cannot wait for host I/O. Production UI
+/// enters request_saved_game_load, which owns the asynchronous wait instead.
+pub(super) fn saved_load_library_ready(state: &AppState) -> bool {
+    HOST.with(|host| {
+        let host = host.borrow();
+        host.handler.is_none()
+            || (host.graphics_ready
+                && !state.process_assets.has_deferred_audio()
+                && !host
+                    .catalog
+                    .keys()
+                    .any(|key| key.starts_with("archive:") && !host.installed.contains(key)))
+    })
+}
+
+fn initial_library_with_policy<T: 'static>(
+    state: &mut AppState,
+    input: T,
+    preserve_page: bool,
+    resume: impl FnOnce(&mut AppState, T, bool) + 'static,
+) -> Option<T> {
     if state.process_assets.has_deferred_audio()
         && let Some(bank) = crate::assets::deferred_assets::bank_metadata()
     {
-        archive_request(
+        archive_request_with_policy(
             state,
             "audio",
             &bank.archive_name,
+            preserve_page,
             Box::new(move |state, ready| {
                 resume(state, input, ready);
             }),
@@ -482,10 +541,11 @@ pub(super) fn initial_library<T: 'static>(
     });
     if let Some(next) = next {
         let (_, name) = next.split_once(':').unwrap();
-        archive_request(
+        archive_request_with_policy(
             state,
             "archive",
             name,
+            preserve_page,
             Box::new(move |state, ready| {
                 resume(state, input, ready);
             }),
@@ -500,7 +560,8 @@ pub(super) fn initial_library<T: 'static>(
             .map(|c| c.paths.ra2_dir.clone())
         {
             if let Err(error) = state.process_assets.complete_initial_library(&root, false) {
-                incompatible(state, error);
+                initial_library_error(state, error, preserve_page);
+                resume(state, input, false);
                 return None;
             }
             HOST.with(|h| h.borrow_mut().graphics_ready = true);

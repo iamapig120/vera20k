@@ -83,3 +83,32 @@ test('corrupt cached bytes are refetched; integrity errors and cancellation neve
   const controller = new AbortController(); controller.abort();
   await assert.rejects(loadRemoteProfile(remote, 'skirmish', {signal: controller.signal, fetchImpl: async () => {assert.fail('cancelled request reached network');}}), {name: 'AbortError'});
 });
+
+
+test('bootstrap aggregate progresses across files and verified cache, not runtime catalog', async () => {
+ const remote=await readRemoteManifest('https://cdn.example/resources.json',{fetchImpl:async()=>new Response(JSON.stringify(manifest()))});
+ const events=[]; const rows=remote.profiles.get('skirmish');
+ const total=rows.reduce((n,r)=>n+r.size,0);
+ const entries=await loadRemoteProfile(remote,'skirmish',{fetchImpl:async url=>new Response(bytes(url.split('/').at(-1))),onProgress:e=>events.push(e)});
+ assert.equal(events[0].overall.loaded,0);
+ assert(events.every(e=>e.overall.total===total&&e.overall.count===3));
+ assert(events.slice(1).every((e,i)=>e.overall.loaded>=events[i].overall.loaded));
+ assert.equal(events.filter(e=>e.overall.complete).length,1);
+ assert.deepEqual(events.at(-1).overall,{loaded:total,total,completed:3,count:3,complete:true});
+ const warm=[];
+ await loadRemoteProfile(remote,'skirmish',{cached:entries,fetchImpl:()=>{throw Error('cache requested network');},onProgress:e=>warm.push(e)});
+ assert.equal(warm.length,4);assert.equal(warm.at(-1).overall.complete,true);
+});
+
+test('failed integrity and canceled downloads cannot complete aggregate; retry starts clean', async () => {
+ const remote=await readRemoteManifest('https://cdn.example/resources.json',{fetchImpl:async()=>new Response(JSON.stringify(manifest()))});
+ const failed=[];
+ await assert.rejects(loadRemoteProfile(remote,'skirmish',{fetchImpl:async url=>new Response(Buffer.alloc(bytes(url.split('/').at(-1)).length)),onProgress:e=>failed.push(e)}));
+ assert(failed.length>1);assert(failed.every(e=>!e.overall.complete));
+ const controller=new AbortController(),canceled=[];
+ await assert.rejects(loadRemoteProfile(remote,'skirmish',{signal:controller.signal,fetchImpl:async url=>new Response(bytes(url.split('/').at(-1))),onProgress:e=>{canceled.push(e);if(e.overall.completed===1)controller.abort();}}));
+ assert(canceled.every(e=>!e.overall.complete));
+ const retry=[];
+ await loadRemoteProfile(remote,'skirmish',{fetchImpl:async url=>new Response(bytes(url.split('/').at(-1))),onProgress:e=>retry.push(e)});
+ assert.equal(retry[0].overall.loaded,0);assert.equal(retry.at(-1).overall.complete,true);
+});
