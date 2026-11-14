@@ -1398,16 +1398,19 @@ index 78bbb4f5d..6cae382df 100644
      /// YRO archives, and its PKT titles resolve through the process CSF. Both
      /// fields live on this owner, so the pair is borrowed together.
 diff --git a/src/app/radar_movie.rs b/src/app/radar_movie.rs
-index db76e3800..c3142a2e4 100644
+index db76e3800..4d7445a0d 100644
 --- a/src/app/radar_movie.rs
 +++ b/src/app/radar_movie.rs
-@@ -180,12 +180,41 @@ pub(crate) fn enqueue(state: &mut AppState, index: i32, pause_simulation: bool)
+@@ -180,12 +180,44 @@ pub(crate) fn enqueue(state: &mut AppState, index: i32, pause_simulation: bool)
  /// Returns whether the clip was admitted. `false` means it is missing or
  /// undecodable; the caller decides what to do with the failed request.
  pub(crate) fn enqueue_file(state: &mut AppState, stem: &str, pause_simulation: bool) -> bool {
 +    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
 +    {
 +        let file = format!("{stem}.BIK");
++        if let Some(bytes) = super::remote_assets::movie_bytes(&file) {
++            return enqueue_file_bytes(state, stem, pause_simulation, Some(bytes));
++        }
 +        if super::remote_assets::movie_missing(state, &file) {
 +            let stem = stem.to_owned();
 +            super::remote_assets::movie(
@@ -1449,15 +1452,19 @@ index db76e3800..c3142a2e4 100644
          return false;
      };
 diff --git a/src/app/shell_campaign.rs b/src/app/shell_campaign.rs
-index 71900800f..b71ee7f40 100644
+index 71900800f..3aceaed19 100644
 --- a/src/app/shell_campaign.rs
 +++ b/src/app/shell_campaign.rs
-@@ -282,6 +282,10 @@ impl App {
+@@ -282,6 +282,14 @@ impl App {
          state: &mut AppState,
          request: crate::app::loading::pump::LoadingRequest,
      ) {
 +        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
 +        let Some(request) = super::remote_assets::map(state, request, true) else {
++            return;
++        };
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        let Some(request) = super::remote_assets::campaign_media(state, request) else {
 +            return;
 +        };
          let movie = (|| -> anyhow::Result<Option<String>> {
@@ -1479,10 +1486,10 @@ index 656aab654..634be19ab 100644
              MainMenuShellAction::None => {}
              // The original pops a confirm message box here; it does NOT quit on
 diff --git a/src/app/shell_movies_credits.rs b/src/app/shell_movies_credits.rs
-index 882eb965e..18678b915 100644
+index 882eb965e..fefd3b8c0 100644
 --- a/src/app/shell_movies_credits.rs
 +++ b/src/app/shell_movies_credits.rs
-@@ -241,6 +241,35 @@ impl App {
+@@ -241,6 +241,39 @@ impl App {
  
      /// Play_Movie `0x005BED40` from the shell.
      pub(super) fn start_fullscreen_movie(state: &mut AppState, name: &str, return_to: MovieReturn) {
@@ -1495,6 +1502,10 @@ index 882eb965e..18678b915 100644
 +                    .sim_runtime
 +                    .runtime()
 +                    .is_some_and(|r| r.simulation.session().game_mode_nonzero());
++            if !native_skips && let Some(bytes) = super::remote_assets::movie_bytes(&file) {
++                Self::start_fullscreen_movie_bytes(state, name, return_to, Some(bytes));
++                return;
++            }
 +            if !native_skips && super::remote_assets::movie_missing(state, &file) {
 +                let name = name.to_owned();
 +                super::remote_assets::movie(
@@ -1518,7 +1529,7 @@ index 882eb965e..18678b915 100644
          let running_scenario = matches!(&return_to, MovieReturn::RunningScenario);
          // The calling dialog is destroyed before the movie state runs.
          Self::destroy_current_shell_dialog(state);
-@@ -270,6 +299,8 @@ impl App {
+@@ -270,6 +303,8 @@ impl App {
                  .get_with_source_ref(&file_name)
                  .map(|(bytes, source)| (Arc::<[u8]>::from(bytes), source.to_string()))
          });
@@ -1527,7 +1538,7 @@ index 882eb965e..18678b915 100644
          let Some((bytes, source)) = resolved else {
              // No .BIK (and no VQA decoder is needed: retail YR ships none):
              // Play_Movie returns with no visible or audible change.
-@@ -385,7 +416,7 @@ impl App {
+@@ -385,7 +420,7 @@ impl App {
          }
      }
  
@@ -1536,7 +1547,7 @@ index 882eb965e..18678b915 100644
          match return_to {
              // The frame loop presents the splash, then starts the pending
              // intro, then paints the shell (`App::render_frame`).
-@@ -416,19 +447,24 @@ impl App {
+@@ -416,19 +451,24 @@ impl App {
          }
      }
  
@@ -1568,7 +1579,7 @@ index 882eb965e..18678b915 100644
          {
              movie.abort();
              state.platform.window.request_redraw();
-@@ -528,3 +564,88 @@ impl App {
+@@ -528,3 +568,88 @@ impl App {
          }
      }
  }

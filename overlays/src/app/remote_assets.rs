@@ -4,7 +4,7 @@ use js_sys::Function;
 use serde::Deserialize;
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
@@ -36,6 +36,8 @@ struct Host {
     next: u32,
     installed: HashSet<String>,
     graphics_ready: bool,
+    // Verified compressed BIK bytes for only the current campaign mission.
+    campaign_movies: HashMap<String, Arc<[u8]>>,
 }
 thread_local! { static HOST: RefCell<Host> = RefCell::new(Host::default()); }
 
@@ -136,6 +138,7 @@ pub fn configure_remote_assets(catalog: &str, handler: Function) -> Result<(), J
         host.handler = Some(handler);
         host.graphics_ready = !host.catalog.keys().any(|key| key.starts_with("archive:"));
         host.installed.clear();
+        host.campaign_movies.clear();
     });
     Ok(())
 }
@@ -276,6 +279,7 @@ pub(crate) fn clear() {
     let handler = HOST.with(|host| {
         let mut h = host.borrow_mut();
         h.queue.clear();
+        h.campaign_movies.clear();
         h.handler.clone()
     });
     if let Some(handler) = handler {
@@ -633,6 +637,7 @@ pub(super) fn movie_missing(state: &AppState, name: &str) -> bool {
     state.match_state.live_network.is_none()
         && !state.match_state.match_diagnostics.is_replay_playback()
         && declared("movie", name)
+        && movie_bytes(name).is_none()
         && !state
             .process_assets
             .manager()
@@ -640,4 +645,157 @@ pub(super) fn movie_missing(state: &AppState, name: &str) -> bool {
 }
 pub(super) fn movie(name: &str, continuation: Continuation) {
     begin("movie", name, continuation);
+}
+
+/// A mission-scoped byte cache removes browser/worker round trips at the trigger.
+/// Bink decoding and native action 117's intentional simulation pause stay intact.
+pub(super) fn movie_bytes(name: &str) -> Option<Arc<[u8]>> {
+    HOST.with(|host| {
+        host.borrow()
+            .campaign_movies
+            .get(&name.to_uppercase())
+            .cloned()
+    })
+}
+
+const CAMPAIGN_MOVIE_BUDGET: usize = 64 * 1024 * 1024;
+
+// BEGIN CAMPAIGN MEDIA SELECTION
+fn campaign_media_indices(
+    intro: i32,
+    brief: i32,
+    basic: impl IntoIterator<Item = i32>,
+    actions: impl IntoIterator<Item = (i32, Option<i32>)>,
+) -> BTreeSet<i32> {
+    // Start_Scenario683AB0 prefers Intro, even when its bytes are unavailable.
+    std::iter::once(if intro == -1 { brief } else { intro })
+        .chain(basic)
+        // Execute6DD8B0: 10 is full-screen; 100/117 are radar movies.
+        .chain(actions.into_iter().filter_map(|(kind, value)| {
+            matches!(kind, 10 | 100 | 117).then_some(value.unwrap_or(0))
+        }))
+        .filter(|index| *index >= 0)
+        .collect()
+}
+// END CAMPAIGN MEDIA SELECTION
+
+/// Called after initial archives/map admission and before Intro/ReadScenario.
+/// Each ticket uses the existing SHA-256/Bink admission and Retry/Cancel UI.
+/// Do not insert these leaves into the native MIX search order or unlock movies.
+pub(super) fn campaign_media(
+    state: &mut AppState,
+    request: super::loading::pump::LoadingRequest,
+) -> Option<super::loading::pump::LoadingRequest> {
+    if !request.remote_allowed() {
+        return Some(request);
+    }
+    let plan = (|| -> anyhow::Result<BTreeSet<String>> {
+        let (Some(assets), Some(rules), Some(config)) = (
+            state.process_assets.manager(),
+            state.process_assets.native_rules(),
+            state.platform.game_config.as_ref(),
+        ) else {
+            return Ok(BTreeSet::new());
+        };
+        let loaded = crate::map::source::load_map_ini_by_name_or_path_with_assets(
+            &config.paths.ra2_dir,
+            request.selected_map_file(),
+            assets,
+        )?;
+        let movies = rules.movies();
+        let basic = loaded.ini.section("Basic");
+        let read = |name: &str| basic.map_or(-1, |s| s.read_movie(name, -1, movies));
+        let actions = crate::map::actions::parse_actions(&loaded.ini);
+        Ok(campaign_media_indices(
+            read("Intro"),
+            read("Brief"),
+            ["Action", "Win", "Lose", "PostScore", "PreMapSelect"].map(read),
+            actions
+                .values()
+                .flat_map(|a| a.entries())
+                .map(|a| (a.kind, a.literal_value())),
+        )
+        .into_iter()
+        .filter_map(|index| movies.name(index))
+        .map(|name| {
+            format!(
+                "{}.BIK",
+                super::frontend::fullscreen_movie::movie_stem(name)
+            )
+            .to_uppercase()
+        })
+        .filter(|name| declared("movie", name) && !assets.contains(name))
+        .collect())
+    })();
+    let names = match plan {
+        Ok(names) => names,
+        Err(error) => {
+            // ReadScenario remains the authoritative map-error owner.
+            log::warn!("Campaign media lookup failed: {error:#}");
+            return Some(request);
+        }
+    };
+    let fits = HOST.with(|host| {
+        let mut host = host.borrow_mut();
+        let total = names.iter().try_fold(0usize, |size, name| {
+            size.checked_add(host.catalog[&key("movie", name)].size)
+        });
+        if total.is_none_or(|size| size > CAMPAIGN_MOVIE_BUDGET) {
+            host.campaign_movies.clear();
+            return false;
+        }
+        host.campaign_movies.retain(|name, _| names.contains(name));
+        true
+    });
+    if !fits {
+        log::warn!("Campaign media exceeds 64 MiB; retaining on-demand playback");
+        return Some(request);
+    }
+    let next = names.into_iter().find(|name| movie_bytes(name).is_none());
+    let Some(name) = next else {
+        return Some(request);
+    };
+    begin(
+        "movie",
+        &name.clone(),
+        Box::new(move |state, bytes| {
+            if let Some(bytes) = bytes {
+                HOST.with(|host| {
+                    host.borrow_mut().campaign_movies.insert(name, bytes);
+                });
+                App::start_campaign_scenario(state, request);
+            } else {
+                back_to_menu(state);
+            }
+        }),
+    );
+    None
+}
+
+#[cfg(test)]
+mod campaign_media_tests {
+    use super::campaign_media_indices;
+
+    #[test]
+    fn valid_intro_wins_over_brief_and_all_movie_actions_are_included_once() {
+        let selected = campaign_media_indices(
+            3,
+            4,
+            [5, -1, 3],
+            [
+                (100, Some(8)),
+                (117, Some(8)),
+                (10, Some(9)),
+                (19, Some(10)),
+            ],
+        );
+        assert_eq!(selected.into_iter().collect::<Vec<_>>(), [3, 5, 8, 9]);
+    }
+
+    #[test]
+    fn absent_intro_uses_brief_and_literal_default_matches_dispatch() {
+        let selected =
+            campaign_media_indices(-1, 4, [-1], [(100, None), (117, Some(-1)), (10, Some(-5))]);
+        assert_eq!(selected.into_iter().collect::<Vec<_>>(), [0, 4]);
+    }
 }
