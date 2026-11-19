@@ -263,7 +263,8 @@ impl KeyboardLayout {
             category,
             commands: dlu(224, 82, 136, 110),
             group: dlu(63, 98, 138, 95),
-            description: dlu(70, 109, 127, 42),
+            // VERA extends the A3 body inside the unchanged stock frame for six natural rows.
+            description: dlu(70, 109, 127, 64),
             capture: dlu(64, 245, 124, 14),
             assign: dlu(224, 245, 83, 15),
             reset: dlu(224, 278, 83, 15),

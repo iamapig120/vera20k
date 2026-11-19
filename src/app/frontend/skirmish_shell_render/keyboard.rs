@@ -365,7 +365,7 @@ pub(crate) fn render_keyboard_shell(
             font,
             &selected.description,
             layout.description,
-            ShellAlign::NONE,
+            ShellAlign::NATURAL_WRAP,
             SHELL_CONTROL_TEXT_DEPTH,
         ));
         if let Some(metadata) = catalog.get(selected.command_index) {
@@ -507,6 +507,37 @@ pub(crate) fn render_keyboard_shell(
 #[cfg(all(test, tests_app_frontend))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyboard_description_draws_six_rows_in_retail_and_scaled_layouts() {
+        let font = crate::render::bit_font::tests::make_test_font(&[('字' as u16, 12)], 4);
+        for layout in [
+            crate::ui::shell::keyboard::KeyboardLayout::new(800, 600, None),
+            crate::ui::shell::keyboard::KeyboardLayout::responsive(1600, 1200),
+        ] {
+            let scale = layout.scale.factor();
+            let body = layout.description;
+            let rendered = shell_text::draw_in_rect_scaled(
+                &font,
+                "字\n字\n字\n字\n字\n字",
+                rect_to_text_rect(body),
+                SHELL_LABEL_TEXT_RGB,
+                ShellAlign::NATURAL_WRAP,
+                [0.0; 2],
+                SHELL_CONTROL_TEXT_DEPTH,
+                scale,
+            );
+            assert_eq!(rendered.instances.len(), 6);
+            let first = &rendered.instances[0];
+            let last = &rendered.instances[5];
+            assert_eq!(
+                last.position[1] - first.position[1],
+                5.0 * font.cell_height() * scale
+            );
+            assert!(last.position[1] + last.size[1] <= (body.y + body.h) as f32);
+            assert!(body.y + body.h < layout.group.y + layout.group.h);
+        }
+    }
 
     #[test]
     fn native_group_caption_gap_and_bevel_polarity_are_preserved() {

@@ -28,6 +28,8 @@ impl ShellAlign {
     /// SDBTNANM button's red face or the title window atop the column, so the
     /// text must also fit [`RIGHT_PANEL_FACE_W`] on one line to stay on it.
     pub const PANEL_FACE: ShellAlign = ShellAlign(0x08);
+    /// Long-form descriptions wrap at their natural width instead of squeezing.
+    pub const NATURAL_WRAP: ShellAlign = ShellAlign(0x10);
     /// An SDBTNANM button's caption, centred on its face.
     pub const BUTTON_CAPTION: ShellAlign = ShellAlign(0x01 | 0x04 | 0x08);
     /// The right panel's title, centred in its window.
@@ -101,7 +103,9 @@ fn to_native_rect(rect: TextRect, scale: f32) -> TextRect {
 
 /// How far `text` squeezes to fit `native` (VERA's own; see the module doc).
 fn squeeze(font: &BitFont, text: &str, native: TextRect, flags: ShellAlign) -> Fit {
-    if flags.contains(ShellAlign::PANEL_FACE) {
+    if flags.contains(ShellAlign::NATURAL_WRAP) {
+        Fit::NONE
+    } else if flags.contains(ShellAlign::PANEL_FACE) {
         let face = font.fit_line(text, native.w.min(RIGHT_PANEL_FACE_W));
         font.fitted(face, |font| font.fit_box(text, native.w, native.h))
     } else {
@@ -542,6 +546,23 @@ mod tests {
         assert_eq!((layout.lines.len(), layout.split_word), (1, false));
         assert_eq!(
             font.fit_box("这是一个没有空格的很长的句子", 75, 17 * 5),
+            Fit::NONE
+        );
+    }
+
+    #[test]
+    fn natural_wrap_keeps_word_advances_instead_of_squeezing() {
+        let font = crate::render::bit_font::tests::make_vector_test_font();
+        let text = "Šûþéŕçåļîƒŕåĝîļîšţîç";
+        let rect = TextRect {
+            x: 0,
+            y: 0,
+            w: font.text_width(text) * 9 / 10,
+            h: 51,
+        };
+        assert!(squeeze(&font, text, rect, ShellAlign::NONE) > Fit::NONE);
+        assert_eq!(
+            squeeze(&font, text, rect, ShellAlign::NATURAL_WRAP),
             Fit::NONE
         );
     }
