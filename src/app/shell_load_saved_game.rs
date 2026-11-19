@@ -181,7 +181,11 @@ impl App {
     ) {
         match result {
             Ok(()) => {
-                state.frontend.load_saved_game = None;
+                retire_loaded_game_picker(
+                    &mut state.frontend.shell_route,
+                    &mut state.frontend.load_saved_game,
+                );
+                Self::destroy_current_shell_dialog(state);
                 state.platform.window.request_redraw();
                 return;
             }
@@ -288,11 +292,39 @@ fn saved_game_row(
     }
 }
 
+/// B7's successful load dismisses the picker (0x00558DD0). When Main_Game
+/// returns to PrepareSession (0x0048CFAA), a new 0xE2 owns both slide directions.
+fn retire_loaded_game_picker(
+    route: &mut ShellRoute,
+    picker: &mut Option<SavedSeedBrowserState<PathBuf>>,
+) {
+    *picker = None;
+    *route = ShellRoute::MainMenu;
+}
+
 #[cfg(all(test, tests_app))]
 mod tests {
     use super::*;
     use crate::sim::snapshot::GameSnapshot;
     use crate::ui::skirmish_shell::SavedSeedBrowserState;
+
+    #[test]
+    fn a_successful_menu_load_retires_both_the_picker_and_its_slide_route() {
+        let mut route = ShellRoute::LoadSavedGame;
+        let mut picker = Some(SavedSeedBrowserState::open_rows(
+            SavedSeedMode::Load,
+            Vec::new(),
+            "Current".into(),
+            "[EMPTY SLOT]".into(),
+            0,
+            4,
+        ));
+
+        retire_loaded_game_picker(&mut route, &mut picker);
+
+        assert!(picker.is_none());
+        assert_eq!(route, ShellRoute::MainMenu);
+    }
 
     #[test]
     fn a_save_from_another_build_stays_listed_for_load_and_delete_but_not_loadable() {
