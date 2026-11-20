@@ -135,12 +135,18 @@ pub fn available(directory: &Path, name: &NativeFileName) -> bool {
     drop(unsafe { std::fs::File::from_raw_handle(handle) });
     true
 }
-#[cfg(not(windows))]
+#[cfg(all(
+    not(windows),
+    not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))
+))]
 pub fn available(directory: &Path, name: &NativeFileName) -> bool {
     open(directory, name, false).is_ok()
 }
 
-#[cfg(not(windows))]
+#[cfg(all(
+    not(windows),
+    not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))
+))]
 pub fn open(
     directory: &Path,
     name: &NativeFileName,
@@ -164,9 +170,62 @@ pub fn delete(directory: &Path, name: &NativeFileName) -> std::io::Result<()> {
         Ok(())
     }
 }
-#[cfg(not(windows))]
+#[cfg(all(
+    not(windows),
+    not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))
+))]
 pub fn delete(directory: &Path, name: &NativeFileName) -> std::io::Result<()> {
     std::fs::remove_file(directory.join(name.display_text()))
+}
+
+// Browser saves use the same virtual filesystem as directory enumeration and
+// the host's persistence callbacks. Preserve the stored spelling so an
+// overwrite or delete also addresses the same record after reload.
+#[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+fn browser_path(directory: &Path, name: &NativeFileName) -> std::path::PathBuf {
+    let text = name.display_text();
+    let exact = directory.join(&text);
+    if crate::util::file_system::exists(&exact) {
+        exact
+    } else {
+        crate::util::case_insensitive_path::find(directory, &text).unwrap_or(exact)
+    }
+}
+
+#[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+pub fn available(directory: &Path, name: &NativeFileName) -> bool {
+    crate::util::file_system::is_file(browser_path(directory, name))
+}
+
+#[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+pub fn delete(directory: &Path, name: &NativeFileName) -> std::io::Result<()> {
+    crate::util::file_system::remove_file(browser_path(directory, name))
+}
+
+pub fn read_bytes(directory: &Path, name: &NativeFileName) -> std::io::Result<Vec<u8>> {
+    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+    {
+        crate::util::file_system::read(browser_path(directory, name))
+    }
+    #[cfg(not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")))]
+    {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        open(directory, name, false)?.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+}
+
+pub fn write_bytes(directory: &Path, name: &NativeFileName, bytes: &[u8]) -> std::io::Result<()> {
+    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+    {
+        crate::util::file_system::write(browser_path(directory, name), bytes)
+    }
+    #[cfg(not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")))]
+    {
+        use std::io::Write;
+        open(directory, name, true)?.write_all(bytes)
+    }
 }
 
 #[cfg(windows)]

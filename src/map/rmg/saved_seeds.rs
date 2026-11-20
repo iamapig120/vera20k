@@ -8,7 +8,6 @@ use std::path::Path;
 
 use super::options::RmgOptions;
 use crate::util::native_file_name::{self, NativeFileName};
-use std::io::{Read, Write};
 
 /// The extension every saved seed carries. Matched case-insensitively — the
 /// engine writes mixed case and players' files come from anywhere.
@@ -70,11 +69,7 @@ pub fn list_saved_seeds(dir: &Path) -> Vec<SavedSeed> {
                 return None;
             }
             // Metadata 0x00597E24 rejects INI load failure before sorting.
-            let mut bytes = Vec::new();
-            native_file_name::open(dir, &name, false)
-                .ok()?
-                .read_to_end(&mut bytes)
-                .ok()?;
+            let bytes = native_file_name::read_bytes(dir, &name).ok()?;
             if !metadata_ini_has_section(&bytes) {
                 return None;
             }
@@ -157,8 +152,7 @@ pub fn read_browser_seed(
     default: &str,
     ares: bool,
 ) -> std::io::Result<RmgOptions> {
-    let mut bytes = Vec::new();
-    native_file_name::open(dir, name, false)?.read_to_end(&mut bytes)?;
+    let bytes = native_file_name::read_bytes(dir, name)?;
     Ok(options_from_bytes(&bytes, current, default, ares))
 }
 
@@ -170,7 +164,7 @@ pub fn write_browser_seed(
     options: &RmgOptions,
     ares: bool,
 ) -> std::io::Result<()> {
-    native_file_name::open(dir, name, true)?.write_all(&options.to_sed_bytes(ares))
+    native_file_name::write_bytes(dir, name, &options.to_sed_bytes(ares))
 }
 
 pub fn system_time_to_file_time(time: crate::util::time::SystemTime) -> u64 {
@@ -433,21 +427,29 @@ mod tests {
             description: "Desert Duel".into(),
             ..Default::default()
         };
-        let path = dir.join("SAVE1234.SED");
-        save_saved_seed(&path, &options, false).expect("save");
+        let name = NativeFileName::from("SAVE1234.SED");
+        write_browser_seed(&dir, &name, &options, false).expect("save");
+        assert!(native_file_name::available(&dir, &name));
 
         let listed = list_saved_seeds(&dir);
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].description, "Desert Duel");
 
-        let loaded =
-            load_saved_seed(&path, &RmgOptions::default(), "Random Map", false).expect("load");
+        let loaded = read_browser_seed(
+            &dir,
+            &listed[0].file_name,
+            &RmgOptions::default(),
+            "Random Map",
+            false,
+        )
+        .expect("load");
         assert_eq!(loaded.seed, 4242);
         assert_eq!(loaded.num_players, 6);
         assert_eq!(loaded.map_type, 3);
         assert_eq!(loaded.description, "Desert Duel");
 
-        delete_saved_seed(&path).expect("delete");
+        native_file_name::delete(&dir, &listed[0].file_name).expect("delete");
+        assert!(!native_file_name::available(&dir, &name));
         assert!(
             list_saved_seeds(&dir).is_empty(),
             "delete removes the entry"

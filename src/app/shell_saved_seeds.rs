@@ -118,14 +118,22 @@ impl App {
             return;
         };
         // MapSeed Save 0x00597804 updates the working description before file I/O.
-        // Its nonnull-filename path returns success even if the file could not open.
+        // Native acknowledges even an I/O failure; the browser instead reports
+        // a virtual filesystem error so it doesn't claim a missing save exists.
         modal.options.description = description;
         if let Err(error) = crate::util::file_system::create_dir_all(&dir).and_then(|()| {
             saved_seeds::write_browser_seed(&dir, &file_name, &modal.options, modal.ares)
         }) {
-            log::warn!(
-                "saved seed: native-style save acknowledgment despite I/O failure for {file_name}: {error}"
-            );
+            log::warn!("saved seed: could not write {file_name}: {error}");
+            if cfg!(all(
+                feature = "wasm",
+                target_arch = "wasm32",
+                target_os = "unknown"
+            )) {
+                let body = Self::csf_label(state, "TXT_ERROR_SAVING_GAME", "Error saving game.");
+                Self::show_saved_seed_prompt(state, SavedSeedPromptPurpose::Error, body, false);
+                return;
+            }
         }
         let body = Self::csf_label(state, "GUI:MapSaved", "Map Saved");
         Self::show_saved_seed_prompt(state, SavedSeedPromptPurpose::Saved, body, false);
