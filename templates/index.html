@@ -63,7 +63,7 @@
                     <div class="import-controls"><button id="cancel-import" class="retry" type="button" hidden>取消导入</button><button id="retry-import" class="retry" type="button" hidden>重试导入</button><button id="retry-cache" class="retry" type="button" hidden>重试缓存</button></div>
                     <p class="selection-note">资源仅在本机读取；远程下载需允许 CORS，可改用本地导入。ZIP 支持 UTF-8 Store/Deflate，最多 2 GiB、12,000 项。</p>
                 </section>
-                <p id="save-compatibility" role="note">存档兼容提示：不同引擎版本的存档可能不兼容，回退程序也不保证旧版可读新版存档。开始前会保存独立的用户数据快照；可用“升级前备份”取回覆盖前的原字节。请勿清除此站点数据。</p>
+                <p id="save-compatibility" role="note">存档兼容提示：此版引擎使用 v2 存档格式，旧版 v1 存档可列出但不能载入，旧引擎也不能读取新版存档。开始前会保存独立的用户数据快照；可用“升级前备份”取回覆盖前的原字节。回退程序不会转换存档，请勿清除此站点数据。</p>
                 <div id="button-caption"></div>
                 <div class="progress-area" id="progress-area" hidden>
                     <div class="progress-track" role="progressbar" aria-label="游戏加载进度" aria-valuemin="0"
