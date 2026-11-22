@@ -1,4 +1,4 @@
-import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game,configure_remote_assets,finish_remote_asset} from './pkg/vera20k.js';
+import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, set_lifecycle_callback, start_game,configure_remote_assets,finish_remote_asset} from './pkg/vera20k.js';
 import * as engineModule from './pkg/vera20k.js';
 import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries,readRemoteManifest,loadRemoteProfile} from './resources.mjs';
 import {installFullscreen} from './fullscreen.mjs';
@@ -159,12 +159,18 @@ async function finishExit(){
  window.close();
 }
 function engineStatus(message){
- if(message==='Exited'){void finishExit();return;}
+ if(!exiting)status.textContent=message;
+}
+function engineLifecycle(event){
  if(exiting)return;
- status.textContent=message;
- if(message==='Ready')enterGame();
- else if(message==='Starting engine')feedback('正在启动引擎…');
- else fail('游戏未能正常启动，请查看详细信息。',message);
+ switch(event?.type){
+  case 'engine-ready':enterGame();break;
+  case 'engine-error':
+  case 'engine-exited':
+   if(event.type==='engine-exited'&&event.reason!=='error'){void finishExit();break;}
+   fail('游戏未能正常启动，请查看详细信息。',event.error||status.textContent);
+   break;
+ }
 }
 // Keep every stored row. Copy only legacy player-profile names to the new
 // upstream profile directory; explicit new records (including deletions) win.
@@ -348,6 +354,7 @@ button.onclick=async()=>{
    const catalog=Object.fromEntries([...runtimeManifest.runtime].map(([key,row])=>[key,{size:row.size,sha256:row.sha256,duration_seconds:row.duration_seconds,bank:row.bank}]));
    configure_remote_assets(JSON.stringify(catalog),runtimeLoader.request);
   }
+  set_lifecycle_callback(engineLifecycle);
   start_game(canvas,engineStatus);
  }catch(error){fail('读取或启动失败，请重新加载后再试。',String(error));}
 };

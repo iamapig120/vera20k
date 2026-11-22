@@ -1,8 +1,8 @@
 # YR Toy test corresponding source
 
 This tree contains the Toy wrapper and a patch against VERA20k 79edebfa25eb3411105117409a3363497e4529b6.
-Engine adaptation commit: a8dca8870db3e114321d56e391bf757331fc2196.
-Wrapper integration commit: 4e4f4113c56df244fc5bec96c7bc1850ff66e6f4.
+Engine adaptation commit: ef1426ac46580819d51c29ea5ffb953266095099.
+Wrapper integration commit: e9257ce5a87e570b237016c1b4afe255ef7f7cd3.
 Upstream source: https://github.com/YuriPlanet/vera20k/tree/79edebfa25eb3411105117409a3363497e4529b6
 
 ## Rebuild
@@ -23,10 +23,11 @@ Upstream source: https://github.com/YuriPlanet/vera20k/tree/79edebfa25eb34111051
 7. Point VERA_TOY_LOGO to the separately supplied authorized logo artwork.
    Its SHA-256 is 017a5021324b635e88d24bc37c8332bb6665d464a4c965f347627da429a7a5bd.
    Run:
-   node tools/toy-build/package-online.cjs PATH_TO_PKG PATH_TO_LAYOUT_FILE a8dca8870db3e114321d56e391bf757331fc2196 NEW_OUTPUT_ROOT
+   node tools/toy-build/package-online.cjs PATH_TO_PKG PATH_TO_LAYOUT_FILE ef1426ac46580819d51c29ea5ffb953266095099 NEW_OUTPUT_ROOT
 
 The candidate directory under NEW_OUTPUT_ROOT contains the site. The release
 receipt records exact file hashes and the immutable corresponding-source URL.
-The measured Wasm SHA-256 is 297c152dd1ad6e8db2f48500a5ff0723a30611af258d2663f2b8eeef90b821cd.
+The measured Wasm SHA-256 is 7818bddcde6ea77ab51f0bdc88ecc0ccbf7e9d2766e69ac0a9be3faf9629d880.
 Retail data, artwork, compiled output and player data are excluded from this
 source tree. Refer to wrapper/LICENSE-GPL and wrapper/notices/ENGINE-LEGAL.md.
+The Toy launcher uses the structured engine-ready, engine-error and engine-exited events. Localized status text is for display only.

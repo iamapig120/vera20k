@@ -19,7 +19,7 @@ const wasm = fs.readFileSync(path.join(pkgPath, 'vera20k_bg.wasm'));
 const layout = Number(fs.readFileSync(layoutPath, 'utf8').trim());
 assert(Number.isInteger(layout) && layout >= 0x80000000 && layout <= 0xffffffff, 'Invalid traced snapshot layout');
 const bindings = fs.readFileSync(path.join(pkgPath, 'vera20k.js'), 'utf8');
-for (const required of ['configure_remote_assets', 'finish_remote_asset', 'fonts_ready', 'veraLobbyOpen', 'veraLobbyRequest', 'veraSocketOpen']) {
+for (const required of ['configure_remote_assets', 'finish_remote_asset', 'set_lifecycle_callback', 'fonts_ready', 'veraLobbyOpen', 'veraLobbyRequest', 'veraSocketOpen']) {
   assert(bindings.includes(required), 'Missing generated binding: ' + required);
 }
 assert(!/veraLan[A-Z]/.test(bindings), 'Unexpected LAN binding');

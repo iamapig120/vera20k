@@ -47,10 +47,32 @@ index 41008b6..683f0a2 100644
              crate::app::input::hardware_cursor::hide_game_cursor(state);
              return Ok(if presented {
 diff --git a/src/app/handler.rs b/src/app/handler.rs
-index cd8f053..53055f7 100644
+index cd8f053..62c7dfe 100644
 --- a/src/app/handler.rs
 +++ b/src/app/handler.rs
-@@ -1405,6 +1405,20 @@ impl ApplicationHandler for App {
+@@ -1110,13 +1110,16 @@ impl App {
+                     crate::app::input::cursor::apply_cursor_confinement(state);
+                 }
+                 #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+-                crate::web::status(
+-                    &self
++                {
++                    let error = self
+                         .state
+                         .as_ref()
+-                        .and_then(|state| state.frontend.main_menu_shell_error.clone())
+-                        .unwrap_or_else(|| crate::i18n::tr("VERA:EngineReady")),
+-                );
++                        .and_then(|state| state.frontend.main_menu_shell_error.as_deref());
++                    crate::web::status(
++                        &error.map_or_else(|| crate::i18n::tr("VERA:EngineReady"), str::to_owned),
++                    );
++                    crate::web::startup_finished(error);
++                }
+                 #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+                 if let (Some(error), Some(state)) = (browser_spawn_failure, self.state.as_mut()) {
+                     Self::finish_browser_external_launch(state, Some(&error));
+@@ -1405,6 +1408,20 @@ impl ApplicationHandler for App {
          }
  
          let Some(state) = &mut self.state else { return };
@@ -71,7 +93,7 @@ index cd8f053..53055f7 100644
          state.sync_cursor_space();
          // Playback has presentation-only input. Exit is local and never
          // schedules EventClass EXIT or changes the recorded simulation. A
-@@ -1988,6 +2002,11 @@ impl ApplicationHandler for App {
+@@ -1988,6 +2005,11 @@ impl ApplicationHandler for App {
              {
                  return;
              }
@@ -1829,10 +1851,31 @@ index fff31ba..7e55146 100644
  
      #[test]
 diff --git a/src/web.rs b/src/web.rs
-index 2667150..71414e7 100644
+index 2667150..a0afc78 100644
 --- a/src/web.rs
 +++ b/src/web.rs
-@@ -119,6 +119,7 @@ pub(crate) fn spawn_finished(report: &str) {
+@@ -65,8 +65,18 @@ pub(crate) fn status(message: &str) {
+     }
+ }
+ 
+-/// Install before starting. Receives structured match-ended, engine-exited,
+-/// and engine-error objects. Callback exceptions never veto engine shutdown.
++/// Notify the host independently of the localized display status.
++pub(crate) fn startup_finished(error: Option<&str>) {
++    match error {
++        Some(error) => emit_lifecycle(Some(serde_json::json!({
++            "type": "engine-error", "error": error,
++        }))),
++        None => emit_lifecycle(Some(serde_json::json!({ "type": "engine-ready" }))),
++    }
++}
++
++/// Install before starting. Receives structured engine-ready, match-ended,
++/// engine-exited and engine-error objects. Callback exceptions do not affect the engine.
+ #[wasm_bindgen]
+ pub fn set_lifecycle_callback(callback: js_sys::Function) {
+     ON_LIFECYCLE.with(|slot| *slot.borrow_mut() = Some(callback));
+@@ -119,6 +129,7 @@ pub(crate) fn spawn_finished(report: &str) {
  }
  
  pub(crate) fn engine_exited() {
@@ -1840,7 +1883,7 @@ index 2667150..71414e7 100644
      crate::audio::web_output::pause();
      remove_spawn_files();
      ime::remove();
-@@ -144,7 +145,7 @@ fn request_spawn_action(action: crate::app::SpawnAction) -> Result<(), JsValue>
+@@ -144,7 +155,7 @@ fn request_spawn_action(action: crate::app::SpawnAction) -> Result<(), JsValue>
  }
  
  /// Run the event loop's next pass now, even while it waits.
@@ -1849,7 +1892,7 @@ index 2667150..71414e7 100644
      WAKE.with(|slot| {
          if let Some(proxy) = slot.borrow().as_ref() {
              let _ = proxy.send_event(());
-@@ -287,7 +288,7 @@ fn mod_folder(folder: &str) -> Result<(), JsValue> {
+@@ -287,7 +298,7 @@ fn mod_folder(folder: &str) -> Result<(), JsValue> {
      Ok(())
  }
  
@@ -1858,7 +1901,7 @@ index 2667150..71414e7 100644
      if LIFECYCLE.with(|slot| slot.borrow().idle()) {
          Ok(())
      } else {
-@@ -492,7 +493,12 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
+@@ -492,7 +503,12 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
  }
  
  #[wasm_bindgen]
@@ -1872,7 +1915,7 @@ index 2667150..71414e7 100644
      if !LIFECYCLE.with(|slot| slot.borrow().idle()) {
          return Err(JsValue::from_str(
              "Restore user data before starting or after the engine exited",
-@@ -503,14 +509,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
+@@ -503,14 +519,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
      if path.starts_with("/replays/") {
          return Ok(());
      }
