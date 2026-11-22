@@ -1,7 +1,0 @@
-.build/
-dist/
-*.zip
-.local/
-.DS_Store
-
-node_modules/
