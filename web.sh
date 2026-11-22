@@ -93,17 +93,17 @@ prepare() {
 bundle_static() {
   local directory=$1
   cp "$ROOT/templates/index.html" "$directory/index.html"
-  [[ $(wc -c < "$directory/index.html") -lt 10000 ]] || fail 'index.html must be smaller than 10,000 bytes'
   cp "$ROOT/templates/.assetsignore" "$directory/.assetsignore"
-  cp "$ROOT/templates/lobby.js" "$ROOT/templates/network.js" "$ROOT/templates/storage.js" "$ROOT/templates/resources.mjs" "$ROOT/templates/fullscreen.mjs" "$ROOT/templates/launcher.css" "$ROOT/templates/launcher.js" "$directory/"
+  cp "$ROOT/templates/lobby.js" "$ROOT/templates/network.js" "$ROOT/templates/storage.js" "$ROOT/templates/user-data.mjs" "$ROOT/templates/resources.mjs" "$ROOT/templates/fullscreen.mjs" "$ROOT/templates/launcher.css" "$ROOT/templates/launcher.js" "$directory/"
   cp "$ROOT/LICENSE-GPL" "$directory/LICENSE-GPL"
+  if [[ -d "$ROOT/LICENSES" ]]; then mkdir -p "$directory/LICENSES"; cp -R "$ROOT/LICENSES/." "$directory/LICENSES/"; fi
   mkdir -p "$directory/assets"
   cp "$ROOT/assets/RA2MD.png" "$directory/assets/RA2MD.png"
   rm -f "$directory/standalone.html"
   # HTML and modules must never mix across releases. Python's static server
   # and regular static hosts can otherwise reuse old module/Wasm responses.
   local version
-  version=$(cat "$directory/lobby.js" "$directory/network.js" "$directory/launcher.js" "$directory/storage.js" "$directory/resources.mjs" "$directory/fullscreen.mjs" "$directory/launcher.css" "$directory/pkg/vera20k.js" "$directory/pkg/vera20k_bg.wasm" | git hash-object --stdin)
+  version=$(node -e 'const {inventory}=require(process.argv[1]); console.log(require("node:crypto").createHash("sha256").update(JSON.stringify(inventory(process.argv[2]))).digest("hex"))' "$ROOT/tools/package-preflight.cjs" "$directory")
   sed -e "s@./launcher.css@./launcher.css?v=$version@g" \
       -e "s@./lobby.js@./lobby.js?v=$version@g" \
       -e "s@./network.js@./network.js?v=$version@g" \
@@ -113,11 +113,13 @@ bundle_static() {
   sed -e "s@./pkg/vera20k.js'@./pkg/vera20k.js?v=$version'@g" \
       -e "s@./pkg/vera20k_bg.wasm'@./pkg/vera20k_bg.wasm?v=$version'@g" \
       -e "s@./resources.mjs'@./resources.mjs?v=$version'@g" \
+      -e "s@./user-data.mjs'@./user-data.mjs?v=$version'@g" \
       -e "s@./fullscreen.mjs'@./fullscreen.mjs?v=$version'@g" \
       "$directory/launcher.js" > "$directory/launcher.versioned"
   mv "$directory/launcher.versioned" "$directory/launcher.js"
 }
 build() {
+  [[ "$BASE_REVISION" != 79edebfa25eb3411105117409a3363497e4529b6 ]] || fail 'Use the official Linux build and checked cloud pkg; see PAGES-CANDIDATE.md. No legacy Rust patch is applied for this pin.'
   prepare
   for tool in cargo rustc wasm-bindgen python3; do command -v "$tool" >/dev/null || fail "Missing $tool on PATH; see README.md"; done
   expected=$(awk '$0 == "name = \"wasm-bindgen\"" {seen=1;next} seen && $1 == "version" {gsub(/"/,"",$3);print $3;exit}' "$ENGINE/Cargo.lock")
@@ -149,10 +151,12 @@ package() {
   mkdir -p "$(dirname "$output")"
   output=$(cd "$(dirname "$output")" && pwd)/$(basename "$output")
   case "$output" in "$DIST/"*) fail 'ZIP must be outside dist/';; esac
-  local files=(index.html launcher.css launcher.js storage.js resources.mjs fullscreen.mjs lobby.js network.js LICENSE-GPL assets/RA2MD.png build-info.txt pkg/vera20k.js pkg/vera20k_bg.wasm)
-  for file in pkg/vera20k.d.ts pkg/vera20k_bg.wasm.d.ts; do
-    if [[ -f "$DIST/$file" ]]; then files+=("$file"); fi
-  done
+  local files=() members source
+  source=$(git -C "$ROOT" rev-parse HEAD)
+  members=$(mktemp "$BUILD/members.XXXXXX")
+  node --experimental-vm-modules "$ROOT/tools/package-files.cjs" "$DIST" "$source" "$BASE_REVISION" > "$members" || fail 'Package validation failed; no ZIP was written'
+  while IFS= read -r file; do files+=("$file"); done < "$members"
+  rm -f "$members"
   for file in "${files[@]}"; do
     [[ -f "$DIST/$file" && ! -L "$DIST/$file" ]] || fail "Missing file or unexpected symlink: $file"
   done
@@ -188,8 +192,8 @@ usage() {
 Usage: bash web.sh [--upstream PATH] [--ref REF] COMMAND
   prepare                         Export upstream and apply Web compatibility
   build                           Compile and emit the static site in dist/
-  bundle                          Rebuild HTML from existing dist/pkg (no Cargo)
-  package [--output PATH]          ZIP the fixed public-file allowlist
+  bundle --expected-wasm-sha SHA   Assemble checked cloud pkg (no Cargo)
+  package [--output PATH]          ZIP public files and the complete pkg tree
   refresh-patch --adapted PATH --base REF
 The output is static. Single-player needs no gateway; multiplayer uses an optional WebSocket gateway.
 EOF
@@ -208,7 +212,20 @@ lock
 case "$command" in
   prepare) prepare;;
   build) build;;
-  bundle) bundle_static "$DIST";;
+  bundle)
+    [[ $# == 2 && "$1" == --expected-wasm-sha && "$2" =~ ^[0-9a-f]{64}$ ]] || fail 'bundle requires --expected-wasm-sha from the verified cloud manifest'
+    [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]] || fail 'Commit the corresponding wrapper source before bundling'
+    engine=$(git -C "$ROOT" ls-tree HEAD vera20k | awk '{print $3}')
+    [[ "$engine" == "$BASE_REVISION" ]] || fail 'Engine gitlink does not match the configured pin'
+    actual=$(node -e 'console.log(require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(process.argv[1])).digest("hex"))' "$DIST/pkg/vera20k_bg.wasm")
+    [[ "$actual" == "$2" ]] || fail 'Cloud Wasm SHA256 mismatch; the existing candidate was preserved'
+    bundle_static "$DIST"
+    source=$(git -C "$ROOT" rev-parse HEAD)
+    printf 'Upstream: %s\nRevision: %s\nWeb integration: %s\nFeatures: wasm (single-player)\nWASM SHA256: %s\n' "$UPSTREAM_URL" "$BASE_REVISION" "$source" "$actual" > "$DIST/build-info.txt"
+    sed "s@/tree/web-preview-source@/tree/$source@g" "$DIST/index.html" > "$DIST/index.source"
+    mv "$DIST/index.source" "$DIST/index.html"
+    node --experimental-vm-modules "$ROOT/tools/package-preflight.cjs" check-imports "$DIST"
+    ;;
   package)
     if [[ $# == 0 ]]; then package; elif [[ $# == 2 && "$1" == --output ]]; then package "$2"; else fail 'package: expected --output PATH'; fi;;
   refresh-patch)

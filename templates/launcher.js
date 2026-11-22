@@ -1,4 +1,5 @@
-import init, {import_file, prepare_audio, restore_user_file, set_persistence_callbacks, start_game} from './pkg/vera20k.js';
+import init, {fonts_ready, import_file, prepare_audio, restore_user_file, set_persistence_callbacks, set_lifecycle_callback, start_game} from './pkg/vera20k.js';
+import {planUserRestore} from './user-data.mjs';
 import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs';
 import {installFullscreen} from './fullscreen.mjs';
 const $=id=>document.getElementById(id);
@@ -35,6 +36,7 @@ let selectionRevision=0, restoreRevision=0, engineLoading=false;
 let ready=false, busy=false, failed=false, selecting=false, selected=[];
 let importController,lastImport,exiting=false;
 const store=globalThis.VeraStorage;
+const enginePin='79edebfa25eb3411105117409a3363497e4529b6';
 let storageAvailable=false, cachedSelection=false, saving=false;
 const pending=new Map();
 let saveTask;
@@ -64,14 +66,24 @@ globalThis.vera20kPersistWrite=(path,bytes,modified_ms)=>{
  pending.set(path,{path,bytes:bytes.slice(),modified_ms});void flushUserData();
 };
 globalThis.vera20kPersistRemove=path=>{if(userPath(path)){pending.set(path,null);void flushUserData();}};
+function downloadUserBackup(rows,name){
+ const data={format:'vera20k-web-user-data',version:1,files:rows.map(row=>({...row,bytes:Array.from(row.bytes)}))};
+ const url=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));
+ const link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 $('export-data').onclick=async()=>{
  try{
   const rows=new Map((storageAvailable?await store.users():[]).map(row=>[row.path,row]));
   for(const [path,row] of pending){if(row)rows.set(path,row);else rows.set(path,{path,bytes:new Uint8Array(),modified_ms:Date.now(),deleted:true});}
-  const data={format:'vera20k-web-user-data',version:1,files:[...rows.values()].map(row=>({...row,bytes:Array.from(row.bytes)}))};
-  const url=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));
-  const link=document.createElement('a');link.href=url;link.download='vera20k-backup.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  downloadUserBackup([...rows.values()],'vera20k-backup.json');
  }catch(error){storageStatus(`导出失败：${error.message}`,true);}
+};
+$('export-before-upgrade').onclick=async()=>{
+ try{
+  const rows=await store.preservedUsers(enginePin);
+  if(rows===null)throw Error('尚未建立升级前备份；开始游戏前会先保存');
+  downloadUserBackup(rows,'vera20k-before-'+enginePin.slice(0,12)+'.json');
+ }catch(error){storageStatus(error.message,true);}
 };
 $('import-data').onclick=()=>{$('backup-file').value='';$('backup-file').click();};
 $('backup-file').onchange=async()=>{
@@ -130,25 +142,12 @@ async function finishExit(){
  window.close();
 }
 function engineStatus(message){
- if(message==='Exited'){void finishExit();return;}
  if(exiting)return;
  status.textContent=message;
- if(message==='Ready')enterGame();
- else if(message==='Starting engine')feedback('正在启动引擎…');
- else fail('游戏未能正常启动，请查看详细信息。',message);
 }
-// Keep every stored row. Copy only legacy player-profile names to the new
-// upstream profile directory; explicit new records (including deletions) win.
-function restoredUserRows(rows){
- const current=new Set(rows.map(row=>row.path.toLowerCase()));
- const profiles=new Map(['VERA.INI','VERARULES.INI','RA2MD.INI','KeyboardMD.ini','wolinfoMD.ini','coopsave.ini']
-  .map(name=>[name.toLowerCase(),'/saves/profile/'+name]));
- const copies=rows.flatMap(row=>{
-  const match=/^\/retail\/([^/]+)$/i.exec(row.path);
-  const path=match&&profiles.get(match[1].toLowerCase());
-  return path&&!current.has(path.toLowerCase())?[{...row,path}]:[];
- });
- return [...copies,...rows];
+function engineLifecycle(event){
+ if(event?.type==='engine-error'||event?.type==='engine-exited'&&event.error)fail('引擎已停止，请查看详细信息。',String(event.error));
+ else if(event?.type==='engine-exited')void finishExit();
 }
 window.addEventListener('error',event=>{if(busy||document.body.classList.contains('playing'))fail('游戏运行出错，请查看错误详情。',event.message||String(event.error));});
 window.addEventListener('unhandledrejection',event=>{if(busy||document.body.classList.contains('playing'))fail('游戏运行出错，请查看错误详情。',String(event.reason));});
@@ -246,11 +245,17 @@ button.onclick=async()=>{
   // start from retail defaults while the durable settings database is opening.
   progress(95,'正在恢复设置与存档…');
   await store.open();storageAvailable=true;
-  for(const row of restoredUserRows(await store.users()))restore_user_file(row.path,row.bytes,row.modified_ms,!!row.deleted);
+  await store.preserveUsers(enginePin);
+  $('export-before-upgrade').disabled=false;
+  const restored=planUserRestore(await store.users());
+  for(const row of restored.imports)import_file(row.name,row.bytes);
+  for(const row of restored.files)restore_user_file(row.path,row.bytes,row.modified_ms);
+  if(restored.retained.length)storageStatus(`${restored.retained.length} 条旧版记录仍保留在浏览器和备份中，本引擎未应用：${restored.retained.slice(0,3).join('、')}`);
   $('import-data').disabled=true;
   const canvas=document.createElement('canvas');canvas.tabIndex=0;
   $('game').append(canvas);
   start_game(canvas,engineStatus);
+  enterGame();
  }catch(error){fail('读取或启动失败，请重新加载后再试。',String(error));}
 };
 
@@ -287,7 +292,9 @@ async function prepareEngine(){
   const bytes=await engineBytes();
   compiling=true;feedback('正在准备游戏引擎…');$('progress-area').hidden=true;
   await init({module_or_path:bytes});
+  await fonts_ready();
   set_persistence_callbacks(globalThis.vera20kPersistWrite,globalThis.vera20kPersistRemove);
+  set_lifecycle_callback(engineLifecycle);
   ready=true;failed=false;
   $('environment').className='environment ready';$('environment-label').textContent='浏览器已就绪';
   if(!selecting)feedback(selected.length?'资源已就绪，点击「开始游戏」。':'请选择游戏目录；如果正在恢复缓存，也可以稍候。');
@@ -302,6 +309,7 @@ async function restoreStorage(){
  storageStatus('正在打开本机存储…');
  try{
   await store.open();storageAvailable=true;syncButton();
+  $('export-before-upgrade').disabled=(await store.preservedUsers(enginePin))===null;
   storageStatus('正在恢复上次的游戏资源…');
   const library=await store.library();
   if(revision!==restoreRevision)return;

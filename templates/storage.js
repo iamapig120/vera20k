@@ -115,9 +115,39 @@ function createVeraStorage(name='vera20k-web-v2',{timeoutMs=20000,migrateLegacy=
  }
  async function open(){await database('users');await migrate('users');}
  async function libraryReady(){await database('library');await migrate('library');}
+ function backupKey(pin){if(!/^[0-9a-f]{40}$/.test(pin))throw Error('Invalid engine backup version');return 'before-engine:'+pin;}
  return {
   open,
   async users(){await open();return transaction('users','readonly',({data,done,guard})=>{data.getAll().onsuccess=guard(e=>done(e.target.result.map(userRow)));});},
+  async preserveUsers(pin){
+   const key=backupKey(pin);await open();
+   return transaction('users','readwrite',({data,meta,done,guard})=>{
+    meta.get(key).onsuccess=guard(event=>{
+     if(event.target.result!==undefined){const marker=event.target.result;if(marker?.version!==1||!Number.isSafeInteger(marker.count)||marker.count<0)throw Error('升级前备份标记无效，原数据保留');done(marker);return;}
+     let count=0;
+     data.openCursor().onsuccess=guard(event=>{
+      const cursor=event.target.result;
+      if(cursor){meta.put(userRow(cursor.value),key+':'+cursor.key);count++;cursor.continue();}
+      else{const marker={version:1,count,created_ms:Date.now()};meta.put(marker,key);done(marker);}
+     });
+    });
+   });
+  },
+  async preservedUsers(pin){
+   const key=backupKey(pin);await open();
+   return transaction('users','readonly',({meta,done,guard})=>{
+    meta.get(key).onsuccess=guard(event=>{
+     const marker=event.target.result;if(marker===undefined){done(null);return;}
+     if(marker?.version!==1||!Number.isSafeInteger(marker.count)||marker.count<0)throw Error('升级前备份标记无效，原数据保留');
+     const rows=[];
+     meta.openCursor().onsuccess=guard(event=>{
+      const cursor=event.target.result;
+      if(cursor){if(typeof cursor.key==='string'&&cursor.key.startsWith(key+':'))rows.push(userRow(cursor.value));cursor.continue();}
+      else{if(rows.length!==marker.count)throw Error('升级前备份不完整，原数据保留');done(rows);}
+     });
+    });
+   });
+  },
   async write(row){await open();const checked=userRow(row);return transaction('users','readwrite',({data})=>data.put(checked,checked.path));},
   remove(path){return this.write({path,bytes:new Uint8Array(),modified_ms:Date.now(),deleted:true});},
   async library(){await libraryReady();return transaction('library','readonly',({data,done})=>{data.get('current').onsuccess=e=>done(e.target.result);});},
