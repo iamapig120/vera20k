@@ -1,13 +1,18 @@
-# VERA20k Web
+# VERA20k Web releases
 
 EA has not endorsed and does not support this product.
 
-Play at https://github.bysb.net/vera20k/ using your own game files.
-Corresponding GPLv3 source: https://github.com/iamapig120/vera20k/tree/6994a5109615a840dbbdd222dce8d63ce88b7553
-Official engine: b6ef13b19c8c538a12eab7b2eb74ae5e2e3b486f.
+Use https://github.bysb.net/vera20k/ to select the current single-player release or the retained legacy release. Supply your own game files; this site distributes no retail assets, translation packs, music, player data, or Toy gateway.
 
-Includes upstream campaign autosave migration (#3526), loading-dialog presentation (#3527), refresh-independent frame pacing and browser IME. Retains directory/ZIP/HTTPS import, atomic resource caching, backups, durable settings/saves, viewport sizing, YR-style defaults, remappable web fullscreen, campaign speed control and scaled map-dialog static text. Existing saved choices remain authoritative. Browser-reserved keys may require rebinding or the fullscreen button. No network gateway is deployed by this build.
+Current wrapper corresponding source: https://github.com/iamapig120/vera20k/tree/5163eba8616a2dba68e88bf2ac05b9e88b1892d3
+Official engine: https://github.com/YuriPlanet/vera20k/tree/79edebfa25eb3411105117409a3363497e4529b6
+Current static prefix: releases/5163eba8616a/
+Legacy prefix: releases/6994a5109615/ (unchanged, wrapper 6994a5109615, engine b6ef13b1).
 
-Local validation: 154 native tests passed (one existing ignored), 42 host/import tests and six startup checks; WASM compiled and static paths, allowlist and private prefixes checked. This revision has not been run in a real browser/game session, so DPR/fullscreen, physical key behavior, BIK and real-save UI flows remain unverified. No existing player page or saved data was changed.
+The current engine writes envelope v2; the legacy engine accepts v1. The new metadata reader can list v1 saves, but neither strict loader converts the other format. Existing records are not cleared by this deployment. The launcher preserves pre-upgrade user bytes atomically and offers an export; these backups do not make binary formats compatible. Both releases use the same origin storage, so export before switching or overwriting a slot.
 
-Only the current release is served; no retail resources, translation pack, music or private test/debug files are distributed. GPL and LGPL notices are retained. User resource and save databases are unchanged by deployment. Current asset prefix: `releases/6994a5109615/`. WASM SHA256: `f935ef37fe87c5c20e42f35a9e89176dca222c88c472381f5c29a29bdc09318a`. Previous deployment `663922ce566c2306ad042efaec602502ef246866` remains recoverable through ordinary Git history, without a public old-version entry.
+Complete pkg/snippets/fonts and GPL/Ares/font notices are included. Build uses the official single-player wasm cloud output unchanged, with SHA256 8f7ea8cce78cfd636f4d27d412081b34033e956eaae2fb4d6532f6483243fedf. No Cargo was run on Windows. Wrapper changes were implemented by ChatGPT at the repository owner's request.
+
+Local validation: five host/IndexedDB checks, package membership/import closure, real sandboxed headless Edge WebGPU cold start, Chinese menu and campaign BIK, first mission, engine PNG and own generated save after refresh. Storage rollback used synthetic data. Real bidirectional game-format loading did not pass: the versions are explicitly incompatible. Test resources emitted TMP/SHP fallback warnings. Other DPR/fullscreen, long-running gameplay, audible audio and all languages have not been fully tested. No real player save or active player page was used.
+
+Parent deployment commit: 714aee5cd4c491b654754dccfc57a615b742a693. Earlier releases and Git history are retained, with no forced history update.

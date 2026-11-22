@@ -1,0 +1,5 @@
+Upstream: https://github.com/YuriPlanet/vera20k.git
+Revision: 79edebfa25eb3411105117409a3363497e4529b6
+Web integration: 5163eba8616a2dba68e88bf2ac05b9e88b1892d3
+Features: wasm (single-player)
+WASM SHA256: 8f7ea8cce78cfd636f4d27d412081b34033e956eaae2fb4d6532f6483243fedf
