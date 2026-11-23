@@ -1,2 +1,0 @@
-# Never commit data extracted from retail binaries — this repo is public.
-*.bin

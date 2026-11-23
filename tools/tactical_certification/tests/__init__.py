@@ -1,1 +1,0 @@
-"""Focused tactical-certification tests."""

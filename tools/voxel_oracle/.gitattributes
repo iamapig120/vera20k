@@ -1,2 +1,0 @@
-# Generated JSON uses canonical content hashes; keep materialized files portable.
-shadow_fixtures*.json text eol=lf

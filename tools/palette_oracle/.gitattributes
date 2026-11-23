@@ -1,2 +1,0 @@
-# Preserve the original byte-pinned JSON fixture on every checkout platform.
-fixtures/ground-level.json -text whitespace=cr-at-eol
