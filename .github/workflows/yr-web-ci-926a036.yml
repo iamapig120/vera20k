@@ -5,6 +5,7 @@ on:
       - ci/yr-web-926a036-build
     paths:
       - ci/yr-web/shared-926a036-engine.patch
+      - .github/workflows/yr-web-ci-926a036.yml
 
 permissions:
   contents: read
@@ -20,6 +21,7 @@ jobs:
       ENGINE_PATCH_SHA: ccdf1b1cb3db616be75c3d40246c1177c5101978d4a4a1eee3a72c2b190b4aba
       EXPECTED_LAYOUT: '3603389783'
       EXPECTED_NETWORK: '0.4.2:7af96fb20cdf9796f71fde0f4fb1d0f29dddb4a4b4238903517d838b71bc2d17'
+      RUSTUP_TOOLCHAIN: '1.100.0'
       CARGO_BUILD_JOBS: '1'
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_FAST_OPT_LEVEL: '0'
@@ -49,7 +51,9 @@ jobs:
         run: |
           set -euo pipefail
           rustc -V
-          rustup target list --installed | grep -Fx wasm32-unknown-unknown
+          rustup target add --toolchain "$RUSTUP_TOOLCHAIN" wasm32-unknown-unknown
+          target_lib=$(rustc --print target-libdir --target wasm32-unknown-unknown)
+          compgen -G "$target_lib/libcore-*.rlib" >/dev/null
           base=https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.127
           name=wasm-bindgen-0.2.127-x86_64-unknown-linux-musl
           curl --fail --location --retry 3 "$base/$name.tar.gz" -o "$RUNNER_TEMP/bindgen.tar.gz"
