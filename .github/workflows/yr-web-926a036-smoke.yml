@@ -1,0 +1,98 @@
+name: 'YR exact artifact browser validation'
+on:
+  push:
+    branches: [ci/yr-web-926a036-smoke]
+    paths: [.github/workflows/yr-web-926a036-smoke.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  smoke:
+    if: github.repository == 'iamapig120/vera20k' && github.ref == 'refs/heads/ci/yr-web-926a036-smoke'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 890f0578cff85550befa9f9459e564f26f8ff430
+          path: pages-source
+          persist-credentials: false
+      - name: Stage exact wrapper sources and already-verified artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git -C pages-source rev-parse HEAD^{tree})" = 015540d2fba5c52aa68451037bd24f37f3a09e69
+          gh api repos/iamapig120/vera20k/actions/artifacts/14891138087/zip > "$RUNNER_TEMP/artifact.zip"
+          echo "af827bef7c85af9665b49a0c194b3de0fa35aec0b17d139525aeafc46d7cd23e  $RUNNER_TEMP/artifact.zip" | sha256sum -c
+          unzip -q "$RUNNER_TEMP/artifact.zip" -d "$RUNNER_TEMP/engine"
+          pkg="$(dirname "$(find "$RUNNER_TEMP/engine" -name vera20k_bg.wasm -type f -print -quit)")"
+          echo "e0d07990668669792e84dffbaeba404bfacb9ba32957ce0c5312fd9221891602  $pkg/vera20k_bg.wasm" | sha256sum -c
+          mkdir -p "$RUNNER_TEMP/yr-final"
+          final="$RUNNER_TEMP/yr-final"
+          node --experimental-vm-modules pages-source/tools/package-preflight.cjs copy-pkg "$pkg" pages-source/dist/pkg
+          (
+            cd pages-source
+            bash web.sh bundle --expected-wasm-sha e0d07990668669792e84dffbaeba404bfacb9ba32957ce0c5312fd9221891602
+            printf '%s\n' 'Engine adaptation: 928f99bbf797e5e3ccdd39793d8e3d763a58afcc' 'Engine source tree: 483fb4ac1a4f056a1c9bfdd8e3c05a0238f957e3' 'Vera-Build: 0.4.2:7af96fb20cdf9796f71fde0f4fb1d0f29dddb4a4b4238903517d838b71bc2d17' 'Snapshot layout 3603389783' 'Wrapper source: https://github.com/iamapig120/vera20k/tree/890f0578cff85550befa9f9459e564f26f8ff430' >> dist/build-info.txt
+            printf '%s\n' 'Engine corresponding upstream and exact adaptation patch: https://github.com/iamapig120/vera20k/blob/fb01294906b9f3bccfaaff1387bb6f68b7e25306/ci/yr-web/shared-926a036-engine.patch' >> dist/build-info.txt
+            bash web.sh package --output "$final/pages-926a036.zip"
+          )
+          ! grep -E 'fullscreen-tools|toggle-fullscreen' pages-source/dist/index.html pages-source/dist/launcher.css
+          (cd "$final"; unzip -tq pages-926a036.zip; sha256sum pages-926a036.zip | tee SHA256SUMS)
+        id: package
+      - name: Browser launch and status-only diagnostics
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/yr-smoke-js"
+          mkdir "$d"; cd "$d"
+          npm install --ignore-scripts --package-lock=false --no-audit --no-fund playwright-core@1.56.1
+          printf 'Chrome: '; google-chrome --version
+          python3 -m http.server 18864 --bind 127.0.0.1 --directory "$GITHUB_WORKSPACE/pages-source/dist" > "$RUNNER_TEMP/yr-static.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" || true' EXIT
+          cat > smoke.cjs <<'JS'
+          const assert=require('node:assert/strict');
+          const {chromium}=require('playwright-core');
+          (async()=>{
+            const browser=await chromium.launch({headless:true,executablePath:'/usr/bin/google-chrome',chromiumSandbox:true});
+            try {
+              const page=await browser.newPage({viewport:{width:1280,height:900}});
+              const errors=[],remoteStatus=[];
+              page.on('pageerror',e=>errors.push(e.name));
+              page.on('response',r=>{const u=new URL(r.url());if(u.hostname==='cdn.simpad.store'&&u.pathname.endsWith('/manifest.json'))remoteStatus.push(r.status());});
+              page.on('requestfailed',r=>{const u=new URL(r.url());if(u.hostname==='cdn.simpad.store'&&u.pathname.endsWith('/manifest.json'))remoteStatus.push(r.failure()?.errorText);});
+              await page.goto('http://127.0.0.1:18864/',{waitUntil:'domcontentloaded'});
+              await page.waitForFunction(()=>document.querySelector('#environment').classList.contains('ready')||document.querySelector('#environment').classList.contains('error'),null,{timeout:60000});
+              const state=await page.evaluate(()=>({
+                engineReady:document.querySelector('#environment').classList.contains('ready'),
+                oldControl:Boolean(document.querySelector('#fullscreen-tools,#toggle-fullscreen')),
+                storage:document.querySelector('#storage-status')?.textContent.includes('就绪'),
+                canvasCount:document.querySelectorAll('#game canvas').length,
+                sdkAvailable:Boolean(window.toy),
+                adapterAPI:Boolean(navigator.gpu)
+              }));
+              console.log('Browser startup '+JSON.stringify({state,errors,remoteStatus}));
+              assert(state.engineReady,'Wasm and fonts must initialize in actual Chrome');
+              assert(!state.oldControl,'Old floating button must be absent in launcher DOM');
+              await page.locator('#start:enabled').waitFor({state:'visible',timeout:15000}).catch(()=>{});
+              if (await page.locator('#start').isEnabled()) {
+                await page.locator('#start').click();
+                await page.locator('body.playing #game canvas').waitFor({state:'visible',timeout:45000}).catch(()=>{});
+                console.log('Local candidate playback '+JSON.stringify({visibleCanvas:await page.locator('body.playing #game canvas').count(),errorTypes:errors,manifest:remoteStatus}));
+              } else {
+                console.log('Local candidate Start still disabled; no claim of gameplay or actual Bilibili iframe.');
+              }
+            }finally{await browser.close();}
+          })().catch(e=>{console.error(e.name+': '+e.message);process.exitCode=1});
+          JS
+          node smoke.cjs
+      - name: Retain corrected Pages release ZIP and checksum (no deploy)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() && steps.package.conclusion == 'success' }}
+        with:
+          name: yr-pages-final-926a036
+          path: ${{ runner.temp }}/yr-final/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
