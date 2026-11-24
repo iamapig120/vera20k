@@ -1,0 +1,118 @@
+name: 'YR web 926a036 candidate build'
+on:
+  push:
+    branches:
+      - ci/yr-web-926a036-build
+    paths:
+      - ci/yr-web/shared-926a036-engine.patch
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'iamapig120/vera20k' && github.ref == 'refs/heads/ci/yr-web-926a036-build'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ENGINE_REV: 926a036e648a505e9d2d93b87ee7a5ccff7e7953
+      ENGINE_TREE: 483fb4ac1a4f056a1c9bfdd8e3c05a0238f957e3
+      ENGINE_PATCH_SHA: ccdf1b1cb3db616be75c3d40246c1177c5101978d4a4a1eee3a72c2b190b4aba
+      EXPECTED_LAYOUT: '3603389783'
+      EXPECTED_NETWORK: '0.4.2:7af96fb20cdf9796f71fde0f4fb1d0f29dddb4a4b4238903517d838b71bc2d17'
+      CARGO_BUILD_JOBS: '1'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_FAST_OPT_LEVEL: '0'
+      CARGO_PROFILE_FAST_DEBUG: '0'
+      CARGO_PROFILE_FAST_CODEGEN_UNITS: '256'
+      CARGO_PROFILE_FAST_LTO: 'off'
+      CARGO_PROFILE_WASM_LTO: 'off'
+      CARGO_PROFILE_WASM_CODEGEN_UNITS: '32'
+      RUSTC_BOOTSTRAP: '1'
+      RUSTFLAGS: '-Zunstable-options --jobs-backend=1 --jobs-frontend=1 -Zfewer-names=yes'
+      VERA20K_MIN_FREE_GIB: '3'
+      VERA20K_FREE_HEADROOM_GIB: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: ci/yr-web
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: '1.100.0'
+          targets: wasm32-unknown-unknown
+      - name: Verify compiler and retrieve matching wasm-bindgen
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc -V
+          rustup target list --installed | grep -Fx wasm32-unknown-unknown
+          base=https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.127
+          name=wasm-bindgen-0.2.127-x86_64-unknown-linux-musl
+          curl --fail --location --retry 3 "$base/$name.tar.gz" -o "$RUNNER_TEMP/bindgen.tar.gz"
+          printf '%s  %s\n' 61d4a7dc85acfa0d2354ccc0b8361928c7e52a746d17f28ebaa795ed3dc1614a "$RUNNER_TEMP/bindgen.tar.gz" | sha256sum -c
+          tar -xf "$RUNNER_TEMP/bindgen.tar.gz" -C "$RUNNER_TEMP"
+          [[ "$("$RUNNER_TEMP/$name/wasm-bindgen" --version)" == 'wasm-bindgen 0.2.127' ]]
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+      - name: Recover and attest the corresponding engine source
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$GITHUB_WORKSPACE/ci/yr-web/shared-926a036-engine.patch"
+          printf '%s  %s\n' "$ENGINE_PATCH_SHA" "$patch" | sha256sum -c
+          git init -q engine
+          git -C engine fetch --depth=1 https://github.com/YuriPlanet/vera20k.git "$ENGINE_REV"
+          git -C engine checkout -q --detach FETCH_HEAD
+          [[ "$(git -C engine rev-parse HEAD)" == "$ENGINE_REV" ]]
+          git -C engine apply --index "$patch"
+          [[ "$(git -C engine write-tree)" == "$ENGINE_TREE" ]]
+          git -C engine diff --cached --check
+          git -C engine diff --cached --exit-code -- Cargo.lock
+      - name: Build single-threaded Internet WebAssembly
+        shell: bash
+        working-directory: engine
+        run: |
+          set -euo pipefail
+          unset WS_PROXY_URL
+          python tools/wasm/build.py --profile wasm --network
+      - name: Confirm real package content and fingerprints
+        shell: bash
+        working-directory: engine
+        run: |
+          set -euo pipefail
+          site=target/wasm-dist
+          mapfile -d '' layouts < <(find target/owned-worktrees -type f -path '*/fast/snapshot-layout' -print0)
+          [[ "${#layouts[@]}" == 1 ]]
+          layout="$("${layouts[0]}")"
+          [[ "$layout" == "$EXPECTED_LAYOUT" ]]
+          [[ -f "$site/pkg/fonts/NotoSans-VF.ttf" && -f "$site/pkg/fonts/Unifont-CJK-15.bin" ]]
+          [[ -f "$site/lobby.js" && -f "$site/network.js" && ! -e "$site/lan_rtc.js" ]]
+          node --input-type=module - "$site/pkg/vera20k_bg.wasm" <<'JS'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const bytes = fs.readFileSync(process.argv[2]);
+          assert(bytes.includes(Buffer.from(process.env.EXPECTED_NETWORK)));
+          assert(bytes.includes(Buffer.from('wss://wss.vera20k.com')));
+          assert(bytes.includes(Buffer.from('vera20kBattlefieldFullscreenAvailability')));
+          const module = await WebAssembly.compile(bytes);
+          const exports = new Set(WebAssembly.Module.exports(module).map(x => x.name));
+          for (const name of ['start_game', 'fonts_ready', 'prepare_audio', 'configure_remote_assets', 'finish_remote_asset', 'set_lifecycle_callback', 'set_persistence_callbacks', 'restore_user_file']) {
+            assert(exports.has(name), 'missing ' + name);
+          }
+          assert(!WebAssembly.Module.imports(module).some(x => x.name.includes('veraLan')));
+          JS
+          (
+            cd "$site"
+            printf 'engine=%s\nengine_tree=%s\nvera_build=%s\nsnapshot_layout=%s\nfeature=wasm-net\n' "$ENGINE_REV" "$ENGINE_TREE" "$EXPECTED_NETWORK" "$layout" > engine-build-receipt.txt
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vera20k-wasm-net-926a036
+          path: engine/target/wasm-dist/
+          if-no-files-found: error
+          retention-days: 7
