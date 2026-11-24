@@ -11,8 +11,6 @@ jobs:
     if: github.repository == 'iamapig120/vera20k' && github.ref == 'refs/heads/ci/yr-web-926a036-smoke'
     runs-on: ubuntu-24.04
     timeout-minutes: 8
-    env:
-      SITE: ${{ runner.temp }}/yr-smoke-site
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -30,6 +28,7 @@ jobs:
           VERA_TOY_SOURCE_URL: https://github.com/iamapig120/vera20k/tree/939b0bde7cb325ef0ddddb9d813737b2ff6e20ac
         run: |
           set -euo pipefail
+          SITE="$RUNNER_TEMP/yr-smoke-site"
           test "$(git -C pages-source rev-parse HEAD^{tree})" = 015540d2fba5c52aa68451037bd24f37f3a09e69
           test "$(git -C toy-source rev-parse HEAD^{tree})" = 7cd6c698b7112c63148a44d3df105fa86a89d59a
           gh api repos/iamapig120/vera20k/actions/artifacts/14891138087/zip > "$RUNNER_TEMP/artifact.zip"
@@ -54,6 +53,7 @@ jobs:
       - name: Browser launch and status-only diagnostics
         run: |
           set -euo pipefail
+          SITE="$RUNNER_TEMP/yr-smoke-site"
           d="$RUNNER_TEMP/yr-smoke-js"
           mkdir "$d"; cd "$d"
           npm install --ignore-scripts --package-lock=false --no-audit --no-fund playwright-core@1.56.1
