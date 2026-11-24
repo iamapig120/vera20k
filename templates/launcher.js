@@ -3,40 +3,21 @@ import {planUserRestore} from './user-data.mjs';
 import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs';
 import {installFullscreen} from './fullscreen.mjs';
 const $=id=>document.getElementById(id);
-globalThis.vera20kToggleFullscreen=installFullscreen(document,$('game'),$('toggle-fullscreen'),message=>{
+globalThis.vera20kToggleFullscreen=installFullscreen(document,$('game'),$('fullscreen-status'),message=>{
  $('fullscreen-status').textContent=message;
 });
+if(typeof $('game').requestFullscreen==='function'&&typeof document.exitFullscreen==='function'){
+ globalThis.vera20kBattlefieldFullscreen=globalThis.vera20kToggleFullscreen;
+ globalThis.vera20kBattlefieldFullscreenAvailability=globalThis.vera20kToggleFullscreen.setBattlefieldAvailable;
+}
 const status=$('status'), button=$('start'), files=$('files');
-const gatewayInput=$('gateway-address'), gatewayStatus=$('gateway-status');
-const gatewayKey='vera20k.gateway-origin';
-function gatewayBase(){
- const value=gatewayInput.value.trim();
- if(!value)return '';
- if(!/^(https?|wss?):\/\/[^/?#\\]+\/?$/i.test(value))throw Error('联机配置错误：请填写 http(s) 网关地址，只包含协议、主机和端口。');
- let url;
- try{url=new URL(value);}catch{throw Error('联机配置错误：网关地址无效。');}
- if(url.username||url.password||value.includes('@'))throw Error('联机配置错误：网关地址不能包含用户名或密码。');
- if(url.protocol==='ws:')url.protocol='http:';
- if(url.protocol==='wss:')url.protocol='https:';
- return url.origin;
-}
-function updateGateway(persist=false){
- try{
-  const base=gatewayBase();
-  gatewayStatus.textContent=base?`本构建仅支持单机；已保留网关地址 ${base}，不会连接。`:'本构建仅支持单机；网关地址可保留供后续联网构建使用。';
-  if(persist)try{globalThis.localStorage?.setItem(gatewayKey,base);}catch{}
- }catch(error){gatewayStatus.textContent=error.message;}
-}
-try{gatewayInput.value=globalThis.localStorage?.getItem(gatewayKey)||'';}catch{gatewayInput.value='';}
-gatewayInput.oninput=()=>updateGateway(true);
-globalThis.veraGatewayBase=gatewayBase;
-updateGateway();
 
 let selectionRevision=0, restoreRevision=0, engineLoading=false;
 let ready=false, busy=false, failed=false, selecting=false, selected=[];
 let importController,lastImport,exiting=false;
 const store=globalThis.VeraStorage;
-const enginePin='79edebfa25eb3411105117409a3363497e4529b6';
+const enginePin='926a036e648a505e9d2d93b87ee7a5ccff7e7953';
+const priorBackupPin='79edebfa25eb3411105117409a3363497e4529b6';
 let storageAvailable=false, cachedSelection=false, saving=false;
 const pending=new Map();
 let saveTask;
@@ -78,13 +59,15 @@ $('export-data').onclick=async()=>{
   downloadUserBackup([...rows.values()],'vera20k-backup.json');
  }catch(error){storageStatus(`导出失败：${error.message}`,true);}
 };
-$('export-before-upgrade').onclick=async()=>{
+async function exportPreservedUsers(pin){
  try{
-  const rows=await store.preservedUsers(enginePin);
-  if(rows===null)throw Error('尚未建立升级前备份；开始游戏前会先保存');
-  downloadUserBackup(rows,'vera20k-before-'+enginePin.slice(0,12)+'.json');
+  const rows=await store.preservedUsers(pin);
+  if(rows===null)throw Error('这个版本没有保存升级前备份。');
+  downloadUserBackup(rows,'vera20k-before-'+pin.slice(0,12)+'.json');
  }catch(error){storageStatus(error.message,true);}
-};
+}
+$('export-before-upgrade').onclick=()=>exportPreservedUsers(enginePin);
+$('export-prior-upgrade').onclick=()=>exportPreservedUsers(priorBackupPin);
 $('import-data').onclick=()=>{$('backup-file').value='';$('backup-file').click();};
 $('backup-file').onchange=async()=>{
  const file=$('backup-file').files[0];if(!file)return;
@@ -310,6 +293,7 @@ async function restoreStorage(){
  try{
   await store.open();storageAvailable=true;syncButton();
   $('export-before-upgrade').disabled=(await store.preservedUsers(enginePin))===null;
+  $('export-prior-upgrade').hidden=(await store.preservedUsers(priorBackupPin))===null;
   storageStatus('正在恢复上次的游戏资源…');
   const library=await store.library();
   if(revision!==restoreRevision)return;

@@ -119,7 +119,7 @@ bundle_static() {
   mv "$directory/launcher.versioned" "$directory/launcher.js"
 }
 build() {
-  [[ "$BASE_REVISION" != 79edebfa25eb3411105117409a3363497e4529b6 ]] || fail 'Use the official Linux build and checked cloud pkg; see PAGES-CANDIDATE.md. No legacy Rust patch is applied for this pin.'
+  [[ "$BASE_REVISION" != 926a036e648a505e9d2d93b87ee7a5ccff7e7953 ]] || fail 'Use the official Linux build and checked cloud pkg; see PAGES-CANDIDATE.md. Apply the shared fork settings patch to the exact upstream source before running the pinned build.'
   prepare
   for tool in cargo rustc wasm-bindgen python3; do command -v "$tool" >/dev/null || fail "Missing $tool on PATH; see README.md"; done
   expected=$(awk '$0 == "name = \"wasm-bindgen\"" {seen=1;next} seen && $1 == "version" {gsub(/"/,"",$3);print $3;exit}' "$ENGINE/Cargo.lock")
@@ -221,7 +221,7 @@ case "$command" in
     [[ "$actual" == "$2" ]] || fail 'Cloud Wasm SHA256 mismatch; the existing candidate was preserved'
     bundle_static "$DIST"
     source=$(git -C "$ROOT" rev-parse HEAD)
-    printf 'Upstream: %s\nRevision: %s\nWeb integration: %s\nFeatures: wasm (single-player)\nWASM SHA256: %s\n' "$UPSTREAM_URL" "$BASE_REVISION" "$source" "$actual" > "$DIST/build-info.txt"
+    printf 'Upstream: %s\nRevision: %s\nWeb integration: %s\nFeatures: wasm-net (Internet; no browser LAN)\nGateway: wss://wss.vera20k.com (upstream default)\nWASM SHA256: %s\n' "$UPSTREAM_URL" "$BASE_REVISION" "$source" "$actual" > "$DIST/build-info.txt"
     sed "s@/tree/web-preview-source@/tree/$source@g" "$DIST/index.html" > "$DIST/index.source"
     mv "$DIST/index.source" "$DIST/index.html"
     node --experimental-vm-modules "$ROOT/tools/package-preflight.cjs" check-imports "$DIST"

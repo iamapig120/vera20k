@@ -1,17 +1,15 @@
-const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const vm = require('node:vm');
-const fs = require('node:fs');
+const {readFileSync} = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
+const test = require('node:test');
 
-function load(name, globals) {
-  const context = vm.createContext(globals);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../templates', name), 'utf8'), context);
-  return context;
-}
+const RELAY = '203.0.113.1:5000';
 
-function transport(protocol = 'https:') {
-  const sockets = [];
+function fixture({worker = false} = {}) {
+  const sockets = [], timers = new Map();
+  const clock = {now: 0}, workerClock = {now: 0};
+  let nextTimer = 1;
   class Socket {
     static OPEN = 1;
     constructor(url) {
@@ -21,144 +19,191 @@ function transport(protocol = 'https:') {
       this.sent = [];
       sockets.push(this);
     }
-    send(bytes) { this.sent.push(Uint8Array.from(bytes)); }
+    send(bytes) {
+      if (bytes.buffer instanceof SharedArrayBuffer) throw new TypeError('value must not be shared');
+      this.sent.push(Uint8Array.from(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes));
+    }
     close() { this.closed = true; }
+    opened() { this.readyState = Socket.OPEN; this.onopen(); }
+    packet(bytes) { this.onmessage({data: Uint8Array.from(bytes).buffer}); }
   }
-  const api = load('network.js', {
-    URL, WebSocket: Socket, ArrayBuffer, Uint8Array,
-    location: {protocol, href: `${protocol}//game.example/nested/index.html`},
-  });
-  return {api, sockets};
-}
-
-function packet(socket, bytes) {
-  socket.onmessage({data: Uint8Array.from(bytes).buffer});
-}
-
-test('socket bridge preserves datagrams and distinguishes pending, failure, and explicit close', () => {
-  const {api, sockets} = transport();
-  const id = api.veraSocketOpen('primary');
-  const socket = sockets[0];
-  assert.equal(socket.url, 'wss://game.example/game/primary');
-  assert.equal(socket.binaryType, 'arraybuffer');
-  assert.equal(api.veraSocketSend(id, new Uint8Array([1])), 1);
-  assert.equal(api.veraSocketReceive(id), null);
-  socket.readyState = 1;
-  const outgoing = new Uint8Array(2048);
-  assert.equal(api.veraSocketSend(id, outgoing), 0);
-  assert.equal(api.veraSocketSend(id, new Uint8Array(2049)), 2);
-  socket.bufferedAmount = 262145;
-  assert.equal(api.veraSocketSend(id, outgoing), 1);
-  assert.equal(socket.sent.length, 1);
-  packet(socket, [1, 2]);
-  packet(socket, [3]);
-  assert.deepEqual([...api.veraSocketReceive(id)], [1, 2]);
-  assert.deepEqual([...api.veraSocketReceive(id)], [3]);
-  packet(socket, [4]);
-  socket.onclose();
-  assert.equal(api.veraSocketSend(id, outgoing), 2);
-  assert.deepEqual([...api.veraSocketReceive(id)], [4]);
-  assert.equal(api.veraSocketReceive(id), undefined);
-  api.veraSocketClose(id);
-  assert.equal(socket.closed, true);
-  assert.equal(socket.onmessage, null);
-  assert.equal(socket.onclose, null);
-  assert.equal(socket.onerror, null);
-  api.veraSocketClose(id);
-  assert.equal(api.veraSocketReceive(id), undefined);
-  assert.throws(() => api.veraSocketOpen('foreign'), /gateway/);
-  const http = transport('http:');
-  http.api.veraSocketOpen('alternate');
-  assert.equal(http.sockets[0].url, 'ws://game.example/game/alternate');
-  http.api.veraGatewayBase = () => 'https://relay.example:9443';
-  http.api.veraSocketOpen('primary');
-  assert.equal(http.sockets[1].url, 'wss://relay.example:9443/game/primary');
-  assert.throws(() => transport('file:').api.veraSocketOpen('primary'), /gateway/);
-});
-
-test('socket receive queue is bounded and rejects oversized or nonbinary frames', () => {
-  const {api, sockets} = transport();
-  const id = api.veraSocketOpen('primary');
-  for (let i = 0; i < 257; i++) packet(sockets[0], [i & 255]);
-  for (let i = 0; i < 256; i++) assert.deepEqual([...api.veraSocketReceive(id)], [i]);
-  assert.equal(api.veraSocketReceive(id), null);
-  packet(sockets[0], new Uint8Array(2048));
-  assert.equal(api.veraSocketReceive(id).length, 2048);
-  packet(sockets[0], new Uint8Array(2049));
-  assert.equal(sockets[0].closed, true);
-  assert.equal(api.veraSocketReceive(id), undefined);
-  const other = api.veraSocketOpen('alternate');
-  sockets[1].onmessage({data: 'unexpected text'});
-  assert.equal(sockets[1].closed, true);
-  assert.equal(api.veraSocketReceive(other), undefined);
-});
-
-test('lobby uses same-origin authenticated requests and bounds success and error bodies', async () => {
-  const calls = [], warnings = [], timers = new Set();
-  let status = 200, chunks = [];
-  const api = load('lobby.js', {
-    console: {warn: (...args) => warnings.push(args.join(' '))},
-    AbortController, Uint8Array, TextDecoder,
-    setTimeout(fn) { timers.add(fn); return fn; },
+  const timing = {
+    setTimeout(fn, delay) { const id = nextTimer++; timers.set(id, {fn, delay}); return id; },
     clearTimeout(id) { timers.delete(id); },
-    async fetch(url, options) {
-      calls.push({url, options});
-      let index = 0;
-      return {status, body: {getReader: () => ({
-        async read() { return index < chunks.length ? {value: chunks[index++], done: false} : {done: true}; },
-      })}};
-    },
-  });
-  chunks = [Uint8Array.from([123]), Uint8Array.from([125])];
-  assert.deepEqual(JSON.parse(await api.veraLobbyRequest('/v1/rooms', 'secret', '{}', 2)), [200, '{}']);
-  const post = calls[0];
-  assert.equal(post.url, '/v1/rooms');
-  assert.equal(post.options.method, 'POST');
-  assert.equal(post.options.headers.Authorization, 'Bearer secret');
-  assert.equal(post.options.headers['Content-Type'], 'application/json');
-  assert.equal(post.options.body, '{}');
-  assert.equal(post.options.credentials, 'omit');
-  assert.equal(post.options.redirect, 'error');
-  assert.equal(post.options.cache, 'no-store');
-  await api.veraLobbyRequest('/v1/rooms', '', undefined, 2);
-  assert.equal(calls[1].options.method, 'GET');
-  assert.equal(calls[1].options.headers.Authorization, undefined);
-  assert.equal(calls[1].options.body, undefined);
-  await assert.rejects(api.veraLobbyRequest('https://foreign.example/v1/rooms', '', undefined, 2), /invalid path/);
-  assert.equal(calls.length, 2);
-  for (const responseStatus of [200, 503]) {
-    status = responseStatus;
-    chunks = [new Uint8Array(2), new Uint8Array(1)];
-    await assert.rejects(api.veraLobbyRequest('/v1/rooms', '', undefined, 2), /body too large/);
-    assert.equal(calls.at(-1).options.signal.aborted, true);
+  };
+  const globals = {
+    URL, WebSocket: Socket, ArrayBuffer, Uint8Array, ...timing,
+    performance: {timeOrigin: 1000, now: () => clock.now},
+  };
+  if (worker) {
+    // The Worker runs the posted source in its own realm with its own clock;
+    // messages cross synchronously.
+    const blobs = new Map();
+    globals.URL = class extends URL {
+      static createObjectURL(blob) { blobs.set('blob:worker', blob.text); return 'blob:worker'; }
+    };
+    globals.Blob = class { constructor(parts) { this.text = parts.join(''); } };
+    globals.Worker = class {
+      constructor(url) {
+        this.scope = vm.createContext({
+          WebSocket: Socket, ArrayBuffer, ...timing,
+          performance: {timeOrigin: 1500, now: () => workerClock.now},
+          postMessage: data => this.onmessage({data}),
+        });
+        vm.runInContext(blobs.get(url), this.scope);
+      }
+      postMessage(data) { this.scope.onmessage({data}); }
+    };
   }
-  api.veraGatewayBase = () => 'https://relay.example:9443';
-  status = 200; chunks = [];
-  await api.veraLobbyRequest('/v1/rooms', '', undefined, 2);
-  assert.equal(calls.at(-1).url, 'https://relay.example:9443/v1/rooms');
-  status = 401;
-  assert.deepEqual(JSON.parse(await api.veraLobbyRequest('/v1/rooms', '', undefined, 2)), [401, '']);
-  assert.equal(warnings.pop(), 'Lobby HTTP failure: status=401, endpoint=/v1/other, cursor_lost=false');
-  const privateToken = 'fixture-bearer-keep-private';
-  const privateBody = '{"password":"fixture-body-keep-private"}';
-  for (const [responseStatus, endpoint, code, lost] of [
-    [503, '/v1/commands', 'unavailable', false],
-    [409, '/v1/events', 'history_expired', true],
-    [409, '/v1/events', 'invalid_cursor', true],
-  ]) {
-    status = responseStatus;
-    const responseBody = JSON.stringify({error: {code, message: 'fixture-server-message-private'}});
-    chunks = [Buffer.from(responseBody)];
-    const result = await api.veraLobbyRequest(endpoint + '?after=private-cursor', privateToken, privateBody, 1024);
-    assert.deepEqual(JSON.parse(result), [responseStatus, responseBody]);
-    assert.equal(warnings.at(-1), `Lobby HTTP failure: status=${responseStatus}, endpoint=${endpoint}, cursor_lost=${lost}`);
-  }
-  status = 401;
-  await api.veraLobbyRequest('/v1/sessions/fixture-private-id', privateToken, privateBody, 1024);
-  assert.equal(warnings.at(-1), 'Lobby HTTP failure: status=401, endpoint=/v1/sessions, cursor_lost=false');
-  const diagnostics = warnings.join('\n');
-  for (const secret of [privateToken, privateBody, 'fixture-server-message-private', 'private-cursor', 'fixture-private-id']) {
-    assert.equal(diagnostics.includes(secret), false, 'diagnostics must omit credentials, bodies, and request details');
-  }
+  const api = vm.createContext(globals);
+  vm.runInContext(readFileSync(path.join(__dirname, '../templates/network.js'), 'utf8'), api);
+  return {api, sockets, timers, clock, workerClock, runTimer(delay) {
+    const [id, timer] = [...timers].find(([, timer]) => timer.delay === delay);
+    timers.delete(id);
+    timer.fn();
+  }};
+}
+
+test('compiled origin and separate channels carry unchanged bounded datagrams to the grant\'s relay', () => {
+  const {api, sockets} = fixture();
+  const primary = api.veraSocketOpen('wss://wss.vera20k.com', 'primary', RELAY, 827);
+  const alternate = api.veraSocketOpen('ws://localhost:8788', 'alternate', RELAY, 827);
+  assert.equal(sockets[0].url, `wss://wss.vera20k.com/game/primary/${RELAY}`);
+  assert.equal(sockets[1].url, `ws://localhost:8788/game/alternate/${RELAY}`);
+  assert.equal(api.veraSocketSend(primary, Uint8Array.of(0, 255)), 1);
+  assert.equal(api.veraSocketReceive(primary), null);
+  sockets[0].opened();
+  const bytes = Uint8Array.from([0, 255, 128, 1]);
+  assert.equal(api.veraSocketSend(primary, bytes), 0);
+  assert.deepEqual(sockets[0].sent, [bytes]);
+  sockets[0].packet(bytes);
+  sockets[0].packet([2, 3]);
+  assert.deepEqual([...api.veraSocketReceive(primary)], [...bytes]);
+  assert.deepEqual([...api.veraSocketReceive(primary)], [2, 3]);
+  assert.equal(api.veraSocketReceive(alternate), null);
+  sockets[0].bufferedAmount = 262143;
+  assert.equal(api.veraSocketSend(primary, bytes), 1);
+  assert.equal(api.veraSocketSend(primary, new Uint8Array(828)), 2);
+  assert.equal(sockets[0].sent.length, 1);
+  assert.throws(() => api.veraSocketOpen('ws://remote.example', 'primary', RELAY, 827));
+  assert.throws(() => api.veraSocketOpen('wss://remote.example/other', 'primary', RELAY, 827));
+  assert.throws(() => api.veraSocketOpen('wss://remote.example', 'primary', 'relay.example:5000', 827));
+  assert.throws(() => api.veraSocketOpen('wss://remote.example', 'primary', `${RELAY}/x`, 827));
+  api.veraSocketClose(primary);
+  api.veraSocketClose(alternate);
+});
+
+test('a datagram viewing shared Wasm memory is sent without reconnecting', () => {
+  const {api, sockets} = fixture();
+  const id = api.veraSocketOpen('wss://proxy.example', 'primary', RELAY, 827);
+  sockets[0].opened();
+  const view = new Uint8Array(new SharedArrayBuffer(4));
+  view.set([9, 8, 7, 6]);
+  assert.equal(api.veraSocketSend(id, view), 0);
+  assert.deepEqual(sockets[0].sent, [Uint8Array.of(9, 8, 7, 6)]);
+  assert.equal(sockets[0].closed, undefined);
+});
+
+test('reconnect changes only the physical route and rejects stale connection callbacks', () => {
+  const {api, sockets, timers, runTimer} = fixture();
+  const id = api.veraSocketOpen('wss://proxy.example', 'primary', RELAY, 827);
+  const old = sockets[0];
+  old.opened();
+  assert.equal(api.veraSocketTakeRouteChange(id), true);
+  assert.equal(api.veraSocketTakeRouteChange(id), false);
+  old.packet([1]);
+  const oldCallback = old.onmessage;
+  old.onclose();
+  assert.equal(old.closed, true);
+  assert.equal(api.veraSocketTakeRouteChange(id), true);
+  assert.equal(api.veraSocketReceive(id), null);
+  assert.equal(api.veraSocketSend(id, Uint8Array.of(1)), 1);
+  runTimer(250);
+  const current = sockets[1];
+  current.opened();
+  oldCallback({data: Uint8Array.of(99).buffer});
+  current.packet([2]);
+  assert.deepEqual([...api.veraSocketReceive(id)], [2]);
+  assert.equal(api.veraSocketReceive(id), null);
+  // Retained game messages belong to Rust; the bridge replays no stale bytes.
+  assert.equal(current.sent.length, 0);
+  current.onclose();
+  api.veraSocketClose(id);
+  api.veraSocketClose(id);
   assert.equal(timers.size, 0);
+  assert.equal(api.veraSocketReceive(id), undefined);
+  assert.equal(api.veraSocketSend(id, Uint8Array.of(1)), 2);
+});
+
+test('a full receive queue loses the arriving datagram; a malformed message resets the route', () => {
+  const {api, sockets, timers} = fixture();
+  const id = api.veraSocketOpen('wss://proxy.example', 'primary', RELAY, 2048);
+  sockets[0].opened();
+  api.veraSocketTakeRouteChange(id);
+  // The byte bound is reached before the packet-count bound for large packets.
+  for (let i = 0; i < 128; i++) sockets[0].packet(new Uint8Array(2048));
+  sockets[0].packet([1]);
+  assert.equal(sockets[0].closed, undefined);
+  assert.equal(api.veraSocketTakeRouteChange(id), false);
+  for (let i = 0; i < 128; i++) assert.equal(api.veraSocketReceive(id).byteLength, 2048);
+  assert.equal(api.veraSocketReceive(id), null);
+  const other = api.veraSocketOpen('wss://proxy.example', 'alternate', RELAY, 827);
+  sockets[1].opened();
+  sockets[1].onmessage({data: 'not a datagram'});
+  assert.equal(sockets[1].closed, true);
+  assert.equal(api.veraSocketReceive(other), null);
+  api.veraSocketClose(id);
+  api.veraSocketClose(other);
+  assert.equal(timers.size, 0);
+});
+
+test('each received datagram reports how long it waited for the game loop', () => {
+  const {api, sockets, clock} = fixture();
+  const id = api.veraSocketOpen('wss://proxy.example', 'primary', RELAY, 827);
+  sockets[0].opened();
+  clock.now = 1000;
+  sockets[0].packet([1]);
+  clock.now = 1012.5;
+  sockets[0].packet([2]);
+  clock.now = 1040;
+  assert.deepEqual([...api.veraSocketReceive(id)], [1]);
+  assert.equal(api.veraSocketReceivedAgo(id), 40);
+  assert.deepEqual([...api.veraSocketReceive(id)], [2]);
+  assert.equal(api.veraSocketReceivedAgo(id), 27.5);
+  api.veraSocketClose(id);
+});
+
+test('repeated connection failures retry within two seconds', () => {
+  const {api, sockets, runTimer} = fixture();
+  const id = api.veraSocketOpen('wss://proxy.example', 'primary', RELAY, 827);
+  for (const delay of [250, 500, 1000, 2000, 2000]) {
+    sockets.at(-1).onclose();
+    runTimer(delay);
+  }
+  assert.equal(sockets.length, 6);
+  api.veraSocketClose(id);
+});
+
+test('a Worker owns the sockets, times arrivals on its clock and reports send backlog', () => {
+  const {api, sockets, clock, workerClock, runTimer} = fixture({worker: true});
+  const id = api.veraSocketOpen('wss://proxy.example', 'primary', RELAY, 827);
+  assert.equal(sockets[0].url, `wss://proxy.example/game/primary/${RELAY}`);
+  assert.equal(api.veraSocketSend(id, Uint8Array.of(1)), 1);
+  sockets[0].opened();
+  assert.equal(api.veraSocketTakeRouteChange(id), true);
+  // Arrival at Worker 10 ms (absolute 1510) is page time 510.
+  workerClock.now = 10;
+  sockets[0].packet([7, 8]);
+  clock.now = 540;
+  assert.deepEqual([...api.veraSocketReceive(id)], [7, 8]);
+  assert.equal(api.veraSocketReceivedAgo(id), 30);
+  sockets[0].bufferedAmount = 262000;
+  assert.equal(api.veraSocketSend(id, Uint8Array.of(1, 2, 3, 4)), 0);
+  assert.deepEqual(sockets[0].sent, [Uint8Array.of(1, 2, 3, 4)]);
+  assert.equal(api.veraSocketSend(id, new Uint8Array(200)), 1, 'the reported backlog');
+  sockets[0].onclose();
+  runTimer(250);
+  assert.equal(sockets[1].url, `wss://proxy.example/game/primary/${RELAY}`);
+  api.veraSocketClose(id);
+  assert.equal(sockets[1].closed, true);
 });

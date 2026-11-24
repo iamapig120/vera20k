@@ -25,7 +25,7 @@ EA has not endorsed and does not support this product.
 
 资源地址由使用者填写，不内置资源或代理。远程服务必须允许 CORS，失败可改用本地导入。公开入口仅接受 HTTPS；HTTP 仅在页面与资源均为 loopback 时供开发使用。下载支持进度、取消、重试；失败保留旧缓存。原子缓存提交阶段不可取消。
 
-本次构建仅启用 `wasm` 单机功能，不连接联网网关。启动器保留上游界面及已填写的网关地址，供后续启用联网的构建使用；本次不部署网关，也不改变已有网关配置。
+此 Pages 构建使用 `wasm-net`，通过上游默认 `wss://wss.vera20k.com` 支持单机和互联网联机。无自填网关、密钥或浏览器 LAN。构建与对应源码见 [Pages 说明](PAGES-CANDIDATE.md)。
 音效、单位语音和背景音乐使用导入的游戏音频资源；请允许浏览器播放声音。
 资源会加载到浏览器内存中，所需内存取决于导入的资源量。
 
@@ -42,7 +42,7 @@ bash server.sh
 
 `server.sh` 构建并运行上游原有 Rust UDP relay，同时运行上游大厅逻辑的本机 HTTP/SQLite 宿主和 WebSocket 网关。大厅直接导入子模块的 `LobbyService`/`SqlStore`，没有另写房间或比赛状态机。首次运行在 `.build/server-data/` 创建签名密钥和数据库；不要删除该目录或将其部署为静态资源。Ctrl+C 关闭本次启动的服务。
 
-本机入口默认只监听回环地址。公网部署需 HTTPS/WSS 与允许的游戏 Origin，可只部署网关并连接上游原有 Cloudflare 大厅和匹配的 relay，详见 [网关部署](gateway/README.md) 与 [本机大厅适配](servers/README.md)。`HOST`、`PORT`、`VERA_WEB_ORIGIN` 可配置一体入口；首页“游戏资源 / 帮助”内可填写独立网关地址；留空使用页面同源 `/v1/` 和 `/game/`。静态网页可独立部署，网关需允许该网页 Origin。单机启动不发网关请求、不等待连接；无网关或网关不可达不影响单机。
+本机入口默认只监听回环地址。公网部署需 HTTPS/WSS 与允许的游戏 Origin，可只部署网关并连接上游原有 Cloudflare 大厅和匹配的 relay，详见 [网关部署](gateway/README.md) 与 [本机大厅适配](servers/README.md)。`HOST`、`PORT`、`VERA_WEB_ORIGIN` 可配置一体入口；下文服务器配置用于独立开发／自托管，当前 Pages 构建不使用这些本地服务，也不按浏览器地址栏或存储内容切换网关。静态网页可独立部署，网关需允许该网页 Origin。单机启动不发网关请求、不等待连接；无网关或网关不可达不影响单机。
 
 所有 Web 兼容补丁、覆盖源码、服务器适配和网关均在本目录维护；上游子模块不承载本项目的代码修改，见 [AGENTS.md](AGENTS.md)。
 
@@ -228,7 +228,7 @@ node tests/audio.mjs
 
 ### Upstream synchronization (2026-10-31)
 
-The engine follows official main `b6ef13b19c8c538a12eab7b2eb74ae5e2e3b486f`. Radar subtitles and their MessageList timeout conversion now come from upstream, alongside the previously integrated fullscreen subtitles, saved browser exit, WOL prompt scaling and tooltip metrics. The compatibility patch retains durable settings/deletions, the fork's YR-style default, keyboard footer scaling, remappable browser fullscreen command and campaign speed-control default. It also fixes static-text scaling in Random Map Setup and Choose Map. The launcher retains directory/ZIP/HTTPS import, atomic resource caching, backups and viewport sizing. Upstream lifecycle/replay handling and the new SkipStartupLogo setting are preserved. No retail files or translation content are distributed.
+Historical release (not the current Pages build): the engine followed official main `b6ef13b19c8c538a12eab7b2eb74ae5e2e3b486f`. Radar subtitles and their MessageList timeout conversion now come from upstream, alongside the previously integrated fullscreen subtitles, saved browser exit, WOL prompt scaling and tooltip metrics. The compatibility patch retains durable settings/deletions, the fork's YR-style default, keyboard footer scaling, remappable browser fullscreen command and campaign speed-control default. It also fixes static-text scaling in Random Map Setup and Choose Map. The launcher retains directory/ZIP/HTTPS import, atomic resource caching, backups and viewport sizing. Upstream lifecycle/replay handling and the new SkipStartupLogo setting are preserved. No retail files or translation content are distributed.
 
 The previous `97ed751` integration passed 39 launcher/import tests, six startup compatibility checks and 24 subtitle logic checks. Its isolated muted browser run with local Chinese resources displayed the first Allied mission's loading art/progress, opening subtitles, radar movie and tactical HUD subtitle, including one restart without stale text. Those runtime observations do not validate this newer engine: this synchronization uses background compilation and automated tests only, with browser/DPR/fullscreen, BIK and real-save runtime checks still pending. No existing player page or saved data was changed. This release also includes upstream campaign autosave migration (#3526), loading-dialog presentation (#3527), refresh-independent pacing and browser IME support. Deployment status is recorded separately from local test results.
 

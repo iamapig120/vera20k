@@ -1,14 +1,8 @@
-# Single-player Pages candidate
+# Internet-enabled Pages source
 
-This wrapper consumes the official engine at `79edebfa25eb3411105117409a3363497e4529b6`, with no Rust compatibility patch. Changes in this candidate were implemented by ChatGPT at the repository owner's request.
+Upstream engine `926a036e648a505e9d2d93b87ee7a5ccff7e7953` with `patches/pages-shared-engine.patch`: default Original YR Style for a fresh profile; explicit saved yes/no still wins. The launcher uses the matching official JS transports. Browser multiplayer is Internet-only via the upstream default `wss://wss.vera20k.com`; this package does not enable browser LAN, include a custom gateway, or require a key.
 
-The old patch-based `web.sh build` is disabled for this pin. Build the official source on a designated Linux machine with independent Cargo home/target directories:
-
-```sh
-bash tools/pages/build-singleplayer.sh /absolute/new/build-directory
-```
-
-This produces `engine/target/wasm-dist/`. Use the complete generated `pkg`, including snippets, fonts and notices. The screenshot bridge and font loader require those nested files. This repository's engine submodule is source correspondence; never copy retail assets, translation packs or a Toy gateway into the site.
+Use `bash tools/pages/build-network.sh /absolute/new/build-directory` with the matching official toolchain and wasm-bindgen. Keep the entire engine-generated pkg tree; don't include retail data.
 
 After independently checking the cloud archive's engine pin and SHA256, copy its pkg to a NEW staging `dist/pkg` and bundle without Cargo:
 
@@ -24,4 +18,4 @@ Before an engine starts, this wrapper atomically preserves user-data bytes in th
 
 This preserves bytes, not binary save-format compatibility. The previous engine `b6ef13b1` accepts envelope v1; this pin writes and loads v2. Its metadata reader can list v1 saves, but its strict world loader rejects them. The previous engine rejects v2. These explicit version checks are in `src/sim/snapshot.rs`; this wrapper does not convert the format. A code rollback requires the original pre-upgrade bytes. The original config.toml remains exportable but is not passed into the new engine, which generates that file itself. Supported old INI settings use the upstream profile-import path; explicit new profile records win over old aliases. The same-origin browser regression used synthetic records, not real game saves.
 
-Keep the previous release commit for recovery in Git history. Do not expose an old-version site entry or delete players' databases. This is a local candidate until engine provenance, complete asset hashes and runtime acceptance have all been checked.
+Keep previous commits and build files for internal recovery only. No public legacy route is exposed and players’ databases are not deleted. This is a local candidate until engine provenance, complete asset hashes and runtime acceptance have all been checked.

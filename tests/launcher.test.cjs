@@ -14,7 +14,7 @@ async function exitFixture(storage){
  };
  const context=vm.createContext({...resources,installFullscreen,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
   navigator:{gpu:{}},window:{addEventListener(){},close(){closeCalls++;}},document:{createElement(){return {};},getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
-  fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},set_persistence_callbacks(){},
+  fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},fonts_ready:async()=>{},set_lifecycle_callback(){},set_persistence_callbacks(){},
   VeraStorage:{open:async()=>{},library:async()=>null,users:async()=>[],...storage},import_file(){},prepare_audio(){},restore_user_file(){},start_game(){}
  });
  vm.runInContext(source('launcher.js').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js')),context);
@@ -74,7 +74,7 @@ test('manual folder wins over late cache restoration and storage does not gate e
  navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,body:{classList:element('body').classList},addEventListener(){}},
  MutationObserver:class{observe(){}},
  fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),
- AbortController,init:async()=>{},set_persistence_callbacks(){},VeraStorage:{open:async()=>{},library:()=>new Promise(resolve=>restore=resolve)},
+ AbortController,init:async()=>{},fonts_ready:async()=>{},set_lifecycle_callback(){},set_persistence_callbacks(){},VeraStorage:{open:async()=>{},preservedUsers:async()=>null,library:()=>new Promise(resolve=>restore=resolve)},
  import_file(){},prepare_audio(){},restore_user_file(){},start_game(){}
  });
  vm.runInContext(source('launcher.js').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js')),context);
@@ -89,13 +89,14 @@ test('manual folder wins over late cache restoration and storage does not gate e
 test('startup waits for saved preferences even when storage opens after the engine',async()=>{
  const {installFullscreen}=await import('../templates/fullscreen.mjs');
  const resources=await import('../templates/resources.mjs');
+ const {planUserRestore}=await import('../templates/user-data.mjs');
  let openStorage;const calls=[],elements=new Map();
  const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},setAttribute(){},addEventListener(){}});return elements.get(id);};
  const opening=new Promise(resolve=>openStorage=resolve);
- const context=vm.createContext({...resources,installFullscreen,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
+ const context=vm.createContext({...resources,installFullscreen,planUserRestore,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
  navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
- fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},set_persistence_callbacks(){},
- VeraStorage:{open:()=>opening,library:async()=>null,users:async()=>[{path:'/retail/RA2MD.INI',bytes:new Uint8Array([89]),modified_ms:1}],saveLibrary:async()=>{}},
+ fetch:async()=>({ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}}),init:async()=>{},fonts_ready:async()=>{},set_lifecycle_callback(){},set_persistence_callbacks(){},
+ VeraStorage:{open:()=>opening,preserveUsers:async()=>calls.push('backup'),library:async()=>null,users:async()=>[{path:'/retail/RA2MD.INI',bytes:new Uint8Array([89]),modified_ms:1}],saveLibrary:async()=>{}},
  prepare_audio(){},import_file(name){calls.push(name);},restore_user_file(path){calls.push(path);},start_game(){calls.push('start');}
  });
  vm.runInContext(source('launcher.js').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js')),context);
@@ -105,46 +106,16 @@ test('startup waits for saved preferences even when storage opens after the engi
  await new Promise(resolve=>setTimeout(resolve,20));
  assert.ok(!calls.includes('start'),'must not boot with defaults while preferences are still opening');
  openStorage();await starting;
- assert.deepEqual(calls.slice(-2),['/retail/RA2MD.INI','start']);
+ assert.deepEqual(calls.slice(-3),['backup','RA2MD.INI','start']);
 });
 
-test('optional gateway restores and validates origins without probing or gating single-player',async()=>{
- const {installFullscreen}=await import('../templates/fullscreen.mjs');
- const resources=await import('../templates/resources.mjs');
- const elements=new Map(),writes=[],requests=[];
- let startCalls=0;
- const element=id=>{
-  if(!elements.has(id))elements.set(id,{value:'',textContent:'',hidden:false,disabled:false,style:{},classList:{toggle(){},add(){},remove(){},contains(){return false;}},append(){},setAttribute(){},addEventListener(){}});
-  return elements.get(id);
- };
- const context=vm.createContext({...resources,installFullscreen,File,Blob,console,URL,Uint8Array,Map,Set,WeakMap,Date,Error,Number,Math,Promise,
- setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},AbortController,
- localStorage:{getItem:()=> 'wss://gateway.example:8443/',setItem(key,value){writes.push([key,value]);}},
- navigator:{gpu:{}},window:{addEventListener(){}},document:{createElement(){return {};},getElementById:element,body:element('body'),addEventListener(){}},MutationObserver:class{observe(){}},
- fetch:async url=>{requests.push(String(url));return {ok:true,headers:{get:()=>null},body:{getReader:()=>({read:async()=>({done:true})})}};},
- init:async()=>{},set_persistence_callbacks(){},VeraStorage:{open:async()=>{},library:async()=>null,users:async()=>[],saveLibrary:async()=>{}},
- import_file(){},prepare_audio(){},restore_user_file(){},start_game(){startCalls++;}
- });
- vm.runInContext(source('launcher.js').replace(/^import .*;\r?\n/gm,'').replaceAll('import.meta.url',JSON.stringify('https://example.test/launcher.js')),context);
- await new Promise(setImmediate);
- assert.equal(context.veraGatewayBase(),'https://gateway.example:8443');
- const input=element('gateway-address');
- input.value='ws://localhost:9090';input.oninput();
- assert.equal(context.veraGatewayBase(),'http://localhost:9090');
- assert.deepEqual(writes.at(-1),['vera20k.gateway-origin','http://localhost:9090']);
- for(const value of ['https://name:secret@example.test','https://example.test/path','https://example.test/?key=x','https://example.test/#room','ftp://example.test','https://example.test/../']){
-  input.value=value;input.oninput();
-  assert.throws(()=>context.veraGatewayBase(),/联机配置错误/);
-  assert.match(element('gateway-status').textContent,/联机配置错误/);
- }
- vm.runInContext("selectResources(['ra2.mix','ra2md.mix'].map(name=>({name,size:1,arrayBuffer:async()=>new ArrayBuffer(1)})),'manual')",context);
- assert.equal(element('start').disabled,false);
- await element('start').onclick();
- assert.equal(startCalls,1);
- assert.equal(requests.length,1,'only the Wasm engine is fetched, never a gateway probe');
- assert.ok(requests[0].startsWith('https://example.test/'));
- input.value='';input.oninput();assert.equal(context.veraGatewayBase(),'');
- Object.defineProperty(context,'localStorage',{get(){throw Error('storage blocked');}});
- input.value='https://other.example';assert.doesNotThrow(()=>input.oninput());
- assert.equal(context.veraGatewayBase(),'https://other.example');
+test('Internet visibility leaves the official gateway and existing player data alone',()=>{
+ const launch=source('launcher.js'),html=source('index.html');
+ assert.doesNotMatch(launch,/veraGatewayBase|gateway-origin|gateway-address/);
+ assert.doesNotMatch(html,/6994a5109615|gateway-address/);
+ assert.match(html,/浏览器版暂不支持局域网/);
+ assert.match(html,/升级前备份/);
+ assert.match(html,/id="export-prior-upgrade"[^>]+hidden/);
+ assert.match(launch,/exportPreservedUsers\(priorBackupPin\)/);
+ assert.match(launch,/enginePin='926a036e648a505e9d2d93b87ee7a5ccff7e7953'/);
 });

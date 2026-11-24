@@ -1,0 +1,2545 @@
+diff --git a/src/app/audio_runtime.rs b/src/app/audio_runtime.rs
+index 1a8dbc6f83ac1e579a17b29ed6b5463d6acd6636..528350b24aac8fe00a73509f2f6e0f156de3698d 100644
+--- a/src/app/audio_runtime.rs
++++ b/src/app/audio_runtime.rs
+@@ -325,6 +325,17 @@ impl AppAudioRuntime {
+         main: &mut crate::sim::rng::MainRngDraws,
+     ) {
+         self.service_audio_outputs(wall_ms, paused);
++        if catalog
++            .and_then(|c| c.index())
++            .is_some_and(|index| index.is_deferred())
++            && self
++                .sfx_player
++                .as_ref()
++                .is_some_and(SfxPlayer::has_pending_audio)
++        {
++            crate::assets::deferred_assets::request_audio();
++            return;
++        }
+         let retained = main.clone();
+         let mut draw_main =
+             crate::audio::sfx::PlaybackDraws::new(move |low, high| retained.ranged(low, high));
+diff --git a/src/app/frame.rs b/src/app/frame.rs
+index 41008b6b099a83e9a52995bf2874b935f4e0d559..e19cde43d2d8dd1890173ee52a910b8cc8559d96 100644
+--- a/src/app/frame.rs
++++ b/src/app/frame.rs
+@@ -199,6 +199,10 @@ impl App {
+         catch_up_allowed: bool,
+         wait_for_tick: bool,
+     ) -> RuntimeServiceResult {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if super::remote_assets::pump(state) {
++            return RuntimeServiceResult::default();
++        }
+         if state.persistence.pending_load.is_some() {
+             return RuntimeServiceResult::default();
+         }
+@@ -844,7 +848,14 @@ impl App {
+                     .match_diagnostics
+                     .playback_capture_requested(),
+         );
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if super::remote_assets::pump(state) {
++            crate::web::report_battlefield_fullscreen(false);
++            return Ok(FrameRenderOutcome::Deferred);
++        }
+         if let Some(presented) = crate::app::persistence::commands::pump_saved_game_load(state) {
++            #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++            crate::web::report_battlefield_fullscreen(false);
+             crate::app::input::hardware_cursor::hide_game_cursor(state);
+             return Ok(if presented {
+                 FrameRenderOutcome::Presented
+@@ -1669,6 +1680,16 @@ impl App {
+         let submission = state.renderer.gpu.hand_off_frame(encoder, output);
+         let presented_at = Instant::now();
+         #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        crate::web::report_battlefield_fullscreen(
++            game_render_output
++                .as_ref()
++                .and_then(|output| output.drawn_sidebar_view(state))
++                .is_some()
++                && screen_page == ScreenPage::Battlefield
++                && page.is_none()
++                && crate::app::presentation::sidebar_build::command_bar::battlefield_fullscreen_visible(state),
++        );
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+         if screenshot_requested {
+             // Browser hand-off submits/presents inline. Ask for the snapshot
+             // now, before the browser can recycle the canvas drawing buffer.
+diff --git a/src/app/frontend/shell_layout.rs b/src/app/frontend/shell_layout.rs
+index 581bc1ef359b1e12711ded35c321aa3e9fd66425..ef78351fa62cca83c7c84680f5c2b0fe32c93ff5 100644
+--- a/src/app/frontend/shell_layout.rs
++++ b/src/app/frontend/shell_layout.rs
+@@ -115,7 +115,18 @@ pub(crate) fn on<L>(state: &AppState, layout: impl FnOnce(i32, i32, ShellScale)
+ 
+ /// Main menu dialog `0xE2`.
+ pub(crate) fn main_menu_layout(state: &AppState) -> MainMenuShellLayout {
+-    pick(state, compute_layout)
++    let layout = pick(state, compute_layout);
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown", not(feature = "wasm-lan")))]
++    let layout = {
++        // This host enables the official Internet gateway, not /lan/signal.
++        // The shared render and pointer owners both get these same rectangles.
++        let mut layout = layout;
++        layout.buttons.retain(|button| {
++            button.id != crate::ui::main_menu_shell::MainMenuControlId::Network0x578
++        });
++        layout
++    };
++    layout
+ }
+ 
+ /// A front-end box's rects on the window's mapping.
+diff --git a/src/app/handler.rs b/src/app/handler.rs
+index d62c711960f4b6349adaa01fe33593d41894189d..7082fca560719f02f9e2f68ee9db771f56b29a26 100644
+--- a/src/app/handler.rs
++++ b/src/app/handler.rs
+@@ -227,6 +227,15 @@ impl App {
+         ZoomGeometry::new(width, height, percent, shape)
+     }
+ 
++    /// Actual browser document state when the wrapper owns fullscreen.
++    pub(crate) fn is_full_screen(state: &AppState) -> bool {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if let Some(active) = crate::web::host_fullscreen() {
++            return active;
++        }
++        state.platform.window.fullscreen().is_some()
++    }
++
+     /// The Options page's Full Screen box: switch the window now. On macOS this
+     /// is the system's own full screen with its menu bar and Dock hidden (see
+     /// `initialize`). The resize that follows re-fits the menus and the zoom.
+@@ -240,6 +249,10 @@ impl App {
+     /// window then comes back on the same screen the choice names
+     /// ([`crate::app::display_target`]).
+     pub(crate) fn set_full_screen(state: &mut AppState, full_screen: bool) {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if crate::web::set_host_fullscreen(full_screen) {
++            return;
++        }
+         if !full_screen {
+             // VERA: the game's own switch (the Options and Esc menu boxes, the
+             // Full Screen key) leaves full screen to the launch window, not to
+@@ -284,7 +297,7 @@ impl App {
+         if state.platform.capture_client_size.is_some() {
+             return;
+         }
+-        let full_screen = state.platform.window.fullscreen().is_some();
++        let full_screen = Self::is_full_screen(state);
+         #[cfg(target_os = "macos")]
+         if !full_screen {
+             show_menu_bar_and_dock_after_full_screen();
+@@ -1108,13 +1121,16 @@ impl App {
+                     crate::app::input::cursor::apply_cursor_confinement(state);
+                 }
+                 #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+-                crate::web::status(
+-                    &self
++                {
++                    let error = self
+                         .state
+                         .as_ref()
+-                        .and_then(|state| state.frontend.main_menu_shell_error.clone())
+-                        .unwrap_or_else(|| crate::i18n::tr("VERA:EngineReady")),
+-                );
++                        .and_then(|state| state.frontend.main_menu_shell_error.as_deref());
++                    crate::web::status(
++                        &error.map_or_else(|| crate::i18n::tr("VERA:EngineReady"), str::to_owned),
++                    );
++                    crate::web::startup_finished(error);
++                }
+                 #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+                 if let (Some(error), Some(state)) = (browser_spawn_failure, self.state.as_mut()) {
+                     Self::finish_browser_external_launch(state, Some(&error));
+@@ -1408,6 +1424,20 @@ impl ApplicationHandler for App {
+         }
+ 
+         let Some(state) = &mut self.state else { return };
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if super::remote_assets::pending()
++            && !matches!(
++                &event,
++                WindowEvent::RedrawRequested
++                    | WindowEvent::CloseRequested
++                    | WindowEvent::Resized(_)
++                    | WindowEvent::ScaleFactorChanged { .. }
++                    | WindowEvent::Focused(_)
++                    | WindowEvent::Occluded(_)
++            )
++        {
++            return;
++        }
+         state.sync_cursor_space();
+         // Playback has presentation-only input. Exit is local and never
+         // schedules EventClass EXIT or changes the recorded simulation. A
+@@ -1991,6 +2021,11 @@ impl ApplicationHandler for App {
+             {
+                 return;
+             }
++            #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++            if super::remote_assets::pump(state) {
++                event_loop.set_control_flow(ControlFlow::Wait);
++                return;
++            }
+             Self::follow_window_full_screen(state);
+             // cursor lock: the OS drops the clip on focus loss /
+             // Windows key, so re-assert the player's choice every frame while
+diff --git a/src/app/input/command_bar_input.rs b/src/app/input/command_bar_input.rs
+index 442da2fc4a9fb77426b999eabd84f22306341eb3..6e0ed07d98cd5ee43493a051f7fa978993590333 100644
+--- a/src/app/input/command_bar_input.rs
++++ b/src/app/input/command_bar_input.rs
+@@ -1,6 +1,7 @@
+ //! Command-bar gadgets reuse the ordinary retained mouse driver and actions.
+ 
+ use super::*;
++use crate::ui::sidebar::command_bar::{FULLSCREEN_COMMAND, FULLSCREEN_GADGET_ID};
+ 
+ pub(super) fn sync(state: &mut AppState) {
+     let layout = crate::app::presentation::sidebar_build::command_bar::layout_and_slots(state);
+@@ -51,7 +52,11 @@ fn sync_prepared(
+     let handles =
+         *gadgets.command_bar.get_or_insert_with(|| {
+             std::array::from_fn(|i| {
+-                let id = if i == 11 { 0xF0 } else { 0xD6 + i as u16 };
++                let id = match i {
++                    11 => 0xF0,
++                    12 => FULLSCREEN_GADGET_ID,
++                    _ => 0xD6 + i as u16,
++                };
+                 let kind = if i == 9 {
+                     ToggleKind::Flip
+                 } else {
+@@ -68,9 +73,10 @@ fn sync_prepared(
+             if command == 11 {
+                 Some(layout.left_cap)
+             } else {
++                let identity = if command == 12 { FULLSCREEN_COMMAND } else { command };
+                 slots
+                     .iter()
+-                    .position(|id| *id == Some(command))
++                    .position(|id| *id == Some(identity))
+                     .and_then(|slot| layout.slot(slot))
+             }
+         });
+@@ -180,6 +186,13 @@ pub(super) fn apply(state: &mut AppState, result: u16) -> bool {
+             .command_bar_closed = !opening;
+         return true;
+     }
++    if id == FULLSCREEN_GADGET_ID {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if result & RESULT_RIGHT == 0 {
++            crate::web::toggle_battlefield_fullscreen();
++        }
++        return true;
++    }
+     if !(0xD6..0xE1).contains(&id) {
+         return false;
+     }
+diff --git a/src/app/input/dispatch/hotkey_dispatch.rs b/src/app/input/dispatch/hotkey_dispatch.rs
+index 2b209c22cfe5e7e09aec2cb5766faca32e1cd7f9..6256a3b967b3d37c7e1b9a45fd10495e49726753 100644
+--- a/src/app/input/dispatch/hotkey_dispatch.rs
++++ b/src/app/input/dispatch/hotkey_dispatch.rs
+@@ -546,7 +546,7 @@ pub(crate) fn run_window_command(state: &mut AppState, command: HotkeyCommand) {
+         HotkeyCommand::LockCursor => crate::app::input::cursor::toggle_cursor_confinement(state),
+         // A capture keeps its fixed surface.
+         HotkeyCommand::FullScreen if state.platform.capture_client_size.is_none() => {
+-            let full_screen = state.platform.window.fullscreen().is_none();
++            let full_screen = !crate::app::App::is_full_screen(state);
+             crate::app::App::set_full_screen(state, full_screen);
+         }
+         HotkeyCommand::PerformanceStats => {
+diff --git a/src/app/input/gadget_input.rs b/src/app/input/gadget_input.rs
+index 1b91732bcee7ad4e82cc633f3bdede45c54e9f27..9f5f645930890b26fcff0255f6267d4e98954d69 100644
+--- a/src/app/input/gadget_input.rs
++++ b/src/app/input/gadget_input.rs
+@@ -94,7 +94,7 @@ pub(crate) struct InGameGadgets {
+     /// Minimap/radar click region (A3): invisible sticky region over the radar
+     /// minimap; disabled when the radar is offline / minimap absent.
+     pub minimap: Option<GadgetHandle>,
+-    pub command_bar: Option<[GadgetHandle; 12]>,
++    pub command_bar: Option<[GadgetHandle; 13]>,
+     timer_dock: Option<GadgetHandle>,
+     /// The layout's added parts, a gadget for each: grown to fit and never
+     /// shrunk, with every part that is no button disabled.
+diff --git a/src/app/loading/pump.rs b/src/app/loading/pump.rs
+index a18094a99a663f36e2707489b554ef3a84f7b4db..5335a3853158416f967ef444d4ba17d65cd2d934 100644
+--- a/src/app/loading/pump.rs
++++ b/src/app/loading/pump.rs
+@@ -408,6 +408,11 @@ impl LoadingRequest {
+         }
+     }
+ 
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    pub(crate) fn remote_allowed(&self) -> bool {
++        !matches!(self.startup(), LoadingStartup::Network(_) | LoadingStartup::Replay { .. })
++    }
++
+     pub(crate) fn selected_map_file(&self) -> &str {
+         self.startup().selected_map_file()
+     }
+@@ -1416,6 +1421,8 @@ fn play_startup_personal_rules(
+ }
+ 
+ pub(crate) fn begin_loading(state: &mut AppState, request: LoadingRequest) {
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    let Some(request) = crate::app::remote_assets::map(state, request, false) else { return; };
+     // Retiring the Radar FIFO can record an outgoing scenario service.
+     crate::app::match_runtime::sim_tick::finish_threaded_frame(state);
+     state
+diff --git a/src/app/mod.rs b/src/app/mod.rs
+index 08743fd5957e858b3e8fb2d990a6415e978531bd..cdd00ac107aa455b9da8d7d65b52fb8a00b1c406 100644
+--- a/src/app/mod.rs
++++ b/src/app/mod.rs
+@@ -63,6 +63,8 @@ pub(crate) mod diagnostics;
+ /// Which screen the game opens on: the Display list's own translation between
+ /// VERA's profile value and the window system's monitors.
+ pub(crate) mod display_target;
++#[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++pub(crate) mod remote_assets;
+ mod frame;
+ pub mod frontend;
+ mod game_data_check;
+diff --git a/src/app/persistence/commands.rs b/src/app/persistence/commands.rs
+index d1e61a579d770302b42624e6e1bc6f9e64eb3d2f..96801ea948b4791c00bedc0b6fa650004c8149e5 100644
+--- a/src/app/persistence/commands.rs
++++ b/src/app/persistence/commands.rs
+@@ -433,29 +433,63 @@ pub(crate) fn request_saved_game_load(state: &mut AppState, path: PathBuf) {
+ /// Called before ordinary frame service; the retained browser owns failure UI.
+ pub(crate) fn pump_saved_game_load(state: &mut AppState) -> Option<bool> {
+     let mut pending = state.persistence.pending_load.take()?;
+-    let Some(path) = pending.advance(|| {
+-        match crate::app::loading::pump::present_saved_game_loading(state) {
+-            Ok(presented) => presented,
+-            Err(error) => {
+-                // Like missing native progress artwork, presentation failure
+-                // must not make an otherwise loadable save inaccessible.
+-                log::warn!("Saved-game loading dialog presentation failed: {error:#}");
+-                true
++    if pending
++        .advance(|| {
++            match crate::app::loading::pump::present_saved_game_loading(state) {
++                Ok(presented) => presented,
++                Err(error) => {
++                    // A presentation failure must not make a valid save inaccessible.
++                    log::warn!("Saved-game loading dialog presentation failed: {error:#}");
++                    true
++                }
+             }
+-        }
+-    }) else {
++        })
++        .is_none()
++    {
+         let presented = pending.presented;
+         state.persistence.pending_load = Some(pending);
+         state.platform.window.request_redraw();
+         return Some(presented);
++    }
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    let pending = match crate::app::remote_assets::initial_library_preserving_page(
++        state,
++        pending,
++        |state, pending, ready| {
++            if ready {
++                state.persistence.pending_load = Some(pending);
++            } else {
++                finish_pending_load(
++                    state,
++                    &pending.path,
++                    Err(super::PreparedLoadError::Resources(
++                        "saved-game resource loading was cancelled or failed".into(),
++                    )),
++                );
++            }
++            state.platform.window.request_redraw();
++        },
++    ) {
++        Some(pending) => pending,
++        None => return Some(false),
+     };
++    let path = pending.path.as_path();
++    let result = restore_save_file(state, path);
++    finish_pending_load(state, path, result);
++    Some(false)
++}
++
++fn finish_pending_load(
++    state: &mut AppState,
++    path: &Path,
++    result: Result<(), super::PreparedLoadError>,
++) {
+     let from_menu = state.frontend.screen == crate::ui::game_screen::GameScreen::MainMenu;
+     let from_browser = state
+         .match_state
+         .match_presentation
+         .saved_game_browser
+         .is_some();
+-    let result = restore_save_file(state, path);
+     if from_menu {
+         crate::app::App::finish_load_saved_game_from_menu(state, path, result);
+     } else if from_browser {
+@@ -467,7 +501,6 @@ pub(crate) fn pump_saved_game_load(state: &mut AppState) -> Option<bool> {
+         log::warn!("Load: {}: {error}", path.display());
+     }
+     state.platform.window.request_redraw();
+-    Some(false)
+ }
+ 
+ /// Both browser routes prepare the saved world's own resources, then publish
+@@ -477,6 +510,12 @@ pub(crate) fn try_load_save_file(
+     state: &mut AppState,
+     path: &Path,
+ ) -> Result<(), crate::app::persistence::PreparedLoadError> {
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    if !crate::app::remote_assets::initial_library_ready(state) {
++        return Err(crate::app::persistence::PreparedLoadError::Resources(
++            "saved-game resources are not resident; use request_saved_game_load".into(),
++        ));
++    }
+     if let Err(error) = crate::app::loading::pump::present_saved_game_loading(state) {
+         log::warn!("Saved-game loading dialog presentation failed: {error:#}");
+     }
+diff --git a/src/app/persistence/options_profile.rs b/src/app/persistence/options_profile.rs
+index a3db68d18e2aa1f5cd7dc7fb879b03e70a96cfd5..416dcc91a086123ed5cef75a9009fc245d544bac 100644
+--- a/src/app/persistence/options_profile.rs
++++ b/src/app/persistence/options_profile.rs
+@@ -149,8 +149,8 @@ pub(crate) struct RetailOptionsProfile {
+     pub(crate) sidebar_columns: crate::ui::main_menu_dialogs::options::SidebarColumns,
+     /// `[VERA] YROriginalStyle=`: whether the startup splash, the menu movie,
+     /// the offline Skirmish background and the LAN/WOL lobby backgrounds use
+-    /// Yuri's Revenge's art. Off by default, so new profiles show Red Alert
+-    /// 2's. Only those surfaces read it; see
++    /// Yuri's Revenge's art. This fork defaults to YR; explicit saved choices
++    /// still win. Only those surfaces read it; see
+     /// [`LauncherCheckboxId::YrOriginalStyle`](crate::ui::main_menu_dialogs::options::LauncherCheckboxId::YrOriginalStyle).
+     pub(crate) yr_original_style: bool,
+     /// `[VERA] SkipIntro=`: start straight at the main menu, without the logo
+@@ -423,7 +423,7 @@ impl Default for RetailOptionsProfile {
+             original_shape: false,
+             sidebar: crate::ui::main_menu_dialogs::options::SidebarSize::Normal,
+             sidebar_columns: crate::ui::main_menu_dialogs::options::SidebarColumns::Two,
+-            yr_original_style: false,
++            yr_original_style: true,
+             skip_intro: false,
+             show_string_keys: false,
+             mouse_wheel_zoom: false,
+@@ -1769,7 +1769,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+             defaults.retained_profile.sidebar_columns,
+             SidebarColumns::Two
+         );
+-        assert!(!defaults.retained_profile.yr_original_style);
++        assert!(defaults.retained_profile.yr_original_style);
+         // Shift + left click queues one copy, as in gamemd, until it is ticked.
+         assert!(!defaults.retained_profile.shift_queue);
+         // The retail minimum-player gate stays until SoloSkirmish= is enabled.
+@@ -1788,7 +1788,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+         assert_eq!(load.retained_profile.zoom, Zoom::Percent(200));
+         assert!(load.retained_profile.original_shape);
+         assert_eq!(load.retained_profile.sidebar, SidebarSize::Large);
+-        assert!(!load.retained_profile.yr_original_style);
++        assert!(load.retained_profile.yr_original_style);
+         assert!(!load.retained_profile.skip_intro);
+         assert!(load.retained_profile.shift_queue);
+         assert!(load.retained_profile.solo_skirmish);
+@@ -2349,32 +2349,18 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+     }
+ 
+     #[test]
+-    fn yr_original_style_defaults_to_ra2_and_reads_only_its_own_key() {
+-        let defaults = load_snapshot(&RetailStartupOptions::default(), b"[VERA]\n");
+-        assert!(
+-            !defaults.retained_profile.yr_original_style,
+-            "unchecked Original YR Style selects the default RA2 look"
+-        );
+-
+-        for value in ["yes", "no"] {
+-            let ignored = load_snapshot(
+-                &RetailStartupOptions::default(),
+-                format!("[VERA]\nRA2Look={value}\n").as_bytes(),
+-            );
+-            assert!(
+-                !ignored.retained_profile.yr_original_style,
+-                "RA2Look={value} must not affect the default"
+-            );
++    fn yr_original_style_defaults_to_yr_and_reads_only_its_own_key() {
++        use crate::ui::main_menu_dialogs::options::{LauncherCheckboxId, LauncherOptionsValues};
++        let startup = RetailStartupOptions::default();
++        assert!(RetailOptionsLoad::without_settings(&startup).retained_profile.yr_original_style);
++        assert!(LauncherOptionsValues::default()[LauncherCheckboxId::YrOriginalStyle]);
++        for ini in ["", "[Video]\nScreenWidth=800\n", "[VERA]\n", "[VERA]\nRA2Look=no\n"] {
++            assert!(load_snapshot(&startup, ini.as_bytes()).retained_profile.yr_original_style);
++        }
++        for (choice, enabled) in [("yes", true), ("no", false)] {
++            let ini = format!("[VERA]\nYROriginalStyle={choice}\n");
++            assert_eq!(load_snapshot(&startup, ini.as_bytes()).retained_profile.yr_original_style, enabled);
+         }
+-
+-        let explicit_new_key = load_snapshot(
+-            &RetailStartupOptions::default(),
+-            b"[VERA]\nYROriginalStyle=yes\n",
+-        );
+-        assert!(
+-            explicit_new_key.retained_profile.yr_original_style,
+-            "the YR-original preference must be read from its own key"
+-        );
+     }
+ 
+     /// RA2 Mode comes from its own key and is saved under it, and saving
+diff --git a/src/app/presentation/sidebar_command_bar.rs b/src/app/presentation/sidebar_command_bar.rs
+index ade3524b85cab730abb4102c99600b0432148b8a..fea7636b4d6ed5ffe5ca455fbfd767e1d735ac2d 100644
+--- a/src/app/presentation/sidebar_command_bar.rs
++++ b/src/app/presentation/sidebar_command_bar.rs
+@@ -19,7 +19,29 @@ pub(crate) fn layout_and_slots(state: &AppState) -> Option<(CommandBarLayout, Ve
+             .command_bar_closed,
+     )?;
+     let multiplayer = !state.match_state.session_mode().is_single_player();
+-    Some((layout, art.slots[usize::from(multiplayer)].clone()))
++    let slots = art.slots[usize::from(multiplayer)].clone();
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    let slots = {
++        let mut slots = slots;
++        if art.fullscreen.is_some_and(|entry| {
++            entry.pixel_size[0] <= layout.background.w
++                && entry.pixel_size[1] <= layout.background.h
++        }) && crate::web::battlefield_fullscreen_available()
++        {
++            crate::ui::sidebar::command_bar::append_fullscreen_slot(layout, &mut slots);
++        }
++        slots
++    };
++    Some((layout, slots))
++}
++
++#[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++pub(crate) fn battlefield_fullscreen_visible(state: &AppState) -> bool {
++    state.renderer.sidebar_surface.is_some()
++        && crate::app::presentation::sidebar_render::current_sidebar_view(state).is_some()
++        && layout_and_slots(state).is_some_and(|(_, slots)| {
++            slots.contains(&Some(crate::ui::sidebar::command_bar::FULLSCREEN_COMMAND))
++        })
+ }
+ 
+ /// The bar a match shows on `frame`, in its layout space: along the strip the
+@@ -120,11 +142,21 @@ pub(crate) fn append_prepared(
+     draw(art.right_cap, layout.right_cap.x, layout.right_cap.y);
+     for (slot, command) in slots.iter().copied().enumerate() {
+         if let (Some(rect), Some(command)) = (layout.slot(slot), command) {
+-            draw(
+-                art.buttons[command][usize::from(gadgets.command_pressed[command])],
+-                rect.x,
+-                rect.y,
+-            );
++            if command == crate::ui::sidebar::command_bar::FULLSCREEN_COMMAND {
++                if let Some(icon) = art.fullscreen {
++                    draw(
++                        Some(icon),
++                        rect.x + (rect.w - icon.pixel_size[0]) * 0.5,
++                        rect.y + (rect.h - icon.pixel_size[1]) * 0.5,
++                    );
++                }
++            } else {
++                draw(
++                    art.buttons[command][usize::from(gadgets.command_pressed[command])],
++                    rect.x,
++                    rect.y,
++                );
++            }
+         }
+     }
+     draw(
+@@ -196,6 +228,7 @@ mod tests {
+             left_cap: [Some(piece(28.0)); 3],
+             right_cap: Some(piece(28.0)),
+             background: Some(piece(52.0)),
++            fullscreen: None,
+             buttons: [[None; 2]; 11],
+             slots: [Vec::new(), Vec::new()],
+         }
+diff --git a/src/app/process_assets.rs b/src/app/process_assets.rs
+index 1c99772d93bab4c0e45b9ec6f2cfe528e65a5a8b..a0a037c446ae67d80c906aebfddd780e2d7aa14b 100644
+--- a/src/app/process_assets.rs
++++ b/src/app/process_assets.rs
+@@ -1376,6 +1376,50 @@ impl ProcessAssets {
+         self.manager.as_ref()
+     }
+ 
++    pub(crate) fn has_deferred_audio(&self) -> bool {
++        self.audio_catalog
++            .as_ref()
++            .and_then(|c| c.index())
++            .is_some_and(|i| i.is_deferred())
++    }
++
++    /// The initial readiness stage keeps the process definitions and sticky file cache.
++    pub(crate) fn complete_initial_library(
++        &mut self,
++        root: &std::path::Path,
++        audio: bool,
++    ) -> Result<(), String> {
++        let mut next = self.reconstruct_manager(root).map_err(|e| e.to_string())?;
++        next.register_neutral_archives()
++            .map_err(|e| e.to_string())?;
++        let audio_index = if audio {
++            let loaded = next
++                .load_audio_index()
++                .map_err(|e| e.to_string())?
++                .ok_or_else(|| "completed sound bank is missing".to_owned())?;
++            let original = self
++                .audio_catalog
++                .as_ref()
++                .and_then(|c| c.index.as_ref())
++                .ok_or_else(|| "no frozen audio index".to_owned())?;
++            if loaded.sources != original.sources || loaded.index.is_deferred() {
++                return Err("sound bank completion changed the selected sources".into());
++            }
++            Some(loaded)
++        } else {
++            None
++        };
++        self.manager
++            .as_mut()
++            .ok_or_else(|| "asset manager is currently leased".to_owned())?
++            .admit_initial_library(next)
++            .map_err(|e| e.to_string())?;
++        if let Some(index) = audio_index {
++            self.audio_catalog.as_mut().unwrap().index = Some(index);
++        }
++        Ok(())
++    }
++
+     /// Field-level split borrow for a scenario rescan: the scan registers loose
+     /// YRO archives, and its PKT titles resolve through the process CSF. Both
+     /// fields live on this owner, so the pair is borrowed together.
+diff --git a/src/app/radar_movie.rs b/src/app/radar_movie.rs
+index cfcc36c61d3f2e48d2efc5ff5bf865c082ff02a0..dbe1b144d59a6846e54961b9405964167640b354 100644
+--- a/src/app/radar_movie.rs
++++ b/src/app/radar_movie.rs
+@@ -172,12 +172,44 @@ pub(crate) fn enqueue(state: &mut AppState, index: i32, pause_simulation: bool)
+ /// Returns whether the clip was admitted. `false` means it is missing or
+ /// undecodable; the caller decides what to do with the failed request.
+ pub(crate) fn enqueue_file(state: &mut AppState, stem: &str, pause_simulation: bool) -> bool {
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    {
++        let file = format!("{stem}.BIK");
++        if let Some(bytes) = super::remote_assets::movie_bytes(&file) {
++            return enqueue_file_bytes(state, stem, pause_simulation, Some(bytes));
++        }
++        if super::remote_assets::movie_missing(state, &file) {
++            let stem = stem.to_owned();
++            super::remote_assets::movie(
++                &file,
++                Box::new(move |state, bytes| {
++                    if let Some(bytes) = bytes {
++                        enqueue_file_bytes(state, &stem, pause_simulation, Some(bytes));
++                    }
++                }),
++            );
++            return true;
++        }
++    }
++    enqueue_file_bytes(state, stem, pause_simulation, None)
++}
++fn enqueue_file_bytes(
++    state: &mut AppState,
++    stem: &str,
++    pause_simulation: bool,
++    remote: Option<Arc<[u8]>>,
++) -> bool {
+     let file_name = format!("{stem}.BIK");
+-    let Some((bytes, source)) = state.process_assets.manager().and_then(|assets| {
+-        assets
+-            .get_with_source_ref(&file_name)
+-            .map(|(bytes, source)| (Arc::<[u8]>::from(bytes), source.to_string()))
+-    }) else {
++    let Some((bytes, source)) = state
++        .process_assets
++        .manager()
++        .and_then(|assets| {
++            assets
++                .get_with_source_ref(&file_name)
++                .map(|(bytes, source)| (Arc::<[u8]>::from(bytes), source.to_string()))
++        })
++        .or_else(|| remote.map(|bytes| (bytes, format!("remote:{file_name}"))))
++    else {
+         log::info!("Radar movie {file_name} is not installed");
+         return false;
+     };
+diff --git a/src/app/remote_assets.rs b/src/app/remote_assets.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..5192cb6b6dbf5848950bbcc77877b0f610769c2d
+--- /dev/null
++++ b/src/app/remote_assets.rs
+@@ -0,0 +1,798 @@
++//! Browser-only, explicit resource waits. Never fetch from a synchronous VFS read.
++use super::{App, AppState};
++use js_sys::Function;
++use serde::Deserialize;
++use std::{
++    cell::RefCell,
++    collections::{BTreeSet, HashMap, HashSet, VecDeque},
++    sync::Arc,
++};
++use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
++
++#[derive(Clone, Deserialize)]
++struct Descriptor {
++    size: usize,
++    sha256: String,
++    #[serde(default)]
++    duration_seconds: Option<u32>,
++    #[serde(default)]
++    bank: Option<crate::assets::deferred_assets::BankMetadata>,
++}
++type Continuation = Box<dyn FnOnce(&mut AppState, Option<Arc<[u8]>>)>;
++struct Request {
++    id: u32,
++    key: String,
++    descriptor: Descriptor,
++    continuation: Continuation,
++    dispatched: bool,
++    result: Option<Option<Arc<[u8]>>>,
++    previous: Option<Arc<[u8]>>,
++}
++#[derive(Default)]
++struct Host {
++    catalog: HashMap<String, Descriptor>,
++    handler: Option<Function>,
++    queue: VecDeque<Request>,
++    next: u32,
++    installed: HashSet<String>,
++    graphics_ready: bool,
++    // Verified compressed BIK bytes for only the current campaign mission.
++    campaign_movies: HashMap<String, Arc<[u8]>>,
++}
++thread_local! { static HOST: RefCell<Host> = RefCell::new(Host::default()); }
++
++fn valid_name(name: &str) -> bool {
++    !name.is_empty()
++        && name.len() <= 1024
++        && !name.contains(['\\', ':', '\0'])
++        && !name.chars().any(char::is_control)
++        && name
++            .split('/')
++            .all(|part| !part.is_empty() && part != "." && part != "..")
++}
++fn key(kind: &str, name: &str) -> String {
++    format!("{kind}:{}", name.to_uppercase())
++}
++
++#[wasm_bindgen]
++pub fn configure_remote_assets(catalog: &str, handler: Function) -> Result<(), JsValue> {
++    crate::web::idle("Configure remote assets before starting")?;
++    if catalog.len() > 2 * 1024 * 1024 {
++        return Err(JsValue::from_str("Remote catalog too large"));
++    }
++    let parsed: HashMap<String, Descriptor> =
++        serde_json::from_str(catalog).map_err(|e| JsValue::from_str(&e.to_string()))?;
++    if parsed.len() > 12000
++        || parsed.iter().any(|(key, row)| {
++            let Some((kind, name)) = key.split_once(':') else {
++                return true;
++            };
++            !matches!(kind, "map" | "movie" | "music" | "audio" | "archive")
++                || !valid_name(name)
++                || row.size == 0
++                || row.size > 1024 * 1024 * 1024
++                || !crate::map::source::valid_source_sha256(&row.sha256)
++        })
++    {
++        return Err(JsValue::from_str("Invalid remote catalog"));
++    }
++    let mut music = HashMap::new();
++    let mut bank = None;
++    for (id, row) in &parsed {
++        let (kind, name) = id.split_once(':').unwrap();
++        if matches!(kind, "audio" | "archive")
++            && (name.contains('/') || !name.to_ascii_lowercase().ends_with(".mix"))
++        {
++            return Err(JsValue::from_str("Staged archives must be root MIX files"));
++        }
++        if kind == "music" {
++            let duration = row
++                .duration_seconds
++                .filter(|v| *v <= 86400)
++                .ok_or_else(|| JsValue::from_str("Music metadata needs duration_seconds"))?;
++            if !name.to_ascii_lowercase().ends_with(".wav") {
++                return Err(JsValue::from_str("Remote music must be WAV"));
++            }
++            music.insert(
++                name.to_uppercase(),
++                crate::assets::deferred_assets::MusicMetadata {
++                    size: row.size,
++                    sha256: row.sha256.clone(),
++                    duration_seconds: duration,
++                },
++            );
++        }
++        if kind == "audio" {
++            let metadata = row
++                .bank
++                .clone()
++                .ok_or_else(|| JsValue::from_str("Missing selected bank metadata"))?;
++            if bank.is_some()
++                || !metadata.archive_name.eq_ignore_ascii_case(name)
++                || !valid_name(&metadata.source_archive)
++                || metadata.size == 0
++                || metadata.size > 1024 * 1024 * 1024
++                || !crate::map::source::valid_source_sha256(&metadata.sha256)
++                || !crate::map::source::valid_source_sha256(&metadata.index_sha256)
++            {
++                return Err(JsValue::from_str(
++                    "Invalid or unsupported deferred sound bank",
++                ));
++            }
++            bank = Some(metadata);
++        }
++    }
++    crate::assets::deferred_assets::configure(music, bank);
++    HOST.with(|host| {
++        let mut host = host.borrow_mut();
++        host.catalog = parsed
++            .into_iter()
++            .map(|(k, v)| {
++                let (kind, name) = k.split_once(':').unwrap();
++                (key(kind, name), v)
++            })
++            .collect();
++        host.handler = Some(handler);
++        host.graphics_ready = !host.catalog.keys().any(|key| key.starts_with("archive:"));
++        host.installed.clear();
++        host.campaign_movies.clear();
++    });
++    Ok(())
++}
++
++/// Only the active ticket may publish a complete, independently verified payload.
++#[wasm_bindgen]
++pub fn finish_remote_asset(id: u32, bytes: Vec<u8>, cancelled: bool) -> Result<(), JsValue> {
++    HOST.with(|host| {
++        let mut host = host.borrow_mut();
++        let request = host
++            .queue
++            .front_mut()
++            .filter(|r| r.id == id && r.result.is_none())
++            .ok_or_else(|| JsValue::from_str("Expired remote request"))?;
++        if !cancelled
++            && (bytes.len() != request.descriptor.size
++                || crate::util::sha256::sha256_hex(&bytes) != request.descriptor.sha256)
++        {
++            return Err(JsValue::from_str("Remote resource integrity failure"));
++        }
++        let bytes: Arc<[u8]> = bytes.into();
++        if !cancelled {
++            if request.key.starts_with("map:") {
++                crate::map::map_file::load_from_bytes(bytes.to_vec())
++                    .map_err(|e| JsValue::from_str(&format!("Invalid remote map: {e}")))?;
++            } else if request.key.starts_with("movie:") {
++                let movie = crate::assets::bink_file::BinkFile::parse(Arc::clone(&bytes))
++                    .map_err(|e| JsValue::from_str(&format!("Invalid remote movie: {e}")))?;
++                if movie.header.file_size > bytes.len() as u64
++                    || movie.frame_index.iter().any(|frame| {
++                        (frame.offset as usize)
++                            .checked_add(frame.size as usize)
++                            .is_none_or(|end| end > bytes.len())
++                    })
++                {
++                    return Err(JsValue::from_str("Incomplete remote movie"));
++                }
++            } else if request.key.starts_with("music:") {
++                let wav = crate::assets::wav_file::WavFile::parse(&bytes)
++                    .ok_or_else(|| JsValue::from_str("Invalid remote WAV"))?;
++                if wav.native_duration_seconds() != request.descriptor.duration_seconds {
++                    return Err(JsValue::from_str("Remote music metadata mismatch"));
++                }
++            } else {
++                let archive =
++                    crate::assets::mix_archive::MixArchive::from_shared(Arc::clone(&bytes))
++                        .map_err(|e| JsValue::from_str(&e.to_string()))?;
++                if let Some(previous) = &request.previous {
++                    crate::assets::asset_manager::AssetManager::validate_archive_expansion(
++                        Arc::clone(previous),
++                        Arc::clone(&bytes),
++                    )
++                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
++                }
++                if let Some(bank) = &request.descriptor.bank {
++                    let idx = archive
++                        .get_by_name("audio.idx")
++                        .ok_or_else(|| JsValue::from_str("Missing staged audio.idx"))?;
++                    let bag = archive
++                        .get_by_name("audio.bag")
++                        .ok_or_else(|| JsValue::from_str("Missing staged audio.bag"))?;
++                    if bag.len() != bank.size
++                        || crate::util::sha256::sha256_hex(bag) != bank.sha256
++                        || crate::util::sha256::sha256_hex(idx) != bank.index_sha256
++                    {
++                        return Err(JsValue::from_str("Staged sound source metadata mismatch"));
++                    }
++                }
++            }
++        }
++        request.result = Some(if cancelled { None } else { Some(bytes) });
++        if cancelled {
++            host.queue.truncate(1);
++        }
++        Ok(())
++    })?;
++    crate::web::wake();
++    Ok(())
++}
++
++fn dispatch() {
++    let call = HOST.with(|host| {
++        let mut host = host.borrow_mut();
++        let handler = host.handler.clone()?;
++        let request = host.queue.front_mut()?;
++        if request.dispatched {
++            return None;
++        }
++        request.dispatched = true;
++        Some((handler, request.id, request.key.clone()))
++    });
++    if let Some((handler, id, key)) = call {
++        let (kind, name) = key.split_once(':').unwrap();
++        if handler
++            .call3(&JsValue::NULL, &id.into(), &kind.into(), &name.into())
++            .is_err()
++        {
++            let _ = finish_remote_asset(id, Vec::new(), true);
++        }
++    }
++}
++
++fn declared(kind: &str, name: &str) -> bool {
++    HOST.with(|host| host.borrow().catalog.contains_key(&key(kind, name)))
++}
++fn begin(kind: &str, name: &str, continuation: Continuation) {
++    begin_with_previous(kind, name, None, continuation);
++}
++fn begin_with_previous(
++    kind: &str,
++    name: &str,
++    previous: Option<Arc<[u8]>>,
++    continuation: Continuation,
++) {
++    HOST.with(|host| {
++        let mut host = host.borrow_mut();
++        host.next = host.next.wrapping_add(1).max(1);
++        let key = key(kind, name);
++        let descriptor = host.catalog[&key].clone();
++        let id = host.next;
++        host.queue.push_back(Request {
++            id,
++            key,
++            descriptor,
++            continuation,
++            dispatched: false,
++            result: None,
++            previous,
++        });
++    });
++    dispatch();
++}
++pub(super) fn pending() -> bool {
++    HOST.with(|host| !host.borrow().queue.is_empty())
++}
++pub(crate) fn clear() {
++    crate::assets::deferred_assets::configure(HashMap::new(), None);
++    let handler = HOST.with(|host| {
++        let mut h = host.borrow_mut();
++        h.queue.clear();
++        h.campaign_movies.clear();
++        h.handler.clone()
++    });
++    if let Some(handler) = handler {
++        let _ = handler.call3(&JsValue::NULL, &0u32.into(), &"cancel".into(), &"".into());
++    }
++}
++
++fn queued(kind: &str, name: &str) -> bool {
++    HOST.with(|h| h.borrow().queue.iter().any(|r| r.key == key(kind, name)))
++}
++fn back_to_menu(state: &mut AppState) {
++    state.frontend.screen = crate::ui::game_screen::GameScreen::MainMenu;
++    App::commit_campaign_back(state);
++}
++fn incompatible(state: &mut AppState, error: String) {
++    log::error!("Resource stage incompatible: {error}");
++    crate::assets::deferred_assets::cancel_audio_request();
++    if let Some(sfx) = state.audio.sfx_player.as_mut() {
++        sfx.stop_all();
++    }
++    state.audio.stop_theme();
++    let handler = HOST.with(|h| {
++        let mut h = h.borrow_mut();
++        h.queue.clear();
++        h.handler.clone()
++    });
++    back_to_menu(state);
++    if let Some(handler) = handler {
++        let _ = handler.call3(&JsValue::NULL, &0u32.into(), &"error".into(), &error.into());
++    }
++}
++fn archive_request(
++    state: &mut AppState,
++    kind: &str,
++    name: &str,
++    after: Box<dyn FnOnce(&mut AppState, bool)>,
++) {
++    archive_request_with_policy(state, kind, name, false, after);
++}
++
++// Saved loads and online sign-in retain their page on resource failure.
++fn initial_library_error(state: &mut AppState, error: String, preserve_page: bool) {
++    if preserve_page {
++        log::warn!("Initial scenario resources: {error}");
++    } else {
++        incompatible(state, error);
++    }
++}
++
++fn archive_request_with_policy(
++    state: &mut AppState,
++    kind: &str,
++    name: &str,
++    preserve_page: bool,
++    after: Box<dyn FnOnce(&mut AppState, bool)>,
++) {
++    let Some(root) = state
++        .platform
++        .game_config
++        .as_ref()
++        .map(|c| c.paths.ra2_dir.clone())
++    else {
++        after(state, false);
++        return;
++    };
++    let Some(path) = crate::util::case_insensitive_path::find(&root, name) else {
++        initial_library_error(
++            state,
++            format!("Missing bootstrap archive placeholder: {name}"),
++            preserve_page,
++        );
++        after(state, false);
++        return;
++    };
++    let previous = crate::util::file_system::read_shared(&path).ok();
++    let audio = kind == "audio";
++    let id = key(kind, name);
++    begin_with_previous(
++        kind,
++        name,
++        previous,
++        Box::new(move |state, bytes| {
++            if let Some(bytes) = bytes {
++                crate::util::file_system::import_shared(path, bytes);
++                if audio {
++                    if let Err(error) = state.process_assets.complete_initial_library(&root, true) {
++                        initial_library_error(state, error, preserve_page);
++                        after(state, false);
++                        return;
++                    }
++                    crate::assets::deferred_assets::mark_audio_ready();
++                }
++                HOST.with(|h| {
++                    h.borrow_mut().installed.insert(id);
++                });
++                after(state, true);
++            } else {
++                if audio {
++                    crate::assets::deferred_assets::cancel_audio_request();
++                    if let Some(sfx) = state.audio.sfx_player.as_mut() {
++                        sfx.stop_all();
++                    }
++                }
++                after(state, false);
++            }
++        }),
++    );
++}
++
++fn discover_media_requests(state: &mut AppState) {
++    if crate::assets::deferred_assets::audio_requested()
++        && state.process_assets.has_deferred_audio()
++        && let Some(bank) = crate::assets::deferred_assets::bank_metadata()
++        && !queued("audio", &bank.archive_name)
++    {
++        archive_request(state, "audio", &bank.archive_name, Box::new(|_, _| {}));
++    }
++    let music = state
++        .audio
++        .music_player
++        .as_ref()
++        .and_then(|p| p.pending_remote())
++        .map(str::to_owned);
++    if let Some(name) = music
++        && declared("music", &name)
++        && !queued("music", &name)
++    {
++        begin(
++            "music",
++            &name.clone(),
++            Box::new(move |state, bytes| {
++                if let Some(bytes) = bytes {
++                    crate::assets::deferred_assets::publish_music(&name, Arc::clone(&bytes));
++                    if let Some(player) = state.audio.music_player.as_mut()
++                        && player.pending_remote() == Some(name.as_str())
++                        && !player.fulfill_remote(&name, bytes)
++                    {
++                        state.audio.stop_theme();
++                    }
++                } else if state
++                    .audio
++                    .music_player
++                    .as_ref()
++                    .is_some_and(|p| p.pending_remote() == Some(name.as_str()))
++                {
++                    state.audio.stop_theme();
++                }
++            }),
++        );
++    }
++}
++
++/// Runs on the app thread; no AppState borrow crosses fetch or a JS callback.
++pub(super) fn pump(state: &mut AppState) -> bool {
++    let completed = HOST.with(|host| {
++        let mut host = host.borrow_mut();
++        if host.queue.front().is_some_and(|r| r.result.is_some()) {
++            host.queue.pop_front()
++        } else {
++            None
++        }
++    });
++    if let Some(mut request) = completed {
++        state.platform.frame_pacer.reset_for_immediate_frame();
++        if let Some(movie) = state.frontend.fullscreen_movie.as_mut() {
++            movie.set_active(state.platform.window.has_focus());
++        }
++        state
++            .match_state
++            .match_presentation
++            .radar_movies
++            .set_active(state.platform.window.has_focus());
++        (request.continuation)(state, request.result.take().unwrap());
++        super::match_runtime::scenario_pause::resume(
++            state,
++            super::match_runtime::frame_pacer::wall_clock_ms(),
++        );
++        dispatch();
++        state.platform.window.request_redraw();
++    }
++    discover_media_requests(state);
++    let waiting = pending();
++    if waiting {
++        let now = super::match_runtime::frame_pacer::wall_clock_ms();
++        state.platform.frame_pacer.reanchor(now);
++        if let Some(movie) = state.frontend.fullscreen_movie.as_mut() {
++            movie.set_active(false);
++        }
++        state
++            .match_state
++            .match_presentation
++            .radar_movies
++            .set_active(false);
++        state.match_state.scenario_elapsed_clock.pause(now);
++    }
++    waiting
++}
++
++/// Complete process libraries before any consumer can activate a theater.
++/// Keep the map request or RMG options owned across the explicit async wait;
++/// neither the frozen INI roots nor AssetManager's sticky-cache checks change.
++pub(super) fn initial_library<T: 'static>(
++    state: &mut AppState,
++    input: T,
++    resume: impl FnOnce(&mut AppState, T, bool) + 'static,
++) -> Option<T> {
++    initial_library_with_policy(state, input, false, resume)
++}
++
++pub(super) fn initial_library_preserving_page<T: 'static>(
++    state: &mut AppState,
++    input: T,
++    resume: impl FnOnce(&mut AppState, T, bool) + 'static,
++) -> Option<T> {
++    if initial_library_ready(state) {
++        return Some(input);
++    }
++    initial_library_with_policy(state, input, true, resume)
++}
++
++/// Synchronous diagnostic callers cannot wait for host I/O. Production UI
++/// enters request_saved_game_load, which owns the asynchronous wait instead.
++pub(super) fn initial_library_ready(state: &AppState) -> bool {
++    HOST.with(|host| {
++        let host = host.borrow();
++        host.handler.is_none()
++            || (host.graphics_ready
++                && !state.process_assets.has_deferred_audio()
++                && !host
++                    .catalog
++                    .keys()
++                    .any(|key| key.starts_with("archive:") && !host.installed.contains(key)))
++    })
++}
++
++fn initial_library_with_policy<T: 'static>(
++    state: &mut AppState,
++    input: T,
++    preserve_page: bool,
++    resume: impl FnOnce(&mut AppState, T, bool) + 'static,
++) -> Option<T> {
++    if state.process_assets.has_deferred_audio()
++        && let Some(bank) = crate::assets::deferred_assets::bank_metadata()
++    {
++        archive_request_with_policy(
++            state,
++            "audio",
++            &bank.archive_name,
++            preserve_page,
++            Box::new(move |state, ready| {
++                resume(state, input, ready);
++            }),
++        );
++        return None;
++    }
++    let next = HOST.with(|h| {
++        let h = h.borrow();
++        h.catalog
++            .keys()
++            .filter(|k| k.starts_with("archive:") && !h.installed.contains(*k))
++            .min()
++            .cloned()
++    });
++    if let Some(next) = next {
++        let (_, name) = next.split_once(':').unwrap();
++        archive_request_with_policy(
++            state,
++            "archive",
++            name,
++            preserve_page,
++            Box::new(move |state, ready| {
++                resume(state, input, ready);
++            }),
++        );
++        return None;
++    }
++    if !HOST.with(|h| h.borrow().graphics_ready) {
++        if let Some(root) = state
++            .platform
++            .game_config
++            .as_ref()
++            .map(|c| c.paths.ra2_dir.clone())
++        {
++            if let Err(error) = state.process_assets.complete_initial_library(&root, false) {
++                initial_library_error(state, error, preserve_page);
++                resume(state, input, false);
++                return None;
++            }
++            HOST.with(|h| h.borrow_mut().graphics_ready = true);
++        }
++    }
++    Some(input)
++}
++
++pub(super) fn map(
++    state: &mut AppState,
++    request: super::loading::pump::LoadingRequest,
++    campaign: bool,
++) -> Option<super::loading::pump::LoadingRequest> {
++    let request = if request.remote_allowed() {
++        initial_library(state, request, move |state, request, ready| {
++            if !ready {
++                back_to_menu(state);
++            } else if campaign {
++                App::start_campaign_scenario(state, request);
++            } else {
++                super::loading::pump::begin_loading(state, request);
++            }
++        })?
++    } else {
++        request
++    };
++    let name = request.selected_map_file().to_owned();
++    if !request.remote_allowed() || !declared("map", &name) {
++        return Some(request);
++    }
++    let Some(config) = state.platform.game_config.as_ref() else {
++        return Some(request);
++    };
++    let root = config.paths.ra2_dir.clone();
++    let available = crate::map::source::local_map_path(&root, &name).is_ok()
++        || state.process_assets.manager().is_some_and(|assets| {
++            crate::map::source::asset_map_candidates(&name)
++                .iter()
++                .any(|n| assets.contains(n))
++        });
++    if available {
++        return Some(request);
++    }
++    begin(
++        "map",
++        &name.clone(),
++        Box::new(move |state, bytes| {
++            if let Some(bytes) = bytes {
++                let path = root.join(&name);
++                if let Some(parent) = path.parent() {
++                    let _ = crate::util::file_system::create_dir_all(parent);
++                }
++                crate::util::file_system::import_file(path, bytes.to_vec());
++                if campaign {
++                    App::start_campaign_scenario(state, request);
++                } else {
++                    super::loading::pump::begin_loading(state, request);
++                }
++            } else {
++                state.frontend.screen = crate::ui::game_screen::GameScreen::MainMenu;
++                App::commit_campaign_back(state);
++            }
++        }),
++    );
++    None
++}
++
++pub(super) fn movie_missing(state: &AppState, name: &str) -> bool {
++    state.match_state.live_network.is_none()
++        && !state.match_state.match_diagnostics.is_replay_playback()
++        && declared("movie", name)
++        && movie_bytes(name).is_none()
++        && !state
++            .process_assets
++            .manager()
++            .is_some_and(|a| a.contains(name))
++}
++pub(super) fn movie(name: &str, continuation: Continuation) {
++    begin("movie", name, continuation);
++}
++
++/// A mission-scoped byte cache removes browser/worker round trips at the trigger.
++/// Bink decoding and native action 117's intentional simulation pause stay intact.
++pub(super) fn movie_bytes(name: &str) -> Option<Arc<[u8]>> {
++    HOST.with(|host| {
++        host.borrow()
++            .campaign_movies
++            .get(&name.to_uppercase())
++            .cloned()
++    })
++}
++
++const CAMPAIGN_MOVIE_BUDGET: usize = 64 * 1024 * 1024;
++
++// BEGIN CAMPAIGN MEDIA SELECTION
++fn campaign_media_indices(
++    intro: i32,
++    brief: i32,
++    basic: impl IntoIterator<Item = i32>,
++    actions: impl IntoIterator<Item = (i32, Option<i32>)>,
++) -> BTreeSet<i32> {
++    // Start_Scenario683AB0 prefers Intro, even when its bytes are unavailable.
++    std::iter::once(if intro == -1 { brief } else { intro })
++        .chain(basic)
++        // Execute6DD8B0: 10 is full-screen; 100/117 are radar movies.
++        .chain(actions.into_iter().filter_map(|(kind, value)| {
++            matches!(kind, 10 | 100 | 117).then_some(value.unwrap_or(0))
++        }))
++        .filter(|index| *index >= 0)
++        .collect()
++}
++// END CAMPAIGN MEDIA SELECTION
++
++/// Called after initial archives/map admission and before Intro/ReadScenario.
++/// Each ticket uses the existing SHA-256/Bink admission and Retry/Cancel UI.
++/// Do not insert these leaves into the native MIX search order or unlock movies.
++pub(super) fn campaign_media(
++    state: &mut AppState,
++    request: super::loading::pump::LoadingRequest,
++) -> Option<super::loading::pump::LoadingRequest> {
++    if !request.remote_allowed() {
++        return Some(request);
++    }
++    let plan = (|| -> anyhow::Result<BTreeSet<String>> {
++        let (Some(assets), Some(rules), Some(config)) = (
++            state.process_assets.manager(),
++            state.process_assets.native_rules(),
++            state.platform.game_config.as_ref(),
++        ) else {
++            return Ok(BTreeSet::new());
++        };
++        let loaded = crate::map::source::load_map_ini_by_name_or_path_with_assets(
++            &config.paths.ra2_dir,
++            request.selected_map_file(),
++            assets,
++        )?;
++        let movies = rules.movies();
++        let basic = loaded.ini.section("Basic");
++        let read = |name: &str| basic.map_or(-1, |s| s.read_movie(name, -1, movies));
++        let actions = crate::map::actions::parse_actions(&loaded.ini);
++        Ok(campaign_media_indices(
++            read("Intro"),
++            read("Brief"),
++            ["Action", "Win", "Lose", "PostScore", "PreMapSelect"].map(read),
++            actions
++                .values()
++                .flat_map(|a| a.entries())
++                .map(|a| (a.kind, a.literal_value())),
++        )
++        .into_iter()
++        .filter_map(|index| movies.name(index))
++        .map(|name| {
++            format!(
++                "{}.BIK",
++                super::frontend::fullscreen_movie::movie_stem(name)
++            )
++            .to_uppercase()
++        })
++        .filter(|name| declared("movie", name) && !assets.contains(name))
++        .collect())
++    })();
++    let names = match plan {
++        Ok(names) => names,
++        Err(error) => {
++            // ReadScenario remains the authoritative map-error owner.
++            log::warn!("Campaign media lookup failed: {error:#}");
++            return Some(request);
++        }
++    };
++    let fits = HOST.with(|host| {
++        let mut host = host.borrow_mut();
++        let total = names.iter().try_fold(0usize, |size, name| {
++            size.checked_add(host.catalog[&key("movie", name)].size)
++        });
++        if total.is_none_or(|size| size > CAMPAIGN_MOVIE_BUDGET) {
++            host.campaign_movies.clear();
++            return false;
++        }
++        host.campaign_movies.retain(|name, _| names.contains(name));
++        true
++    });
++    if !fits {
++        log::warn!("Campaign media exceeds 64 MiB; retaining on-demand playback");
++        return Some(request);
++    }
++    let next = names.into_iter().find(|name| movie_bytes(name).is_none());
++    let Some(name) = next else {
++        return Some(request);
++    };
++    begin(
++        "movie",
++        &name.clone(),
++        Box::new(move |state, bytes| {
++            if let Some(bytes) = bytes {
++                HOST.with(|host| {
++                    host.borrow_mut().campaign_movies.insert(name, bytes);
++                });
++                App::start_campaign_scenario(state, request);
++            } else {
++                back_to_menu(state);
++            }
++        }),
++    );
++    None
++}
++
++#[cfg(test)]
++mod campaign_media_tests {
++    use super::campaign_media_indices;
++
++    #[test]
++    fn valid_intro_wins_over_brief_and_all_movie_actions_are_included_once() {
++        let selected = campaign_media_indices(
++            3,
++            4,
++            [5, -1, 3],
++            [
++                (100, Some(8)),
++                (117, Some(8)),
++                (10, Some(9)),
++                (19, Some(10)),
++            ],
++        );
++        assert_eq!(selected.into_iter().collect::<Vec<_>>(), [3, 5, 8, 9]);
++    }
++
++    #[test]
++    fn absent_intro_uses_brief_and_literal_default_matches_dispatch() {
++        let selected =
++            campaign_media_indices(-1, 4, [-1], [(100, None), (117, Some(-1)), (10, Some(-5))]);
++        assert_eq!(selected.into_iter().collect::<Vec<_>>(), [0, 4]);
++    }
++}
+diff --git a/src/app/shell_campaign.rs b/src/app/shell_campaign.rs
+index ba51f3c241f1900e4a8138c263c386327b48d55b..ec1fdde5cb5f0e23be03a8b9605de54fce17088a 100644
+--- a/src/app/shell_campaign.rs
++++ b/src/app/shell_campaign.rs
+@@ -259,6 +259,14 @@ impl App {
+         state: &mut AppState,
+         request: crate::app::loading::pump::LoadingRequest,
+     ) {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        let Some(request) = super::remote_assets::map(state, request, true) else {
++            return;
++        };
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        let Some(request) = super::remote_assets::campaign_media(state, request) else {
++            return;
++        };
+         let movie = (|| -> anyhow::Result<Option<String>> {
+             let (Some(assets), Some(rules), Some(config)) = (
+                 state.process_assets.manager(),
+diff --git a/src/app/shell_main_menu.rs b/src/app/shell_main_menu.rs
+index 321a6967b8bc42159d679dd5203ab4d21d0c45a6..84c7cfa223fd8fa490bc07768c30fb0dbc188c11 100644
+--- a/src/app/shell_main_menu.rs
++++ b/src/app/shell_main_menu.rs
+@@ -816,7 +816,7 @@ impl App {
+         let mut dialog = launcher_dialog_from_profile(
+             &state.persistence.options_profile,
+             labels,
+-            state.platform.window.fullscreen().is_some(),
++            Self::is_full_screen(state),
+             state.renderer.performance_overlay.is_visible(),
+             state.audio.launcher_audio_available,
+             displays,
+diff --git a/src/app/shell_movies_credits.rs b/src/app/shell_movies_credits.rs
+index bbf125292436fa279406f50580ed984509a60782..0a490a1d4950ed4d57755e6ca732154c19c0d611 100644
+--- a/src/app/shell_movies_credits.rs
++++ b/src/app/shell_movies_credits.rs
+@@ -150,6 +150,39 @@ impl App {
+ 
+     /// Play_Movie `0x005BED40` from the shell.
+     pub(super) fn start_fullscreen_movie(state: &mut AppState, name: &str, return_to: MovieReturn) {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        {
++            let file = format!("{}.BIK", movie_stem(name));
++            let native_skips = matches!(&return_to, MovieReturn::RunningScenario)
++                && state
++                    .match_state
++                    .sim_runtime
++                    .runtime()
++                    .is_some_and(|r| r.simulation.session().game_mode_nonzero());
++            if !native_skips && let Some(bytes) = super::remote_assets::movie_bytes(&file) {
++                Self::start_fullscreen_movie_bytes(state, name, return_to, Some(bytes));
++                return;
++            }
++            if !native_skips && super::remote_assets::movie_missing(state, &file) {
++                let name = name.to_owned();
++                super::remote_assets::movie(
++                    &file,
++                    Box::new(move |state, bytes| {
++                        Self::start_fullscreen_movie_bytes(state, &name, return_to, bytes);
++                    }),
++                );
++                return;
++            }
++        }
++        Self::start_fullscreen_movie_bytes(state, name, return_to, None);
++    }
++
++    fn start_fullscreen_movie_bytes(
++        state: &mut AppState,
++        name: &str,
++        return_to: MovieReturn,
++        remote: Option<Arc<[u8]>>,
++    ) {
+         let running_scenario = matches!(&return_to, MovieReturn::RunningScenario);
+         // The calling dialog is destroyed before the movie state runs.
+         Self::destroy_current_shell_dialog(state);
+@@ -174,11 +207,15 @@ impl App {
+             return;
+         }
+         let file_name = format!("{stem}.BIK");
+-        let resolved = state.process_assets.manager().and_then(|assets| {
+-            assets
+-                .get_with_source_ref(&file_name)
+-                .map(|(bytes, source)| (Arc::<[u8]>::from(bytes), source.to_string()))
+-        });
++        let resolved = remote
++            .map(|bytes| (bytes, format!("remote {file_name}")))
++            .or_else(|| {
++                state.process_assets.manager().and_then(|assets| {
++                    assets
++                        .get_with_source_ref(&file_name)
++                        .map(|(bytes, source)| (Arc::<[u8]>::from(bytes), source.to_string()))
++                })
++            });
+         let Some((bytes, source)) = resolved else {
+             // No .BIK (and no VQA decoder is needed: retail YR ships none):
+             // Play_Movie returns with no visible or audible change.
+diff --git a/src/app/shell_random_map.rs b/src/app/shell_random_map.rs
+index cd461a17069a05d7f0b3fff87af5d7698ee70f22..0d67f870ec5e1c80e75089eec3bfa88297f86e04 100644
+--- a/src/app/shell_random_map.rs
++++ b/src/app/shell_random_map.rs
+@@ -1308,6 +1308,39 @@ impl App {
+         options: &crate::map::rmg::RmgOptions,
+         accept_on_finish: bool,
+     ) -> bool {
++        // Web bootstrap archives must be completed before RMG's theater
++        // preparation mutates the process-global archive search list.
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        let (options, accept_on_finish) = {
++            let Some(input) = super::remote_assets::initial_library(
++                state,
++                (options.clone(), accept_on_finish),
++                |state, (options, accept), ready| {
++                    if state
++                        .frontend
++                        .skirmish_shell_state
++                        .random_map_setup_modal
++                        .is_none()
++                    {
++                        return;
++                    }
++                    if (!ready || !App::start_random_map_generation(state, &options, accept))
++                        && let Some(modal) = state
++                            .frontend
++                            .skirmish_shell_state
++                            .random_map_setup_modal
++                            .as_mut()
++                    {
++                        modal.fail_generate();
++                    }
++                },
++            ) else {
++                return true;
++            };
++            input
++        };
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        let options = &options;
+         // A second Generate makes the previous dialog result stale immediately,
+         // even when setup cannot progress far enough to spawn the worker.
+         begin_random_map_generation_owners(
+diff --git a/src/app/shell_wol/service.rs b/src/app/shell_wol/service.rs
+index be0ad1913895457e28adf01a6a918fffb7872c82..a466221f69267b350218c59a47684c0da01204f3 100644
+--- a/src/app/shell_wol/service.rs
++++ b/src/app/shell_wol/service.rs
+@@ -973,6 +973,25 @@ pub(super) fn begin_connect(state: &mut AppState) {
+         .wol
+         .as_ref()
+         .is_some_and(|visit| visit.provider == WolProvider::Online);
++    // Complete Toy's verified archives before authentication starts the room timers.
++    // The sign-in screen itself only needs the bootstrap assets.
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    if online
++        && crate::app::remote_assets::initial_library_preserving_page(
++            state,
++            (),
++            |state, (), ready| {
++                if ready {
++                    begin_connect(state);
++                } else {
++                    super::login::open(state);
++                }
++            },
++        )
++        .is_none()
++    {
++        return;
++    }
+     let persona = if online {
+         WolPersona::default()
+     } else {
+diff --git a/src/assets/asset_manager.rs b/src/assets/asset_manager.rs
+index 2fd47b2daec683a9b91986ace6d2a4629c1b2138..b956cbdaba57ca413df1f5ea87e0b56741657f09 100644
+--- a/src/assets/asset_manager.rs
++++ b/src/assets/asset_manager.rs
+@@ -676,6 +676,109 @@ impl AssetManager {
+         &self.archive_names
+     }
+ 
++    /// Complete a verified bootstrap library before the first scenario. Sticky reads survive.
++    pub fn admit_initial_library(&mut self, next: Self) -> Result<(), AssetError> {
++        let fail = |detail: &str| AssetError::ParseError {
++            format: "initial resource stage".into(),
++            detail: detail.to_owned(),
++        };
++        if self.active_theater.is_some() || self.ini_roots != next.ini_roots {
++            return Err(fail(
++                "resource stage must precede theater activation and keep the INI roots",
++            ));
++        }
++        for name in [
++            self.ini_roots.rules(),
++            self.ini_roots.art(),
++            self.ini_roots.ai(),
++            self.ini_roots.sound(),
++            self.ini_roots.eva(),
++        ] {
++            if self.get_ref(name) != next.get_ref(name) {
++                return Err(fail("resource stage changed a process definition"));
++            }
++        }
++        let cache = self
++            .mix_file_cache
++            .lock()
++            .unwrap_or_else(|p| p.into_inner());
++        for (id, cached) in cache.iter() {
++            let loose = next.loose_files.values().find(|loose| {
++                loose
++                    .source_name
++                    .eq_ignore_ascii_case(&cached.source_archive)
++            });
++            let candidate = if let Some(loose) = loose {
++                loose.bytes()
++            } else {
++                next.lookup_index.get(id).and_then(|where_| {
++                    let archive = &next.archives[where_.archive_index];
++                    archive
++                        .name
++                        .eq_ignore_ascii_case(&cached.source_archive)
++                        .then(|| archive.archive.get_by_id(*id))
++                        .flatten()
++                })
++            };
++            if candidate != Some(cached.bytes.as_ref()) {
++                return Err(fail("resource stage changed a sticky file winner"));
++            }
++        }
++        drop(cache);
++        self.archives = next.archives;
++        self.archive_catalog = next.archive_catalog;
++        self.lookup_index = next.lookup_index;
++        self.loose_files = next.loose_files;
++        self.audio_pairs = next.audio_pairs;
++        Ok(())
++    }
++
++    /// Existing leaf data may not change when a bootstrap archive is completed.
++    pub fn validate_archive_expansion(
++        previous: Arc<[u8]>,
++        complete: Arc<[u8]>,
++    ) -> Result<(), AssetError> {
++        fn check(old: &MixArchive, full: &MixArchive, depth: usize) -> Result<(), AssetError> {
++            if depth > 8 {
++                return Err(AssetError::InvalidMixHeader {
++                    reason: "resource stage nesting exceeds eight levels".into(),
++                });
++            }
++            for entry in old.entries() {
++                let Some(next) = full.get_by_id(entry.id) else {
++                    return Err(AssetError::InvalidMixHeader {
++                        reason: "stage removed a bootstrap member".into(),
++                    });
++                };
++                let Some(bytes) = old.get_by_id(entry.id) else {
++                    return Err(AssetError::InvalidMixHeader {
++                        reason: "invalid bootstrap member bounds".into(),
++                    });
++                };
++                if KNOWN_NESTED_MIX_NAMES
++                    .iter()
++                    .any(|name| mix_hash(name) == entry.id)
++                {
++                    check(
++                        &MixArchive::from_bytes(bytes.to_vec())?,
++                        &MixArchive::from_bytes(next.to_vec())?,
++                        depth + 1,
++                    )?;
++                } else if bytes != next {
++                    return Err(AssetError::InvalidMixHeader {
++                        reason: "stage changed a bootstrap member".into(),
++                    });
++                }
++            }
++            Ok(())
++        }
++        check(
++            &MixArchive::from_shared(previous)?,
++            &MixArchive::from_shared(complete)?,
++            0,
++        )
++    }
++
+     /// Whether this game overlays a selected mod on the installation.
+     pub fn mod_selected(&self) -> bool {
+         self.mod_dir.is_some()
+@@ -1081,6 +1184,44 @@ impl AssetManager {
+             let Some(pair) = self.audio_pairs.first() else {
+                 return Ok(None);
+             };
++            if pair.bag.is_none()
++                && let (Some(idx), Some(bank)) =
++                    (&pair.idx, crate::assets::deferred_assets::bank_metadata())
++            {
++                let idx = self.selected_audio_ref(idx).ok_or_else(|| missing(idx))?;
++                let hash = crate::util::sha256::sha256_hex(idx.bytes);
++                if hash != bank.index_sha256 {
++                    return Err(AssetError::ParseError {
++                        format: "deferred audio index".into(),
++                        detail: "index metadata does not match the selected source".into(),
++                    });
++                }
++                let index =
++                    AudioIndex::from_idx_metadata(idx.bytes, bank.size).ok_or_else(|| {
++                        AssetError::ParseError {
++                            format: "audio.idx".into(),
++                            detail: "invalid deferred index".into(),
++                        }
++                    })?;
++                return Ok(Some(LoadedAudioIndex {
++                    additional_sources: Vec::new(),
++                    index,
++                    sources: AudioIndexSources {
++                        idx: AudioSourceIdentity {
++                            source_archive: idx.source_archive.to_owned(),
++                            entry_id: idx.entry_id,
++                            payload_len: idx.bytes.len(),
++                            source_sha256: hash,
++                        },
++                        bag: AudioSourceIdentity {
++                            source_archive: bank.source_archive,
++                            entry_id: mix_hash("audio.bag"),
++                            payload_len: bank.size,
++                            source_sha256: bank.sha256,
++                        },
++                    },
++                }));
++            }
+             let (Some(idx), Some(bag)) = (&pair.idx, &pair.bag) else {
+                 return Ok(None);
+             };
+diff --git a/src/assets/audio_bag.rs b/src/assets/audio_bag.rs
+index 9ff0f42618df0e78c0f033f7146da4e33852ba66..1e3abbd855b760fa086312482a959d75fed65739 100644
+--- a/src/assets/audio_bag.rs
++++ b/src/assets/audio_bag.rs
+@@ -112,6 +112,7 @@ pub struct AudioIndex {
+     entries: Vec<AudioBagEntry>,
+     /// Backing files, retained independently: offsets stay relative to their BAG.
+     bag_data: Vec<Vec<u8>>,
++    deferred_bag_len: Option<usize>,
+     /// Parallel to entries; constructed by parsing or the sole merge owner below.
+     entry_bags: Vec<usize>,
+     layout: IndexLayout,
+@@ -131,6 +132,16 @@ impl AudioIndex {
+         Self::parse(idx_data, bag_data, IndexLayout::Stock)
+     }
+ 
++    /// Index admission is independent of the bank payload. Playback waits for its source stage.
++    pub fn from_idx_metadata(idx_data: &[u8], bag_len: usize) -> Option<Self> {
++        let mut index = Self::parse(idx_data, Vec::new(), IndexLayout::Stock)?;
++        index.deferred_bag_len = Some(bag_len);
++        Some(index)
++    }
++    pub fn is_deferred(&self) -> bool {
++        self.deferred_bag_len.is_some()
++    }
++
+     /// Installed Ares AudioBag::Open1005AA00, selected by Audio_Load4011C0.
+     /// See tools/rules_oracle/ares_audio_bags.md and its executed controls.
+     pub(crate) fn from_ares_idx_bag(idx_data: &[u8], bag_data: Vec<u8>) -> Option<Self> {
+@@ -209,6 +220,7 @@ impl AudioIndex {
+             id: next_index_id(),
+             entries,
+             bag_data: vec![bag_data],
++            deferred_bag_len: None,
+             entry_bags: vec![0; entry_count],
+             layout,
+         })
+@@ -233,6 +245,7 @@ impl AudioIndex {
+             entries,
+             entry_bags,
+             bag_data: files,
++            deferred_bag_len: None,
+             layout: IndexLayout::Ares,
+         }
+     }
+@@ -281,6 +294,9 @@ impl AudioIndex {
+ 
+     /// Exact binary search by uppercase name.
+     fn get_exact(&self, name: &str) -> Option<(&AudioBagEntry, &[u8])> {
++        if self.is_deferred() {
++            return None;
++        }
+         let idx = self.find_sample_index(name)?;
+         let entry = &self.entries[idx];
+         let start = entry.offset as usize;
+diff --git a/src/assets/deferred_assets.rs b/src/assets/deferred_assets.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7442289fe7b82b81570f86cba93b2dc18c87d77f
+--- /dev/null
++++ b/src/assets/deferred_assets.rs
+@@ -0,0 +1,81 @@
++//! Explicit web media metadata. No synchronous asset read performs network I/O.
++use serde::{Deserialize, Serialize};
++use std::{cell::RefCell, collections::HashMap, sync::Arc};
++
++#[derive(Clone, Debug, Deserialize, Serialize)]
++pub struct MusicMetadata {
++    pub size: usize,
++    pub sha256: String,
++    pub duration_seconds: u32,
++}
++
++#[derive(Clone, Debug, Deserialize, Serialize)]
++pub struct BankMetadata {
++    pub size: usize,
++    pub sha256: String,
++    pub index_sha256: String,
++    pub source_archive: String,
++    pub archive_name: String,
++}
++
++#[derive(Default)]
++struct Registry {
++    music: HashMap<String, MusicMetadata>,
++    bank: Option<BankMetadata>,
++    audio_ready: bool,
++    ready_music: Option<(String, Arc<[u8]>)>,
++    audio_requested: bool,
++}
++thread_local! { static REGISTRY: RefCell<Registry> = RefCell::new(Registry::default()); }
++
++pub fn configure(music: HashMap<String, MusicMetadata>, bank: Option<BankMetadata>) {
++    REGISTRY.with(|r| {
++        *r.borrow_mut() = Registry {
++            music,
++            bank,
++            ..Default::default()
++        }
++    });
++}
++pub fn music_metadata(name: &str) -> Option<MusicMetadata> {
++    REGISTRY.with(|r| r.borrow().music.get(&name.to_uppercase()).cloned())
++}
++pub fn bank_metadata() -> Option<BankMetadata> {
++    REGISTRY.with(|r| r.borrow().bank.clone())
++}
++pub fn audio_ready() -> bool {
++    REGISTRY.with(|r| r.borrow().audio_ready)
++}
++pub fn mark_audio_ready() {
++    REGISTRY.with(|r| {
++        let mut r = r.borrow_mut();
++        r.audio_ready = true;
++        r.audio_requested = false;
++    });
++}
++pub fn request_audio() {
++    REGISTRY.with(|r| {
++        let mut r = r.borrow_mut();
++        if r.bank.is_some() && !r.audio_ready {
++            r.audio_requested = true;
++        }
++    });
++}
++pub fn audio_requested() -> bool {
++    REGISTRY.with(|r| r.borrow().audio_requested)
++}
++pub fn cancel_audio_request() {
++    REGISTRY.with(|r| r.borrow_mut().audio_requested = false);
++}
++pub fn publish_music(name: &str, bytes: Arc<[u8]>) {
++    REGISTRY.with(|r| r.borrow_mut().ready_music = Some((name.to_uppercase(), bytes)));
++}
++pub fn music_bytes(name: &str) -> Option<Arc<[u8]>> {
++    REGISTRY.with(|r| {
++        r.borrow()
++            .ready_music
++            .as_ref()
++            .filter(|(n, _)| n == &name.to_uppercase())
++            .map(|(_, bytes)| Arc::clone(bytes))
++    })
++}
+diff --git a/src/assets/mix_archive.rs b/src/assets/mix_archive.rs
+index e8533f9aa5df743f2fb655898c222462828ddba6..2c1bd8510500fdfc7645e7d169986737c04d8f91 100644
+--- a/src/assets/mix_archive.rs
++++ b/src/assets/mix_archive.rs
+@@ -220,6 +220,14 @@ impl std::ops::Deref for SharedBytes {
+ }
+ 
+ impl MixArchive {
++    pub fn from_shared(bytes: Arc<[u8]>) -> Result<Self, AssetError> {
++        let len = bytes.len();
++        Self::from_data(MixData {
++            bytes: MixBytes::Owned(bytes),
++            start: 0,
++            len,
++        })
++    }
+     /// Parse a MIX archive from raw bytes.
+     ///
+     /// Detects old vs new format by checking the first u16:
+diff --git a/src/assets/mod.rs b/src/assets/mod.rs
+index f051b799308fdeb549e2d1dfe248fc561f32ec0d..92f875ff2e45302ebdd002869fa5fb914d4ffbe4 100644
+--- a/src/assets/mod.rs
++++ b/src/assets/mod.rs
+@@ -31,6 +31,7 @@ pub mod bink_file;
+ pub(crate) mod blowfish;
+ pub mod client_install;
+ pub mod csf_file;
++pub mod deferred_assets;
+ pub mod error;
+ pub mod fnt_file;
+ pub mod format_sniff;
+diff --git a/src/audio/music.rs b/src/audio/music.rs
+index 5df8107d4bcbb41152c0fbe49fd00604b588eb52..04e5210215f8f906e91cd2354d8faa08b3009bb8 100644
+--- a/src/audio/music.rs
++++ b/src/audio/music.rs
+@@ -131,6 +131,7 @@ pub struct MusicPlayer {
+     /// The track was playing on a device that went away: it reads as finished.
+     track_cut: bool,
+     current_player: Option<Player>,
++    pending_remote: Option<String>,
+     volume: f64,
+     /// The Theme stream's own `+0x10` interp (`stream+0x14 -> +0x10`), built
+     /// by the stream constructor at rate `0x10624D` (1000 ms from full to
+@@ -228,6 +229,7 @@ impl MusicPlayer {
+             health: Default::default(),
+             track_cut: false,
+             current_player: None,
++            pending_remote: None,
+             volume: DEFAULT_SCORE_VOLUME,
+             own: VolumeInterp::new(VOLUME_SCALE, 0),
+             focus_output_scale: 1.0,
+@@ -245,6 +247,9 @@ impl MusicPlayer {
+         if self.held {
+             return MusicOutputState::Held;
+         }
++        if self.pending_remote.is_some() {
++            return MusicOutputState::Playing;
++        }
+         match self.current_player.as_ref() {
+             Some(player) if player.empty() || self.track_cut => MusicOutputState::Finished,
+             Some(_) if self.own.moving() => MusicOutputState::Ramping,
+@@ -259,9 +264,17 @@ impl MusicPlayer {
+         if self.held {
+             return false;
+         }
++        if let Some(name) = prepared.deferred_name.as_ref() {
++            self.stop();
++            self.pending_remote = Some(name.clone());
++            self.own.set_target_immediate(VOLUME_SCALE);
++            self.own.tick(0);
++            return true;
++        }
+         let Some(sample_rate) = NonZero::new(prepared.sample_rate) else {
+             return false;
+         };
++        self.pending_remote = None;
+         if let Some(player) = self.current_player.take() {
+             player.stop();
+         }
+@@ -286,11 +299,28 @@ impl MusicPlayer {
+         if self.held {
+             return;
+         }
++        self.pending_remote = None;
+         if let Some(player) = self.current_player.take() {
+             player.stop();
+         }
+     }
+ 
++    pub(crate) fn pending_remote(&self) -> Option<&str> {
++        self.pending_remote.as_deref()
++    }
++    pub(crate) fn fulfill_remote(&mut self, name: &str, bytes: std::sync::Arc<[u8]>) -> bool {
++        if self.held || self.pending_remote.as_deref() != Some(name) {
++            return false;
++        }
++        let stem = name.strip_suffix(".WAV").unwrap_or(name);
++        let file = crate::assets::mix_archive::SharedBytes::from(bytes);
++        let Some(prepared) = PreparedTrack::streamed(stem, &file) else {
++            return false;
++        };
++        self.pending_remote = None;
++        self.submit(prepared)
++    }
++
+     /// Every movie takes the hold (`0x005BF580`, full-screen `0x005BEE0D`)
+     /// and its release resumes the paused song where it stopped
+     /// (`0x004082F0`): Theme's Stops and PlayFiles in between do nothing.
+diff --git a/src/audio/sfx.rs b/src/audio/sfx.rs
+index 7215b314f7fef6f1b9b242e4d917fc78a10319fa..575a9f5a525347452406845f38813f211523853c 100644
+--- a/src/audio/sfx.rs
++++ b/src/audio/sfx.rs
+@@ -1399,6 +1399,9 @@ fn open_sfx_sink() -> Result<SfxOutput, String> {
+ }
+ 
+ impl SfxPlayer {
++    pub(crate) fn has_pending_audio(&self) -> bool {
++        !self.pending.is_empty() || !self.coordinate_requests.is_empty()
++    }
+     /// Create a new SfxPlayer. Returns None if audio output cannot be opened.
+     pub fn new() -> Option<Self> {
+         #[cfg(not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")))]
+diff --git a/src/audio/theme.rs b/src/audio/theme.rs
+index 60f6c67252cdb09eb68707df577ea27ebace74f1..abc25e4ef0644fc8c7e330ca3640a9b6f16b2162 100644
+--- a/src/audio/theme.rs
++++ b/src/audio/theme.rs
+@@ -142,6 +142,7 @@ pub(crate) struct ThemeGates {
+ pub(crate) struct PreparedTrack {
+     pub(crate) stem: String,
+     pub(crate) sample_rate: u32,
++    pub(super) deferred_name: Option<String>,
+     /// Decoded samples; those from `pulled` on are still to play.
+     pcm: Vec<f32>,
+     pulled: usize,
+@@ -166,6 +167,7 @@ impl PreparedTrack {
+         Self {
+             stem,
+             sample_rate,
++            deferred_name: None,
+             pcm: samples,
+             pulled: 0,
+             stream: None,
+@@ -183,6 +185,7 @@ impl PreparedTrack {
+         let mut track = Self {
+             stem: stem.to_string(),
+             sample_rate: wav.sample_rate,
++            deferred_name: None,
+             pcm: Vec::new(),
+             pulled: 0,
+             stream: Some(WavStream {
+@@ -201,6 +204,12 @@ impl PreparedTrack {
+         Some(track)
+     }
+ 
++    pub(super) fn deferred(stem: &str, name: &str) -> Self {
++        let mut track = Self::decoded(stem.to_owned(), Vec::new(), 0);
++        track.deferred_name = Some(name.to_uppercase());
++        track
++    }
++
+     /// Every sample has been pulled.
+     pub(crate) fn exhausted(&self) -> bool {
+         self.pulled >= self.pcm.len()
+@@ -1040,7 +1049,13 @@ impl ThemeRuntime {
+ /// its first piece here (see [`PreparedTrack`]).
+ fn prepare_track(track_name: &str, assets: &AssetManager) -> Option<PreparedTrack> {
+     for filename in [format!("{track_name}.wav"), format!("{track_name}.aud")] {
+-        let Some(file) = assets.get_shared(&filename) else {
++        let file = assets.get_shared(&filename).or_else(|| {
++            crate::assets::deferred_assets::music_bytes(&filename).map(SharedBytes::from)
++        });
++        let Some(file) = file else {
++            if crate::assets::deferred_assets::music_metadata(&filename).is_some() {
++                return Some(PreparedTrack::deferred(track_name, &filename));
++            }
+             continue;
+         };
+         if let Some(track) = prepare_bytes(track_name, &file) {
+diff --git a/src/render/sidebar_chrome.rs b/src/render/sidebar_chrome.rs
+index af865657580fd65ee02837fab1fe4dbfb0224769..cdf914332d0cce0318d669c9e7f702ee12a0bd81 100644
+--- a/src/render/sidebar_chrome.rs
++++ b/src/render/sidebar_chrome.rs
+@@ -40,7 +40,7 @@ pub(crate) fn packed_command_bar_fixture(
+ ) -> (CommandBarArt<SidebarChromeEntry>, Vec<u8>, [u32; 2]) {
+     let route = SidebarSideRoute::for_theme(assets, theme);
+     let palette = decode_sidebar_palette(route.resolve("SIDEBAR.PAL").unwrap().bytes).unwrap();
+-    let rendered = command_bar::load(route, &palette);
++    let rendered = command_bar::load(route, &palette, theme);
+     let width = rendered.entries().map(|entry| entry.width).max().unwrap();
+     let height = rendered
+         .entries()
+@@ -988,7 +988,7 @@ fn build_theme_atlas(
+         .decode(generic_palette_name, |asset| {
+             Some((decode_sidebar_palette(asset.bytes).ok()?, asset.source))
+         })?;
+-    let command_bar_art = command_bar::load(side_route, &generic_palette);
++    let command_bar_art = command_bar::load(side_route, &generic_palette, theme);
+     let in_game_shell_art = in_game_shell::load(side_route, &generic_palette);
+     let layout_art_rendered = layout_art::load(side_route, &generic_palette);
+     let observer_art_rendered = observer_art::load(theme_route);
+diff --git a/src/render/sidebar_chrome_command_bar.rs b/src/render/sidebar_chrome_command_bar.rs
+index 7011d23b6e275c135d45aa3ee756ec637b66862e..1d0c443694892f3d4d7b63c3d279a05278255a57 100644
+--- a/src/render/sidebar_chrome_command_bar.rs
++++ b/src/render/sidebar_chrome_command_bar.rs
+@@ -7,6 +7,7 @@ pub struct CommandBarArt<T> {
+     pub left_cap: [Option<T>; 3],
+     pub right_cap: Option<T>,
+     pub background: Option<T>,
++    pub fullscreen: Option<T>,
+     pub buttons: [[Option<T>; 2]; 11],
+     pub slots: [Vec<Option<usize>>; 2],
+ }
+@@ -18,6 +19,7 @@ impl<T> CommandBarArt<T> {
+             .chain(self.left_cap.iter().flatten())
+             .chain(self.right_cap.iter())
+             .chain(self.background.iter())
++            .chain(self.fullscreen.iter())
+             .chain(self.buttons.iter().flatten().flatten())
+     }
+     pub fn map<U>(&self, mut f: impl FnMut(&T) -> U) -> CommandBarArt<U> {
+@@ -29,6 +31,7 @@ impl<T> CommandBarArt<T> {
+                 .map(|entry| entry.as_ref().map(&mut f)),
+             right_cap: self.right_cap.as_ref().map(&mut f),
+             background: self.background.as_ref().map(&mut f),
++            fullscreen: self.fullscreen.as_ref().map(&mut f),
+             buttons: self
+                 .buttons
+                 .each_ref()
+@@ -41,6 +44,7 @@ impl<T> CommandBarArt<T> {
+ pub(super) fn load(
+     route: SidebarSideRoute<'_>,
+     palette: &Palette,
++    theme: SidebarTheme,
+ ) -> CommandBarArt<RenderedChromeEntry> {
+     let render = |name: &str, frame| route.render(name, palette, frame);
+     // InitSideMixFiles534FA0 loads UIMD.INI before674650 installs ButtonList.
+@@ -59,6 +63,12 @@ pub(super) fn load(
+         left_cap: std::array::from_fn(|i| render("LENDCAP.SHP", i)),
+         right_cap: render("RENDCAP.SHP", 0),
+         background: render("BTTNBKGD.SHP", 0),
++        fullscreen: cfg!(all(
++            feature = "wasm",
++            target_arch = "wasm32",
++            target_os = "unknown"
++        ))
++        .then(|| fullscreen_glyph(theme)),
+         // TabClass::LoadSHPs @ 0x006D02B0 loads Button00..Button24.SHP
+         // (FreeSHPs @ 0x006D0270 frees them), indexed by command; only the
+         // 11 command names (6CFCC0) can take a slot, so 11..24 never draw.
+@@ -68,3 +78,82 @@ pub(super) fn load(
+         slots,
+     }
+ }
++
++/// Newly authored indexed glyph following the approved outward four-corner
++/// silhouette. Draw it over the active side's decoded BTTNBKGD.SHP, so no
++/// retail plate or palette bytes ship with the extension. One glyph serves
++/// both enter and exit; controller state never selects different art.
++fn fullscreen_glyph(theme: SidebarTheme) -> RenderedChromeEntry {
++    const W: usize = 22;
++    const H: usize = 15;
++    const CORNER: [[u8; 6]; 5] = [
++        [0, 0, 2, 2, 2, 1],
++        [0, 3, 3, 2, 1, 0],
++        [2, 3, 2, 0, 0, 0],
++        [2, 2, 1, 0, 0, 0],
++        [1, 2, 0, 0, 0, 0],
++    ];
++    let colors: [[u8; 4]; 4] = match theme {
++        SidebarTheme::Allied => [
++            [0, 0, 0, 0],
++            [29, 85, 140, 255],
++            [61, 151, 227, 255],
++            [132, 216, 253, 255],
++        ],
++        SidebarTheme::Soviet | SidebarTheme::Yuri => [
++            [0, 0, 0, 0],
++            [130, 77, 8, 255],
++            [218, 148, 34, 255],
++            [255, 216, 111, 255],
++        ],
++    };
++    let mut indices = vec![0; W * H];
++    for (y, row) in CORNER.iter().enumerate() {
++        for (x, &shade) in row.iter().enumerate() {
++            for py in [y, H - 1 - y] {
++                for px in [x, W - 1 - x] {
++                    indices[py * W + px] = shade;
++                }
++            }
++        }
++    }
++    let rgba = indices
++        .iter()
++        .flat_map(|&i| colors[usize::from(i)])
++        .collect();
++    RenderedChromeEntry {
++        rgba,
++        indices,
++        width: W as u32,
++        height: H as u32,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn fullscreen_glyph_has_four_open_corners_and_side_colors() {
++        let blue = fullscreen_glyph(SidebarTheme::Allied);
++        let gold = fullscreen_glyph(SidebarTheme::Soviet);
++        let yuri = fullscreen_glyph(SidebarTheme::Yuri);
++        let (w, h) = (blue.width as usize, blue.height as usize);
++        let index = |x, y| y * w + x;
++        assert_eq!((w, h), (22, 15));
++        assert_eq!(blue.indices, gold.indices);
++        assert_eq!(gold.rgba, yuri.rgba);
++        assert_ne!(blue.rgba, gold.rgba);
++        for y in [1, h - 2] {
++            for x in [1, w - 2] {
++                let i = index(x, y) * 4;
++                assert_eq!(blue.rgba[i + 3], 255);
++                assert!(blue.rgba[i + 2] > blue.rgba[i]);
++                assert!(gold.rgba[i] > gold.rgba[i + 2]);
++            }
++        }
++        for (x, y) in [(w / 2, 0), (0, h / 2), (w / 2, h / 2)] {
++            assert_eq!(blue.rgba[index(x, y) * 4 + 3], 0);
++        }
++    }
++}
+diff --git a/src/rules/theme_ini.rs b/src/rules/theme_ini.rs
+index c9204ce3b6a5c181308076f766f90c9f7b54d192..3de821249fb87cb9fc8c8ba6647d4cce8f0b0413 100644
+--- a/src/rules/theme_ini.rs
++++ b/src/rules/theme_ini.rs
+@@ -126,10 +126,13 @@ fn scan_catalog_availability(entries: &mut [ThemeEntry], assets: &AssetManager)
+         let wav = (!entry.sound.is_empty())
+             .then(|| assets.get_ref(&format!("{}.wav", entry.sound)))
+             .flatten();
+-        entry.available = wav.is_some();
++        let remote =
++            crate::assets::deferred_assets::music_metadata(&format!("{}.wav", entry.sound));
++        entry.available = wav.is_some() || remote.is_some();
+         entry.duration_seconds = wav
+             .and_then(crate::assets::wav_file::WavFile::parse)
+             .and_then(|wav| wav.native_duration_seconds())
++            .or_else(|| remote.map(|metadata| metadata.duration_seconds))
+             .unwrap_or(0);
+     }
+ }
+diff --git a/src/ui/main_menu_dialogs/options.rs b/src/ui/main_menu_dialogs/options.rs
+index 38eba41e2b4ec35cd26d670f3fa82ec7f2e60dbc..94b4c3778a18be741ebb5039845d852412c3bd3a 100644
+--- a/src/ui/main_menu_dialogs/options.rs
++++ b/src/ui/main_menu_dialogs/options.rs
+@@ -1357,6 +1357,7 @@ impl Default for LauncherOptionsValues {
+             C::Tooltips,
+             C::TargetLines,
+             C::VSync,
++            C::YrOriginalStyle,
+             C::HdMapPreviews,
+             C::CommanderFeedback,
+         ] {
+diff --git a/src/ui/sidebar/command_bar.rs b/src/ui/sidebar/command_bar.rs
+index e776a2bf2f3a3e8a0e7a9dbf831b30b4a7a58bb6..fc7b316910ca0d745620df4c9ee84a0301459b7a 100644
+--- a/src/ui/sidebar/command_bar.rs
++++ b/src/ui/sidebar/command_bar.rs
+@@ -22,6 +22,18 @@ pub const COMMAND_NAMES: [&str; 11] = [
+     "Cheer",
+ ];
+ 
++/// Browser-only command appended by the frontend, never an INI command.
++pub(crate) const FULLSCREEN_COMMAND: usize = COMMAND_NAMES.len();
++pub(crate) const FULLSCREEN_GADGET_ID: u16 = 0x3F00;
++
++pub(crate) fn append_fullscreen_slot(layout: CommandBarLayout, slots: &mut Vec<Option<usize>>) {
++    // Preserve every authored hole (unknown, duplicate or missing-art token).
++    // A collapsed or narrow bar never truncates the existing retail buttons.
++    if layout.slot(slots.len()).is_some() {
++        slots.push(Some(FULLSCREEN_COMMAND));
++    }
++}
++
+ /// UIMD.INI maps command identities to slots, rather than numbering artwork
+ /// by slot. `674650` reads `ButtonList` into 0x200 bytes and gives each
+ /// `strtok(",")` token the next slot; the name search `6CFCC0` is an exact
+@@ -211,6 +223,26 @@ mod tests {
+         );
+     }
+     #[test]
++    fn fullscreen_uses_first_slot_after_the_authored_sequence_without_inserting() {
++        let layout = |width, open| {
++            CommandBarLayout::new([width, 600], 168, [28, 32], [52, 32], [28, 32], open).unwrap()
++        };
++        let ini = crate::rules::ini_parser::IniFile::from_str(
++            "[AdvancedCommandBar]\nButtonList=Team01,wrong,Team01,Deploy,unused\n",
++        );
++        let old = read_button_list(ini.section_or_empty("AdvancedCommandBar"));
++        assert_eq!(old, [None, None, Some(0), Some(4), None]);
++        let mut roomy = old.clone();
++        append_fullscreen_slot(layout(800, true), &mut roomy);
++        assert_eq!(&roomy[..old.len()], &old);
++        assert_eq!(roomy.last(), Some(&Some(FULLSCREEN_COMMAND)));
++        for control in [layout(480, true), layout(800, false)] {
++            let mut unchanged = old.clone();
++            append_fullscreen_slot(control, &mut unchanged);
++            assert_eq!(unchanged, old);
++        }
++    }
++    #[test]
+     fn original_800_by_600_command_bar_layout() {
+         // Original complete72FC60, retail canvas headers: tools/sidebar_oracle/command_bar/layout-native.json.
+         let layout =
+diff --git a/src/util/file_system.rs b/src/util/file_system.rs
+index f9a43b90277a70451d05f37f45fc22bfc9e216a1..51f9658aff5bfa1cad51e6cb249e7b024be2f030 100644
+--- a/src/util/file_system.rs
++++ b/src/util/file_system.rs
+@@ -206,6 +206,10 @@ mod memory {
+         directories().retain(|dir| !dir.starts_with(&path) || dir == Path::new("/"));
+         before - files.len()
+     }
++    /// Apply a retained deletion without issuing a new persistence notice.
++    pub fn restore_deleted_file(path: impl AsRef<Path>) {
++        files().remove(&key(path.as_ref()));
++    }
+     pub fn read_shared(path: impl AsRef<Path>) -> io::Result<Arc<[u8]>> {
+         files()
+             .get(&key(path.as_ref()))
+@@ -366,6 +370,18 @@ mod memory {
+ 
+ #[cfg(all(test, tests_util, feature = "wasm"))]
+ mod tests {
++    #[test]
++    fn restored_deletion_overrides_import_without_rewriting_other_files() {
++        let path = "/retail/compat-deleted.ini";
++        let keep = "/saves/compat-keep.bin";
++        super::memory::import_file(path, b"imported".to_vec());
++        super::memory::restore_file(keep, b"save".to_vec(), 1234);
++        super::memory::restore_deleted_file(path);
++        super::memory::restore_deleted_file(path);
++        assert!(super::memory::read(path).is_err());
++        assert_eq!(super::memory::read(keep).unwrap(), b"save");
++    }
++
+     use super::memory;
+ 
+     #[test]
+diff --git a/src/web.rs b/src/web.rs
+index 26671507c3f7599127e4bc4b1b8663446ca43826..5ff11eb2b8e52e6bdc08ef8b799ece7cc647fc7c 100644
+--- a/src/web.rs
++++ b/src/web.rs
+@@ -5,6 +5,66 @@ pub(crate) mod sim_worker;
+ 
+ use std::cell::RefCell;
+ use wasm_bindgen::prelude::*;
++use wasm_bindgen::JsCast;
++
++fn battlefield_fullscreen_toggle() -> Option<js_sys::Function> {
++    js_sys::Reflect::get(&js_sys::global(), &"vera20kBattlefieldFullscreen".into())
++        .ok()?
++        .dyn_into()
++        .ok()
++}
++
++pub(crate) fn battlefield_fullscreen_available() -> bool {
++    battlefield_fullscreen_toggle().is_some()
++        && web_sys::window()
++            .and_then(|window| window.document())
++            .is_some_and(|document| document.fullscreen_enabled())
++}
++
++/// Only present to the host on a successful frame hand-off, and only on
++/// transitions. A rejected browser action can keep the fallback visible
++/// without a later frame hiding it again.
++pub(crate) fn report_battlefield_fullscreen(visible: bool) {
++    thread_local! {
++        static REPORTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
++    }
++    if REPORTED.with(|reported| reported.replace(visible)) == visible {
++        return;
++    }
++    if let Some(report) = js_sys::Reflect::get(
++        &js_sys::global(),
++        &"vera20kBattlefieldFullscreenAvailability".into(),
++    )
++    .ok()
++    .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
++    {
++        let _ = report.call1(&JsValue::UNDEFINED, &visible.into());
++    }
++}
++
++pub(crate) fn host_fullscreen() -> Option<bool> {
++    battlefield_fullscreen_available().then(|| {
++        web_sys::window()
++            .and_then(|window| window.document())
++            .and_then(|document| document.fullscreen_element())
++            .is_some()
++    })
++}
++
++pub(crate) fn set_host_fullscreen(active: bool) -> bool {
++    let Some(toggle) = battlefield_fullscreen_toggle() else { return false; };
++    let _ = toggle.call1(&JsValue::UNDEFINED, &active.into());
++    true
++}
++
++/// Keep the browser document state in the existing host owner, including Esc
++/// and external exits. Call from the release gesture so the host can ask for
++/// fullscreen synchronously; this never requests pointer lock.
++pub(crate) fn toggle_battlefield_fullscreen() {
++    if let Some(toggle) = battlefield_fullscreen_toggle() {
++        let _ = toggle.call1(&JsValue::UNDEFINED, &"battlefield".into());
++    }
++}
+ 
+ // The host awaits `initThreadPool(workers)` after `init()`, before any
+ // simulation work. Without it the same package runs that work serially.
+@@ -65,8 +125,18 @@ pub(crate) fn status(message: &str) {
+     }
+ }
+ 
+-/// Install before starting. Receives structured match-ended, engine-exited,
+-/// and engine-error objects. Callback exceptions never veto engine shutdown.
++/// Notify the host independently of the localized display status.
++pub(crate) fn startup_finished(error: Option<&str>) {
++    match error {
++        Some(error) => emit_lifecycle(Some(serde_json::json!({
++            "type": "engine-error", "error": error,
++        }))),
++        None => emit_lifecycle(Some(serde_json::json!({ "type": "engine-ready" }))),
++    }
++}
++
++/// Install before starting. Receives structured engine-ready, match-ended,
++/// engine-exited and engine-error objects. Callback exceptions do not affect the engine.
+ #[wasm_bindgen]
+ pub fn set_lifecycle_callback(callback: js_sys::Function) {
+     ON_LIFECYCLE.with(|slot| *slot.borrow_mut() = Some(callback));
+@@ -119,6 +189,7 @@ pub(crate) fn spawn_finished(report: &str) {
+ }
+ 
+ pub(crate) fn engine_exited() {
++    crate::app::remote_assets::clear();
+     crate::audio::web_output::pause();
+     remove_spawn_files();
+     ime::remove();
+@@ -144,7 +215,7 @@ fn request_spawn_action(action: crate::app::SpawnAction) -> Result<(), JsValue>
+ }
+ 
+ /// Run the event loop's next pass now, even while it waits.
+-fn wake() {
++pub(crate) fn wake() {
+     WAKE.with(|slot| {
+         if let Some(proxy) = slot.borrow().as_ref() {
+             let _ = proxy.send_event(());
+@@ -287,7 +358,7 @@ fn mod_folder(folder: &str) -> Result<(), JsValue> {
+     Ok(())
+ }
+ 
+-fn idle(what: &str) -> Result<(), JsValue> {
++pub(crate) fn idle(what: &str) -> Result<(), JsValue> {
+     if LIFECYCLE.with(|slot| slot.borrow().idle()) {
+         Ok(())
+     } else {
+@@ -492,7 +563,12 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
+ }
+ 
+ #[wasm_bindgen]
+-pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result<(), JsValue> {
++pub fn restore_user_file(
++    path: &str,
++    bytes: Vec<u8>,
++    modified_ms: f64,
++    deleted: Option<bool>,
++) -> Result<(), JsValue> {
+     if !LIFECYCLE.with(|slot| slot.borrow().idle()) {
+         return Err(JsValue::from_str(
+             "Restore user data before starting or after the engine exited",
+@@ -503,14 +579,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
+     if path.starts_with("/replays/") {
+         return Ok(());
+     }
+-    if !path.starts_with("/saves/") {
+-        return Err(JsValue::from_str("User data must be below /saves/"));
++    if !(path == "/config.toml" || path.starts_with("/retail/") || path.starts_with("/saves/")) {
++        return Err(JsValue::from_str("Invalid user data path"));
+     }
+     relative_path(&path[1..])?;
+     if !modified_ms.is_finite() || modified_ms < 0.0 || modified_ms > 8_640_000_000_000_000.0 {
+         return Err(JsValue::from_str("Invalid file timestamp"));
+     }
+-    crate::util::file_system::restore_file(path, bytes, modified_ms as u64);
++    if deleted.unwrap_or(false) {
++        crate::util::file_system::restore_deleted_file(path);
++    } else {
++        crate::util::file_system::restore_file(path, bytes, modified_ms as u64);
++    }
+     Ok(())
+ }
+ 

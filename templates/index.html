@@ -63,8 +63,7 @@
                     <div class="import-controls"><button id="cancel-import" class="retry" type="button" hidden>取消导入</button><button id="retry-import" class="retry" type="button" hidden>重试导入</button><button id="retry-cache" class="retry" type="button" hidden>重试缓存</button></div>
                     <p class="selection-note">资源仅在本机读取；远程下载需允许 CORS，可改用本地导入。ZIP 支持 UTF-8 Store/Deflate，最多 2 GiB、12,000 项。</p>
                 </section>
-                <p id="save-compatibility" role="note">存档兼容提示：此版引擎使用 v2 存档格式，旧版 v1 存档可列出但不能载入，旧引擎也不能读取新版存档。开始前会保存独立的用户数据快照；可用“升级前备份”取回覆盖前的原字节。回退程序不会转换存档，请勿清除此站点数据。</p>
-                <p class="selection-note" id="release-navigation"><a href="../../index.html">版本选择</a> · <a href="../6994a5109615/index.html">旧版（读取旧存档）</a></p>
+                <p id="save-compatibility" role="note">存档兼容提示：此版引擎使用 v2 存档格式，旧版 v1 存档可列出但不能载入，旧引擎也不能读取新版存档。开始前会保存独立的用户数据快照；可用“升级前备份”取回覆盖前的原字节。备份不会转换存档，请勿清除此站点数据。</p>
                 <div id="button-caption"></div>
                 <div class="progress-area" id="progress-area" hidden>
                     <div class="progress-track" role="progressbar" aria-label="游戏加载进度" aria-valuemin="0"
@@ -88,11 +87,7 @@
                     <div class="help-copy">
                         <p>选择《尤里的复仇》安装文件夹或 ZIP；不支持安装程序、加密、分卷和 ZIP64。下载失败可保存到本机再导入。</p>
                         <p>资源只在浏览器本机使用，不会上传或修改。</p>
-                        <p>需要支持 WebGPU 的桌面浏览器。支持单机、音效和音乐；联机需要可用的联机网关。</p>
-                        <p><label for="gateway-address">联机网关地址（可选）</label><br>
-                            <input id="gateway-address" type="url" placeholder="https://gateway.example.com"
-                                autocomplete="off" spellcheck="false" aria-describedby="gateway-status"></p>
-                        <p id="gateway-status" role="status">本站未部署联机网关；单机不受影响。可另行配置已有网关。</p>
+                        <p>需要支持 WebGPU 的桌面浏览器。支持单机及互联网联机，使用上游默认服务，不需要自填网关。浏览器版暂不支持局域网。</p>
                     </div>
                 </details>
             </footer>
@@ -103,7 +98,7 @@
             <p>项目源码：<a href="https://github.com/libi/vera20k-web" target="_blank" rel="noopener noreferrer">VERA20k 网页版</a> · <a href="https://github.com/iamapig120/vera20k/tree/web-preview-source" target="_blank" rel="noopener noreferrer">本站集成源码</a></p>
         </aside>
     </main>
-    <div id="game" aria-label="尤里的复仇游戏画面"><div id="fullscreen-tools"><button id="toggle-fullscreen" type="button" aria-pressed="false">全屏</button><span id="fullscreen-status" role="status"></span></div></div>
+    <div id="game" aria-label="尤里的复仇游戏画面"><span id="fullscreen-status" role="status"></span></div>
     <aside id="storage-tools" aria-label="本机数据">
         <details id="storage-panel">
             <summary>本机数据 / 备份</summary>
@@ -111,7 +106,7 @@
                     id="export-data" type="button" disabled>导出备份</button><button id="import-data" type="button"
                     disabled>导入备份</button><button id="retry-storage" type="button" hidden>重试读取与保存</button><button
                     id="clear-cache" type="button">清除资源缓存</button><input id="backup-file" type="file"
-                    accept="application/json,.json" hidden><button id="export-before-upgrade" type="button" disabled>升级前备份</button></div>
+                    accept="application/json,.json" hidden><button id="export-before-upgrade" type="button" disabled>升级前备份</button><button id="export-prior-upgrade" type="button" hidden>导出上次升级前备份</button></div>
         </details>
     </aside>
     <div id="status" aria-hidden="true"></div>
