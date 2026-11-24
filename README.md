@@ -1,33 +1,29 @@
 # YR Toy test corresponding source
 
-This tree contains the Toy wrapper and a patch against VERA20k 79edebfa25eb3411105117409a3363497e4529b6.
-Engine adaptation commit: ef1426ac46580819d51c29ea5ffb953266095099.
-Wrapper integration commit: e9257ce5a87e570b237016c1b4afe255ef7f7cd3.
-Upstream source: https://github.com/YuriPlanet/vera20k/tree/79edebfa25eb3411105117409a3363497e4529b6
+Upstream base: `926a036e648a505e9d2d93b87ee7a5ccff7e7953` (VERA20k 0.4.2).
+Apply `engine.patch` to that exact upstream revision with `git apply`. The
+same adaptation, including the new-profile YR-style default and Internet-only
+browser menu, is used by GitHub Pages. The browser uses the default
+`wss://wss.vera20k.com` and no custom gateway, key, or browser LAN signaling.
 
-## Rebuild
+Build the engine with Rust 1.100.0, matching wasm-bindgen 0.2.127 and Cargo.lock
+unchanged. Leave WS_PROXY_URL unset. Generate the snapshot layout via the
+native tool; the Wasm build script embeds it. To reproduce the build profile:
 
-1. Check out that exact upstream engine revision, then apply engine.patch with git apply.
-2. With Rust 1.97.0 and Cargo.lock unchanged, build the native snapshot layout tool:
-   cargo build -p vera20k-core --bin snapshot-layout --profile fast --locked
-3. Run the resulting snapshot-layout executable and put its decimal stdout in
-   snapshot-layout.txt. Export that same value as VERA20K_SNAPSHOT_LAYOUT.
-4. Build single-threaded browser bindings from the engine:
-   cargo rustc -p vera20k --lib --target wasm32-unknown-unknown --no-default-features --features wasm-net --profile fast --locked --crate-type cdylib -- -C link-arg=-zstack-size=8388608
-5. With wasm-bindgen CLI 0.2.127, run:
-   wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/fast/vera20k.wasm
-   Copy the upstream font files (.ttf, .otf, .bin) and OFL*.txt from
-   src/render/fonts into pkg/fonts. Preserve the generated pkg/snippets tree.
-6. In wrapper, install locked esbuild 0.28.2 with:
-   npm ci --ignore-scripts --prefix tools/toy-build
-7. Point VERA_TOY_LOGO to the separately supplied authorized logo artwork.
-   Its SHA-256 is 017a5021324b635e88d24bc37c8332bb6665d464a4c965f347627da429a7a5bd.
-   Run:
-   node tools/toy-build/package-online.cjs PATH_TO_PKG PATH_TO_LAYOUT_FILE ef1426ac46580819d51c29ea5ffb953266095099 NEW_OUTPUT_ROOT
+```sh
+export CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0
+export CARGO_PROFILE_FAST_OPT_LEVEL=0 CARGO_PROFILE_FAST_DEBUG=0 CARGO_PROFILE_FAST_CODEGEN_UNITS=256 CARGO_PROFILE_FAST_LTO=off
+export CARGO_PROFILE_WASM_LTO=off CARGO_PROFILE_WASM_CODEGEN_UNITS=32
+export RUSTC_BOOTSTRAP=1 RUSTFLAGS="-Zunstable-options --jobs-backend=1 --jobs-frontend=1 -Zfewer-names=yes"
+python3 tools/wasm/build.py --profile wasm --network
+```
 
-The candidate directory under NEW_OUTPUT_ROOT contains the site. The release
-receipt records exact file hashes and the immutable corresponding-source URL.
-The measured Wasm SHA-256 is 7818bddcde6ea77ab51f0bdc88ecc0ccbf7e9d2766e69ac0a9be3faf9629d880.
-Retail data, artwork, compiled output and player data are excluded from this
-source tree. Refer to wrapper/LICENSE-GPL and wrapper/notices/ENGINE-LEGAL.md.
-The Toy launcher uses the structured engine-ready, engine-error and engine-exited events. Localized status text is for display only.
+Keep the complete generated `pkg`, including fonts and snippets. In this source
+tree install locked esbuild 0.28.2 with
+`npm ci --ignore-scripts --prefix wrapper/tools/toy-build`.
+Point VERA_TOY_LOGO at the separately supplied authorized logo
+(SHA-256 017a5021324b635e88d24bc37c8332bb6665d464a4c965f347627da429a7a5bd).
+Pass the generated pkg, decimal snapshot id file, the adapted engine commit,
+and an unused output directory to `wrapper/tools/toy-build/package-online.cjs`.
+
+This repository contains no retail data, player data, compiled output or logo.

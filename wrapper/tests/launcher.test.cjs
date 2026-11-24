@@ -400,3 +400,51 @@ test('aggregate bar keeps current file progress separate and never completes bef
  fixture.context.resourceProgress({phase:'manifest',loaded:1});
  assert.equal(fixture.element('total-progress-area').hidden,true);
 });
+
+test('old Toy backups enumerate only prior layout stores and read without writes',async()=>{
+ const fs=require('node:fs'),vm=require('node:vm');
+ const {join}=require('node:path');
+ const raw=fs.readFileSync(join(__dirname,'../templates/storage.js'),'utf8');
+ const old='vera20k-web-layout-9bb20d64-users', opened=[],writes=[];
+ const context=vm.createContext({Uint8Array,ArrayBuffer,indexedDB:{
+  async databases(){return [old,'vera20k-web-layout-9bb20d64-library','vera20k-web-layout-cb545137-users','unrelated'].map(name=>({name}));},
+  open(name,...rest){
+   opened.push([name,...rest]);
+   const req={};
+   queueMicrotask(()=>{
+    req.result={
+     objectStoreNames:{contains:name=>name==='users'},close(){},
+     transaction(kind,mode){
+      writes.push([kind,mode]);const tx={objectStore(){return {getAll(){
+       const req={result:[{path:'/saves/fixture.sav',bytes:new Uint8Array([7]),modified_ms:32}]};
+       queueMicrotask(()=>tx.oncomplete());return req;
+      }}}};return tx;
+     }
+    };
+    req.onsuccess();
+   });
+   return req;
+  }
+ }});
+ vm.runInContext(raw,context);
+ const s=context.createVeraStorage('vera20k-web-layout-cb545137',{migrateLegacy:false});
+ assert.deepEqual(Array.from(await s.priorLayouts()),['9bb20d64']);
+ await assert.rejects(s.priorUsers('f1111111'),/不存在/);
+ assert.deepEqual(opened,[]);
+ assert.equal((await s.priorUsers('9bb20d64'))[0].bytes[0],7);
+ assert.deepEqual(opened,[[old]]);
+ assert.deepEqual(writes,[['users','readonly']]);
+});
+
+test('a disappeared prior layout aborts implicit creation rather than opening a new database',async()=>{
+ const fs=require('node:fs'),vm=require('node:vm');
+ const raw=fs.readFileSync(require('node:path').join(__dirname,'../templates/storage.js'),'utf8');
+ let aborted=0;
+ const context=vm.createContext({indexedDB:{
+  async databases(){return [{name:'vera20k-web-layout-9bb20d64-users'}];},
+  open(){const req={transaction:{abort(){aborted++;req.onerror();}}};queueMicrotask(()=>req.onupgradeneeded());return req;}
+ }});
+ vm.runInContext(raw,context);
+ await assert.rejects(context.createVeraStorage('vera20k-web-layout-cb545137').priorUsers('9bb20d64'),/无法读取/);
+ assert.equal(aborted,1);
+});

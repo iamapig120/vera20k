@@ -113,10 +113,36 @@ function createVeraStorage(name='vera20k-web-v2',{timeoutMs=20000,migrateLegacy=
   migration.set(kind,promise);
   try{await promise;}catch(error){migration.delete(kind);throw error;}
  }
+ // Optional export only: discover existing Toy layout stores without opening
+ // anything. A deletion race aborts the implicit upgrade, so no DB is created.
+ async function priorLayouts(){
+  if(!/^vera20k-web-layout-[0-9a-f]{8}$/.test(name)||typeof indexedDB.databases!=='function')return [];
+  return [...new Set((await indexedDB.databases()).map(row=>row.name)
+   .filter(n=>/^vera20k-web-layout-[0-9a-f]{8}-users$/.test(n)&&n!==name+'-users')
+   .map(n=>n.slice(19,-6)))].sort();
+ }
+ async function priorUsers(layout){
+  if(!(await priorLayouts()).includes(layout))throw Error('旧版备份不存在或浏览器不允许读取');
+  const db=await new Promise((resolve,reject)=>{
+   const req=indexedDB.open('vera20k-web-layout-'+layout+'-users');
+   req.onupgradeneeded=()=>req.transaction.abort();
+   req.onerror=()=>reject(req.error||Error('无法读取旧版备份'));
+   req.onsuccess=()=>resolve(req.result);
+  });
+  try{
+   if(!db.objectStoreNames.contains('users'))throw Error('旧版备份结构不受支持');
+   return await new Promise((resolve,reject)=>{
+    const tx=db.transaction('users','readonly');
+    const request=tx.objectStore('users').getAll();
+    tx.oncomplete=()=>{try{resolve(request.result.map(userRow));}catch(error){reject(error);}};
+    tx.onabort=()=>reject(tx.error||Error('旧版备份读取中断'));
+   });
+  }finally{db.close();}
+ }
  async function open(){await database('users');await migrate('users');}
  async function libraryReady(){await database('library');await migrate('library');}
  return {
-  open,
+  open,priorLayouts,priorUsers,
   async users(){await open();return transaction('users','readonly',({data,done,guard})=>{data.getAll().onsuccess=guard(e=>done(e.target.result.map(userRow)));});},
   async write(row){await open();const checked=userRow(row);return transaction('users','readwrite',({data})=>data.put(checked,checked.path));},
   remove(path){return this.write({path,bytes:new Uint8Array(),modified_ms:Date.now(),deleted:true});},

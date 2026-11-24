@@ -4,9 +4,14 @@ import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFrom
 import {installFullscreen} from './fullscreen.mjs';
 import {createRuntimeLoader} from './runtime.mjs';
 const $=id=>document.getElementById(id);
-globalThis.vera20kToggleFullscreen=installFullscreen(document,document.documentElement,$('toggle-fullscreen'),message=>{
+globalThis.vera20kToggleFullscreen=installFullscreen(document,document.documentElement,$('fullscreen-status'),message=>{
  $('fullscreen-status').textContent=message;
 });
+// Explicit host contract: older/other wrappers still use their own window owner.
+if(typeof document.documentElement.requestFullscreen==='function'&&typeof document.exitFullscreen==='function'){
+ globalThis.vera20kBattlefieldFullscreen=globalThis.vera20kToggleFullscreen;
+ globalThis.vera20kBattlefieldFullscreenAvailability=globalThis.vera20kToggleFullscreen.setBattlefieldAvailable;
+}
 const status=$('status'), button=$('start'), files=$('files');
 const gatewayInput=$('gateway-address'), gatewayStatus=$('gateway-status');
 const gatewayKey='vera20k.gateway-origin';
@@ -101,6 +106,27 @@ $('export-data').onclick=async()=>{
   const link=document.createElement('a');link.href=url;link.download='vera20k-backup.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
  }catch(error){storageStatus(`导出失败：${error.message}`,true);}
 };
+async function loadPriorBackupChoices(){
+ if(typeof store.priorLayouts!=='function')return;
+ try{
+  const layouts=await store.priorLayouts();
+  const picker=$('prior-layout');picker.replaceChildren();
+  for(const layout of layouts){
+   const option=document.createElement('option');option.value=layout;option.textContent=layout;picker.append(option);
+  }
+  $('prior-backup-panel').hidden=!layouts.length;
+ }catch{/* Some embedded hosts do not expose database enumeration. */}
+}
+$('export-prior-layout').onclick=async()=>{
+ try{
+  const layout=$('prior-layout').value;
+  const rows=await store.priorUsers(layout);
+  const data={format:'vera20k-web-user-data',version:1,files:rows.map(row=>({...row,bytes:Array.from(row.bytes)}))};
+  const url=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));
+  const link=document.createElement('a');link.href=url;link.download='vera20k-layout-'+layout+'-backup.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+ }catch(error){storageStatus(error.message,true);}
+};
+void loadPriorBackupChoices();
 $('import-data').onclick=()=>{$('backup-file').value='';$('backup-file').click();};
 $('backup-file').onchange=async()=>{
  const file=$('backup-file').files[0];if(!file)return;

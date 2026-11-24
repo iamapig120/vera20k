@@ -1,5 +1,5 @@
 diff --git a/src/app/audio_runtime.rs b/src/app/audio_runtime.rs
-index 1a8dbc6..528350b 100644
+index 1a8dbc6f83ac1e579a17b29ed6b5463d6acd6636..528350b24aac8fe00a73509f2f6e0f156de3698d 100644
 --- a/src/app/audio_runtime.rs
 +++ b/src/app/audio_runtime.rs
 @@ -325,6 +325,17 @@ impl AppAudioRuntime {
@@ -21,7 +21,7 @@ index 1a8dbc6..528350b 100644
          let mut draw_main =
              crate::audio::sfx::PlaybackDraws::new(move |low, high| retained.ranged(low, high));
 diff --git a/src/app/frame.rs b/src/app/frame.rs
-index 41008b6..683f0a2 100644
+index 41008b6b099a83e9a52995bf2874b935f4e0d559..e19cde43d2d8dd1890173ee52a910b8cc8559d96 100644
 --- a/src/app/frame.rs
 +++ b/src/app/frame.rs
 @@ -199,6 +199,10 @@ impl App {
@@ -35,22 +35,103 @@ index 41008b6..683f0a2 100644
          if state.persistence.pending_load.is_some() {
              return RuntimeServiceResult::default();
          }
-@@ -844,6 +848,10 @@ impl App {
+@@ -844,7 +848,14 @@ impl App {
                      .match_diagnostics
                      .playback_capture_requested(),
          );
 +        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
 +        if super::remote_assets::pump(state) {
++            crate::web::report_battlefield_fullscreen(false);
 +            return Ok(FrameRenderOutcome::Deferred);
 +        }
          if let Some(presented) = crate::app::persistence::commands::pump_saved_game_load(state) {
++            #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++            crate::web::report_battlefield_fullscreen(false);
              crate::app::input::hardware_cursor::hide_game_cursor(state);
              return Ok(if presented {
+                 FrameRenderOutcome::Presented
+@@ -1669,6 +1680,16 @@ impl App {
+         let submission = state.renderer.gpu.hand_off_frame(encoder, output);
+         let presented_at = Instant::now();
+         #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        crate::web::report_battlefield_fullscreen(
++            game_render_output
++                .as_ref()
++                .and_then(|output| output.drawn_sidebar_view(state))
++                .is_some()
++                && screen_page == ScreenPage::Battlefield
++                && page.is_none()
++                && crate::app::presentation::sidebar_build::command_bar::battlefield_fullscreen_visible(state),
++        );
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
+         if screenshot_requested {
+             // Browser hand-off submits/presents inline. Ask for the snapshot
+             // now, before the browser can recycle the canvas drawing buffer.
+diff --git a/src/app/frontend/shell_layout.rs b/src/app/frontend/shell_layout.rs
+index 581bc1ef359b1e12711ded35c321aa3e9fd66425..ef78351fa62cca83c7c84680f5c2b0fe32c93ff5 100644
+--- a/src/app/frontend/shell_layout.rs
++++ b/src/app/frontend/shell_layout.rs
+@@ -115,7 +115,18 @@ pub(crate) fn on<L>(state: &AppState, layout: impl FnOnce(i32, i32, ShellScale)
+ 
+ /// Main menu dialog `0xE2`.
+ pub(crate) fn main_menu_layout(state: &AppState) -> MainMenuShellLayout {
+-    pick(state, compute_layout)
++    let layout = pick(state, compute_layout);
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown", not(feature = "wasm-lan")))]
++    let layout = {
++        // This host enables the official Internet gateway, not /lan/signal.
++        // The shared render and pointer owners both get these same rectangles.
++        let mut layout = layout;
++        layout.buttons.retain(|button| {
++            button.id != crate::ui::main_menu_shell::MainMenuControlId::Network0x578
++        });
++        layout
++    };
++    layout
+ }
+ 
+ /// A front-end box's rects on the window's mapping.
 diff --git a/src/app/handler.rs b/src/app/handler.rs
-index cd8f053..62c7dfe 100644
+index d62c711960f4b6349adaa01fe33593d41894189d..7082fca560719f02f9e2f68ee9db771f56b29a26 100644
 --- a/src/app/handler.rs
 +++ b/src/app/handler.rs
-@@ -1110,13 +1110,16 @@ impl App {
+@@ -227,6 +227,15 @@ impl App {
+         ZoomGeometry::new(width, height, percent, shape)
+     }
+ 
++    /// Actual browser document state when the wrapper owns fullscreen.
++    pub(crate) fn is_full_screen(state: &AppState) -> bool {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if let Some(active) = crate::web::host_fullscreen() {
++            return active;
++        }
++        state.platform.window.fullscreen().is_some()
++    }
++
+     /// The Options page's Full Screen box: switch the window now. On macOS this
+     /// is the system's own full screen with its menu bar and Dock hidden (see
+     /// `initialize`). The resize that follows re-fits the menus and the zoom.
+@@ -240,6 +249,10 @@ impl App {
+     /// window then comes back on the same screen the choice names
+     /// ([`crate::app::display_target`]).
+     pub(crate) fn set_full_screen(state: &mut AppState, full_screen: bool) {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if crate::web::set_host_fullscreen(full_screen) {
++            return;
++        }
+         if !full_screen {
+             // VERA: the game's own switch (the Options and Esc menu boxes, the
+             // Full Screen key) leaves full screen to the launch window, not to
+@@ -284,7 +297,7 @@ impl App {
+         if state.platform.capture_client_size.is_some() {
+             return;
+         }
+-        let full_screen = state.platform.window.fullscreen().is_some();
++        let full_screen = Self::is_full_screen(state);
+         #[cfg(target_os = "macos")]
+         if !full_screen {
+             show_menu_bar_and_dock_after_full_screen();
+@@ -1108,13 +1121,16 @@ impl App {
                      crate::app::input::cursor::apply_cursor_confinement(state);
                  }
                  #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
@@ -72,7 +153,7 @@ index cd8f053..62c7dfe 100644
                  #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
                  if let (Some(error), Some(state)) = (browser_spawn_failure, self.state.as_mut()) {
                      Self::finish_browser_external_launch(state, Some(&error));
-@@ -1405,6 +1408,20 @@ impl ApplicationHandler for App {
+@@ -1408,6 +1424,20 @@ impl ApplicationHandler for App {
          }
  
          let Some(state) = &mut self.state else { return };
@@ -93,7 +174,7 @@ index cd8f053..62c7dfe 100644
          state.sync_cursor_space();
          // Playback has presentation-only input. Exit is local and never
          // schedules EventClass EXIT or changes the recorded simulation. A
-@@ -1988,6 +2005,11 @@ impl ApplicationHandler for App {
+@@ -1991,6 +2021,11 @@ impl ApplicationHandler for App {
              {
                  return;
              }
@@ -105,8 +186,85 @@ index cd8f053..62c7dfe 100644
              Self::follow_window_full_screen(state);
              // cursor lock: the OS drops the clip on focus loss /
              // Windows key, so re-assert the player's choice every frame while
+diff --git a/src/app/input/command_bar_input.rs b/src/app/input/command_bar_input.rs
+index 442da2fc4a9fb77426b999eabd84f22306341eb3..6e0ed07d98cd5ee43493a051f7fa978993590333 100644
+--- a/src/app/input/command_bar_input.rs
++++ b/src/app/input/command_bar_input.rs
+@@ -1,6 +1,7 @@
+ //! Command-bar gadgets reuse the ordinary retained mouse driver and actions.
+ 
+ use super::*;
++use crate::ui::sidebar::command_bar::{FULLSCREEN_COMMAND, FULLSCREEN_GADGET_ID};
+ 
+ pub(super) fn sync(state: &mut AppState) {
+     let layout = crate::app::presentation::sidebar_build::command_bar::layout_and_slots(state);
+@@ -51,7 +52,11 @@ fn sync_prepared(
+     let handles =
+         *gadgets.command_bar.get_or_insert_with(|| {
+             std::array::from_fn(|i| {
+-                let id = if i == 11 { 0xF0 } else { 0xD6 + i as u16 };
++                let id = match i {
++                    11 => 0xF0,
++                    12 => FULLSCREEN_GADGET_ID,
++                    _ => 0xD6 + i as u16,
++                };
+                 let kind = if i == 9 {
+                     ToggleKind::Flip
+                 } else {
+@@ -68,9 +73,10 @@ fn sync_prepared(
+             if command == 11 {
+                 Some(layout.left_cap)
+             } else {
++                let identity = if command == 12 { FULLSCREEN_COMMAND } else { command };
+                 slots
+                     .iter()
+-                    .position(|id| *id == Some(command))
++                    .position(|id| *id == Some(identity))
+                     .and_then(|slot| layout.slot(slot))
+             }
+         });
+@@ -180,6 +186,13 @@ pub(super) fn apply(state: &mut AppState, result: u16) -> bool {
+             .command_bar_closed = !opening;
+         return true;
+     }
++    if id == FULLSCREEN_GADGET_ID {
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if result & RESULT_RIGHT == 0 {
++            crate::web::toggle_battlefield_fullscreen();
++        }
++        return true;
++    }
+     if !(0xD6..0xE1).contains(&id) {
+         return false;
+     }
+diff --git a/src/app/input/dispatch/hotkey_dispatch.rs b/src/app/input/dispatch/hotkey_dispatch.rs
+index 2b209c22cfe5e7e09aec2cb5766faca32e1cd7f9..6256a3b967b3d37c7e1b9a45fd10495e49726753 100644
+--- a/src/app/input/dispatch/hotkey_dispatch.rs
++++ b/src/app/input/dispatch/hotkey_dispatch.rs
+@@ -546,7 +546,7 @@ pub(crate) fn run_window_command(state: &mut AppState, command: HotkeyCommand) {
+         HotkeyCommand::LockCursor => crate::app::input::cursor::toggle_cursor_confinement(state),
+         // A capture keeps its fixed surface.
+         HotkeyCommand::FullScreen if state.platform.capture_client_size.is_none() => {
+-            let full_screen = state.platform.window.fullscreen().is_none();
++            let full_screen = !crate::app::App::is_full_screen(state);
+             crate::app::App::set_full_screen(state, full_screen);
+         }
+         HotkeyCommand::PerformanceStats => {
+diff --git a/src/app/input/gadget_input.rs b/src/app/input/gadget_input.rs
+index 1b91732bcee7ad4e82cc633f3bdede45c54e9f27..9f5f645930890b26fcff0255f6267d4e98954d69 100644
+--- a/src/app/input/gadget_input.rs
++++ b/src/app/input/gadget_input.rs
+@@ -94,7 +94,7 @@ pub(crate) struct InGameGadgets {
+     /// Minimap/radar click region (A3): invisible sticky region over the radar
+     /// minimap; disabled when the radar is offline / minimap absent.
+     pub minimap: Option<GadgetHandle>,
+-    pub command_bar: Option<[GadgetHandle; 12]>,
++    pub command_bar: Option<[GadgetHandle; 13]>,
+     timer_dock: Option<GadgetHandle>,
+     /// The layout's added parts, a gadget for each: grown to fit and never
+     /// shrunk, with every part that is no button disabled.
 diff --git a/src/app/loading/pump.rs b/src/app/loading/pump.rs
-index 66e2f4e..aca7bec 100644
+index a18094a99a663f36e2707489b554ef3a84f7b4db..5335a3853158416f967ef444d4ba17d65cd2d934 100644
 --- a/src/app/loading/pump.rs
 +++ b/src/app/loading/pump.rs
 @@ -408,6 +408,11 @@ impl LoadingRequest {
@@ -121,7 +279,7 @@ index 66e2f4e..aca7bec 100644
      pub(crate) fn selected_map_file(&self) -> &str {
          self.startup().selected_map_file()
      }
-@@ -1403,6 +1408,8 @@ fn play_startup_personal_rules(
+@@ -1416,6 +1421,8 @@ fn play_startup_personal_rules(
  }
  
  pub(crate) fn begin_loading(state: &mut AppState, request: LoadingRequest) {
@@ -131,7 +289,7 @@ index 66e2f4e..aca7bec 100644
      crate::app::match_runtime::sim_tick::finish_threaded_frame(state);
      state
 diff --git a/src/app/mod.rs b/src/app/mod.rs
-index a9fe2c0..62e42ac 100644
+index 08743fd5957e858b3e8fb2d990a6415e978531bd..cdd00ac107aa455b9da8d7d65b52fb8a00b1c406 100644
 --- a/src/app/mod.rs
 +++ b/src/app/mod.rs
 @@ -63,6 +63,8 @@ pub(crate) mod diagnostics;
@@ -144,10 +302,10 @@ index a9fe2c0..62e42ac 100644
  pub mod frontend;
  mod game_data_check;
 diff --git a/src/app/persistence/commands.rs b/src/app/persistence/commands.rs
-index f103ade..5e5d7a6 100644
+index d1e61a579d770302b42624e6e1bc6f9e64eb3d2f..96801ea948b4791c00bedc0b6fa650004c8149e5 100644
 --- a/src/app/persistence/commands.rs
 +++ b/src/app/persistence/commands.rs
-@@ -459,29 +459,62 @@ pub(crate) fn request_saved_game_load(state: &mut AppState, path: PathBuf) {
+@@ -433,29 +433,63 @@ pub(crate) fn request_saved_game_load(state: &mut AppState, path: PathBuf) {
  /// Called before ordinary frame service; the retained browser owns failure UI.
  pub(crate) fn pump_saved_game_load(state: &mut AppState) -> Option<bool> {
      let mut pending = state.persistence.pending_load.take()?;
@@ -164,8 +322,7 @@ index f103ade..5e5d7a6 100644
 +            match crate::app::loading::pump::present_saved_game_loading(state) {
 +                Ok(presented) => presented,
 +                Err(error) => {
-+                    // Like missing native progress artwork, presentation failure
-+                    // must not make an otherwise loadable save inaccessible.
++                    // A presentation failure must not make a valid save inaccessible.
 +                    log::warn!("Saved-game loading dialog presentation failed: {error:#}");
 +                    true
 +                }
@@ -179,21 +336,19 @@ index f103ade..5e5d7a6 100644
          state.persistence.pending_load = Some(pending);
          state.platform.window.request_redraw();
          return Some(presented);
-     };
++    }
 +    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
 +    let pending = match crate::app::remote_assets::initial_library_preserving_page(
 +        state,
 +        pending,
 +        |state, pending, ready| {
 +            if ready {
-+                // Re-enter the same gate: one completion may only be one of
-+                // several archives. No AssetManager lease crosses this wait.
 +                state.persistence.pending_load = Some(pending);
 +            } else {
 +                finish_pending_load(
 +                    state,
-+                    pending,
-+                    Err(crate::app::persistence::PreparedLoadError::Resources(
++                    &pending.path,
++                    Err(super::PreparedLoadError::Resources(
 +                        "saved-game resource loading was cancelled or failed".into(),
 +                    )),
 +                );
@@ -203,30 +358,29 @@ index f103ade..5e5d7a6 100644
 +    ) {
 +        Some(pending) => pending,
 +        None => return Some(false),
-+    };
-+    let result = restore_save_file(state, &pending.path);
-+    finish_pending_load(state, pending, result);
+     };
++    let path = pending.path.as_path();
++    let result = restore_save_file(state, path);
++    finish_pending_load(state, path, result);
 +    Some(false)
 +}
 +
 +fn finish_pending_load(
 +    state: &mut AppState,
-+    pending: PendingSavedGameLoad,
-+    result: Result<(), crate::app::persistence::PreparedLoadError>,
++    path: &Path,
++    result: Result<(), super::PreparedLoadError>,
 +) {
-+    let path = pending.path.as_path();
      let from_menu = state.frontend.screen == crate::ui::game_screen::GameScreen::MainMenu;
--    let from_browser = state
--        .match_state
--        .match_presentation
--        .saved_game_browser
--        .is_some();
+     let from_browser = state
+         .match_state
+         .match_presentation
+         .saved_game_browser
+         .is_some();
 -    let result = restore_save_file(state, path);
-+    let from_browser = state.match_state.match_presentation.saved_game_browser.is_some();
      if from_menu {
          crate::app::App::finish_load_saved_game_from_menu(state, path, result);
      } else if from_browser {
-@@ -493,7 +526,6 @@ pub(crate) fn pump_saved_game_load(state: &mut AppState) -> Option<bool> {
+@@ -467,7 +501,6 @@ pub(crate) fn pump_saved_game_load(state: &mut AppState) -> Option<bool> {
          log::warn!("Load: {}: {error}", path.display());
      }
      state.platform.window.request_redraw();
@@ -234,7 +388,7 @@ index f103ade..5e5d7a6 100644
  }
  
  /// Both browser routes prepare the saved world's own resources, then publish
-@@ -503,6 +535,12 @@ pub(crate) fn try_load_save_file(
+@@ -477,6 +510,12 @@ pub(crate) fn try_load_save_file(
      state: &mut AppState,
      path: &Path,
  ) -> Result<(), crate::app::persistence::PreparedLoadError> {
@@ -247,11 +401,167 @@ index f103ade..5e5d7a6 100644
      if let Err(error) = crate::app::loading::pump::present_saved_game_loading(state) {
          log::warn!("Saved-game loading dialog presentation failed: {error:#}");
      }
+diff --git a/src/app/persistence/options_profile.rs b/src/app/persistence/options_profile.rs
+index a3db68d18e2aa1f5cd7dc7fb879b03e70a96cfd5..416dcc91a086123ed5cef75a9009fc245d544bac 100644
+--- a/src/app/persistence/options_profile.rs
++++ b/src/app/persistence/options_profile.rs
+@@ -149,8 +149,8 @@ pub(crate) struct RetailOptionsProfile {
+     pub(crate) sidebar_columns: crate::ui::main_menu_dialogs::options::SidebarColumns,
+     /// `[VERA] YROriginalStyle=`: whether the startup splash, the menu movie,
+     /// the offline Skirmish background and the LAN/WOL lobby backgrounds use
+-    /// Yuri's Revenge's art. Off by default, so new profiles show Red Alert
+-    /// 2's. Only those surfaces read it; see
++    /// Yuri's Revenge's art. This fork defaults to YR; explicit saved choices
++    /// still win. Only those surfaces read it; see
+     /// [`LauncherCheckboxId::YrOriginalStyle`](crate::ui::main_menu_dialogs::options::LauncherCheckboxId::YrOriginalStyle).
+     pub(crate) yr_original_style: bool,
+     /// `[VERA] SkipIntro=`: start straight at the main menu, without the logo
+@@ -423,7 +423,7 @@ impl Default for RetailOptionsProfile {
+             original_shape: false,
+             sidebar: crate::ui::main_menu_dialogs::options::SidebarSize::Normal,
+             sidebar_columns: crate::ui::main_menu_dialogs::options::SidebarColumns::Two,
+-            yr_original_style: false,
++            yr_original_style: true,
+             skip_intro: false,
+             show_string_keys: false,
+             mouse_wheel_zoom: false,
+@@ -1769,7 +1769,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+             defaults.retained_profile.sidebar_columns,
+             SidebarColumns::Two
+         );
+-        assert!(!defaults.retained_profile.yr_original_style);
++        assert!(defaults.retained_profile.yr_original_style);
+         // Shift + left click queues one copy, as in gamemd, until it is ticked.
+         assert!(!defaults.retained_profile.shift_queue);
+         // The retail minimum-player gate stays until SoloSkirmish= is enabled.
+@@ -1788,7 +1788,7 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+         assert_eq!(load.retained_profile.zoom, Zoom::Percent(200));
+         assert!(load.retained_profile.original_shape);
+         assert_eq!(load.retained_profile.sidebar, SidebarSize::Large);
+-        assert!(!load.retained_profile.yr_original_style);
++        assert!(load.retained_profile.yr_original_style);
+         assert!(!load.retained_profile.skip_intro);
+         assert!(load.retained_profile.shift_queue);
+         assert!(load.retained_profile.solo_skirmish);
+@@ -2349,32 +2349,18 @@ ScoreVolume=0.3\nIsScoreShuffle=yes\nSoundLatency=4\nInGameMusic=no\n[VERA]\nZoo
+     }
+ 
+     #[test]
+-    fn yr_original_style_defaults_to_ra2_and_reads_only_its_own_key() {
+-        let defaults = load_snapshot(&RetailStartupOptions::default(), b"[VERA]\n");
+-        assert!(
+-            !defaults.retained_profile.yr_original_style,
+-            "unchecked Original YR Style selects the default RA2 look"
+-        );
+-
+-        for value in ["yes", "no"] {
+-            let ignored = load_snapshot(
+-                &RetailStartupOptions::default(),
+-                format!("[VERA]\nRA2Look={value}\n").as_bytes(),
+-            );
+-            assert!(
+-                !ignored.retained_profile.yr_original_style,
+-                "RA2Look={value} must not affect the default"
+-            );
++    fn yr_original_style_defaults_to_yr_and_reads_only_its_own_key() {
++        use crate::ui::main_menu_dialogs::options::{LauncherCheckboxId, LauncherOptionsValues};
++        let startup = RetailStartupOptions::default();
++        assert!(RetailOptionsLoad::without_settings(&startup).retained_profile.yr_original_style);
++        assert!(LauncherOptionsValues::default()[LauncherCheckboxId::YrOriginalStyle]);
++        for ini in ["", "[Video]\nScreenWidth=800\n", "[VERA]\n", "[VERA]\nRA2Look=no\n"] {
++            assert!(load_snapshot(&startup, ini.as_bytes()).retained_profile.yr_original_style);
++        }
++        for (choice, enabled) in [("yes", true), ("no", false)] {
++            let ini = format!("[VERA]\nYROriginalStyle={choice}\n");
++            assert_eq!(load_snapshot(&startup, ini.as_bytes()).retained_profile.yr_original_style, enabled);
+         }
+-
+-        let explicit_new_key = load_snapshot(
+-            &RetailStartupOptions::default(),
+-            b"[VERA]\nYROriginalStyle=yes\n",
+-        );
+-        assert!(
+-            explicit_new_key.retained_profile.yr_original_style,
+-            "the YR-original preference must be read from its own key"
+-        );
+     }
+ 
+     /// RA2 Mode comes from its own key and is saved under it, and saving
+diff --git a/src/app/presentation/sidebar_command_bar.rs b/src/app/presentation/sidebar_command_bar.rs
+index ade3524b85cab730abb4102c99600b0432148b8a..fea7636b4d6ed5ffe5ca455fbfd767e1d735ac2d 100644
+--- a/src/app/presentation/sidebar_command_bar.rs
++++ b/src/app/presentation/sidebar_command_bar.rs
+@@ -19,7 +19,29 @@ pub(crate) fn layout_and_slots(state: &AppState) -> Option<(CommandBarLayout, Ve
+             .command_bar_closed,
+     )?;
+     let multiplayer = !state.match_state.session_mode().is_single_player();
+-    Some((layout, art.slots[usize::from(multiplayer)].clone()))
++    let slots = art.slots[usize::from(multiplayer)].clone();
++    #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++    let slots = {
++        let mut slots = slots;
++        if art.fullscreen.is_some_and(|entry| {
++            entry.pixel_size[0] <= layout.background.w
++                && entry.pixel_size[1] <= layout.background.h
++        }) && crate::web::battlefield_fullscreen_available()
++        {
++            crate::ui::sidebar::command_bar::append_fullscreen_slot(layout, &mut slots);
++        }
++        slots
++    };
++    Some((layout, slots))
++}
++
++#[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++pub(crate) fn battlefield_fullscreen_visible(state: &AppState) -> bool {
++    state.renderer.sidebar_surface.is_some()
++        && crate::app::presentation::sidebar_render::current_sidebar_view(state).is_some()
++        && layout_and_slots(state).is_some_and(|(_, slots)| {
++            slots.contains(&Some(crate::ui::sidebar::command_bar::FULLSCREEN_COMMAND))
++        })
+ }
+ 
+ /// The bar a match shows on `frame`, in its layout space: along the strip the
+@@ -120,11 +142,21 @@ pub(crate) fn append_prepared(
+     draw(art.right_cap, layout.right_cap.x, layout.right_cap.y);
+     for (slot, command) in slots.iter().copied().enumerate() {
+         if let (Some(rect), Some(command)) = (layout.slot(slot), command) {
+-            draw(
+-                art.buttons[command][usize::from(gadgets.command_pressed[command])],
+-                rect.x,
+-                rect.y,
+-            );
++            if command == crate::ui::sidebar::command_bar::FULLSCREEN_COMMAND {
++                if let Some(icon) = art.fullscreen {
++                    draw(
++                        Some(icon),
++                        rect.x + (rect.w - icon.pixel_size[0]) * 0.5,
++                        rect.y + (rect.h - icon.pixel_size[1]) * 0.5,
++                    );
++                }
++            } else {
++                draw(
++                    art.buttons[command][usize::from(gadgets.command_pressed[command])],
++                    rect.x,
++                    rect.y,
++                );
++            }
+         }
+     }
+     draw(
+@@ -196,6 +228,7 @@ mod tests {
+             left_cap: [Some(piece(28.0)); 3],
+             right_cap: Some(piece(28.0)),
+             background: Some(piece(52.0)),
++            fullscreen: None,
+             buttons: [[None; 2]; 11],
+             slots: [Vec::new(), Vec::new()],
+         }
 diff --git a/src/app/process_assets.rs b/src/app/process_assets.rs
-index 81a2f56..85cae98 100644
+index 1c99772d93bab4c0e45b9ec6f2cfe528e65a5a8b..a0a037c446ae67d80c906aebfddd780e2d7aa14b 100644
 --- a/src/app/process_assets.rs
 +++ b/src/app/process_assets.rs
-@@ -1202,6 +1202,50 @@ impl ProcessAssets {
+@@ -1376,6 +1376,50 @@ impl ProcessAssets {
          self.manager.as_ref()
      }
  
@@ -303,7 +613,7 @@ index 81a2f56..85cae98 100644
      /// YRO archives, and its PKT titles resolve through the process CSF. Both
      /// fields live on this owner, so the pair is borrowed together.
 diff --git a/src/app/radar_movie.rs b/src/app/radar_movie.rs
-index cfcc36c..dbe1b14 100644
+index cfcc36c61d3f2e48d2efc5ff5bf865c082ff02a0..dbe1b144d59a6846e54961b9405964167640b354 100644
 --- a/src/app/radar_movie.rs
 +++ b/src/app/radar_movie.rs
 @@ -172,12 +172,44 @@ pub(crate) fn enqueue(state: &mut AppState, index: i32, pause_simulation: bool)
@@ -358,7 +668,7 @@ index cfcc36c..dbe1b14 100644
      };
 diff --git a/src/app/remote_assets.rs b/src/app/remote_assets.rs
 new file mode 100644
-index 0000000..5192cb6
+index 0000000000000000000000000000000000000000..5192cb6b6dbf5848950bbcc77877b0f610769c2d
 --- /dev/null
 +++ b/src/app/remote_assets.rs
 @@ -0,0 +1,798 @@
@@ -1161,7 +1471,7 @@ index 0000000..5192cb6
 +    }
 +}
 diff --git a/src/app/shell_campaign.rs b/src/app/shell_campaign.rs
-index ba51f3c..ec1fdde 100644
+index ba51f3c241f1900e4a8138c263c386327b48d55b..ec1fdde5cb5f0e23be03a8b9605de54fce17088a 100644
 --- a/src/app/shell_campaign.rs
 +++ b/src/app/shell_campaign.rs
 @@ -259,6 +259,14 @@ impl App {
@@ -1179,8 +1489,21 @@ index ba51f3c..ec1fdde 100644
          let movie = (|| -> anyhow::Result<Option<String>> {
              let (Some(assets), Some(rules), Some(config)) = (
                  state.process_assets.manager(),
+diff --git a/src/app/shell_main_menu.rs b/src/app/shell_main_menu.rs
+index 321a6967b8bc42159d679dd5203ab4d21d0c45a6..84c7cfa223fd8fa490bc07768c30fb0dbc188c11 100644
+--- a/src/app/shell_main_menu.rs
++++ b/src/app/shell_main_menu.rs
+@@ -816,7 +816,7 @@ impl App {
+         let mut dialog = launcher_dialog_from_profile(
+             &state.persistence.options_profile,
+             labels,
+-            state.platform.window.fullscreen().is_some(),
++            Self::is_full_screen(state),
+             state.renderer.performance_overlay.is_visible(),
+             state.audio.launcher_audio_available,
+             displays,
 diff --git a/src/app/shell_movies_credits.rs b/src/app/shell_movies_credits.rs
-index bbf1252..0a490a1 100644
+index bbf125292436fa279406f50580ed984509a60782..0a490a1d4950ed4d57755e6ca732154c19c0d611 100644
 --- a/src/app/shell_movies_credits.rs
 +++ b/src/app/shell_movies_credits.rs
 @@ -150,6 +150,39 @@ impl App {
@@ -1245,10 +1568,10 @@ index bbf1252..0a490a1 100644
              // No .BIK (and no VQA decoder is needed: retail YR ships none):
              // Play_Movie returns with no visible or audible change.
 diff --git a/src/app/shell_random_map.rs b/src/app/shell_random_map.rs
-index a885c08..9080a2c 100644
+index cd461a17069a05d7f0b3fff87af5d7698ee70f22..0d67f870ec5e1c80e75089eec3bfa88297f86e04 100644
 --- a/src/app/shell_random_map.rs
 +++ b/src/app/shell_random_map.rs
-@@ -1299,6 +1299,39 @@ impl App {
+@@ -1308,6 +1308,39 @@ impl App {
          options: &crate::map::rmg::RmgOptions,
          accept_on_finish: bool,
      ) -> bool {
@@ -1289,10 +1612,10 @@ index a885c08..9080a2c 100644
          // even when setup cannot progress far enough to spawn the worker.
          begin_random_map_generation_owners(
 diff --git a/src/app/shell_wol/service.rs b/src/app/shell_wol/service.rs
-index ef670c9..b6fa2ed 100644
+index be0ad1913895457e28adf01a6a918fffb7872c82..a466221f69267b350218c59a47684c0da01204f3 100644
 --- a/src/app/shell_wol/service.rs
 +++ b/src/app/shell_wol/service.rs
-@@ -970,6 +970,25 @@ pub(super) fn begin_connect(state: &mut AppState) {
+@@ -973,6 +973,25 @@ pub(super) fn begin_connect(state: &mut AppState) {
          .wol
          .as_ref()
          .is_some_and(|visit| visit.provider == WolProvider::Online);
@@ -1319,10 +1642,10 @@ index ef670c9..b6fa2ed 100644
          WolPersona::default()
      } else {
 diff --git a/src/assets/asset_manager.rs b/src/assets/asset_manager.rs
-index 4727f6a..b31b79b 100644
+index 2fd47b2daec683a9b91986ace6d2a4629c1b2138..b956cbdaba57ca413df1f5ea87e0b56741657f09 100644
 --- a/src/assets/asset_manager.rs
 +++ b/src/assets/asset_manager.rs
-@@ -606,6 +606,109 @@ impl AssetManager {
+@@ -676,6 +676,109 @@ impl AssetManager {
          &self.archive_names
      }
  
@@ -1432,7 +1755,7 @@ index 4727f6a..b31b79b 100644
      /// Whether this game overlays a selected mod on the installation.
      pub fn mod_selected(&self) -> bool {
          self.mod_dir.is_some()
-@@ -977,6 +1080,44 @@ impl AssetManager {
+@@ -1081,6 +1184,44 @@ impl AssetManager {
              let Some(pair) = self.audio_pairs.first() else {
                  return Ok(None);
              };
@@ -1478,7 +1801,7 @@ index 4727f6a..b31b79b 100644
                  return Ok(None);
              };
 diff --git a/src/assets/audio_bag.rs b/src/assets/audio_bag.rs
-index 9ff0f42..1e3abbd 100644
+index 9ff0f42618df0e78c0f033f7146da4e33852ba66..1e3abbd855b760fa086312482a959d75fed65739 100644
 --- a/src/assets/audio_bag.rs
 +++ b/src/assets/audio_bag.rs
 @@ -112,6 +112,7 @@ pub struct AudioIndex {
@@ -1534,7 +1857,7 @@ index 9ff0f42..1e3abbd 100644
          let start = entry.offset as usize;
 diff --git a/src/assets/deferred_assets.rs b/src/assets/deferred_assets.rs
 new file mode 100644
-index 0000000..7442289
+index 0000000000000000000000000000000000000000..7442289fe7b82b81570f86cba93b2dc18c87d77f
 --- /dev/null
 +++ b/src/assets/deferred_assets.rs
 @@ -0,0 +1,81 @@
@@ -1620,7 +1943,7 @@ index 0000000..7442289
 +    })
 +}
 diff --git a/src/assets/mix_archive.rs b/src/assets/mix_archive.rs
-index e8533f9..2c1bd85 100644
+index e8533f9aa5df743f2fb655898c222462828ddba6..2c1bd8510500fdfc7645e7d169986737c04d8f91 100644
 --- a/src/assets/mix_archive.rs
 +++ b/src/assets/mix_archive.rs
 @@ -220,6 +220,14 @@ impl std::ops::Deref for SharedBytes {
@@ -1639,7 +1962,7 @@ index e8533f9..2c1bd85 100644
      ///
      /// Detects old vs new format by checking the first u16:
 diff --git a/src/assets/mod.rs b/src/assets/mod.rs
-index f051b79..92f875f 100644
+index f051b799308fdeb549e2d1dfe248fc561f32ec0d..92f875ff2e45302ebdd002869fa5fb914d4ffbe4 100644
 --- a/src/assets/mod.rs
 +++ b/src/assets/mod.rs
 @@ -31,6 +31,7 @@ pub mod bink_file;
@@ -1651,7 +1974,7 @@ index f051b79..92f875f 100644
  pub mod fnt_file;
  pub mod format_sniff;
 diff --git a/src/audio/music.rs b/src/audio/music.rs
-index f5ace23..ba784ce 100644
+index 5df8107d4bcbb41152c0fbe49fd00604b588eb52..04e5210215f8f906e91cd2354d8faa08b3009bb8 100644
 --- a/src/audio/music.rs
 +++ b/src/audio/music.rs
 @@ -131,6 +131,7 @@ pub struct MusicPlayer {
@@ -1662,7 +1985,7 @@ index f5ace23..ba784ce 100644
      volume: f64,
      /// The Theme stream's own `+0x10` interp (`stream+0x14 -> +0x10`), built
      /// by the stream constructor at rate `0x10624D` (1000 ms from full to
-@@ -225,6 +226,7 @@ impl MusicPlayer {
+@@ -228,6 +229,7 @@ impl MusicPlayer {
              health: Default::default(),
              track_cut: false,
              current_player: None,
@@ -1670,7 +1993,7 @@ index f5ace23..ba784ce 100644
              volume: DEFAULT_SCORE_VOLUME,
              own: VolumeInterp::new(VOLUME_SCALE, 0),
              focus_output_scale: 1.0,
-@@ -242,6 +244,9 @@ impl MusicPlayer {
+@@ -245,6 +247,9 @@ impl MusicPlayer {
          if self.held {
              return MusicOutputState::Held;
          }
@@ -1680,7 +2003,7 @@ index f5ace23..ba784ce 100644
          match self.current_player.as_ref() {
              Some(player) if player.empty() || self.track_cut => MusicOutputState::Finished,
              Some(_) if self.own.moving() => MusicOutputState::Ramping,
-@@ -256,9 +261,17 @@ impl MusicPlayer {
+@@ -259,9 +264,17 @@ impl MusicPlayer {
          if self.held {
              return false;
          }
@@ -1698,7 +2021,7 @@ index f5ace23..ba784ce 100644
          if let Some(player) = self.current_player.take() {
              player.stop();
          }
-@@ -283,11 +296,28 @@ impl MusicPlayer {
+@@ -286,11 +299,28 @@ impl MusicPlayer {
          if self.held {
              return;
          }
@@ -1728,10 +2051,10 @@ index f5ace23..ba784ce 100644
      /// and its release resumes the paused song where it stopped
      /// (`0x004082F0`): Theme's Stops and PlayFiles in between do nothing.
 diff --git a/src/audio/sfx.rs b/src/audio/sfx.rs
-index 4d90f71..16b0163 100644
+index 7215b314f7fef6f1b9b242e4d917fc78a10319fa..575a9f5a525347452406845f38813f211523853c 100644
 --- a/src/audio/sfx.rs
 +++ b/src/audio/sfx.rs
-@@ -1396,6 +1396,9 @@ fn open_sfx_sink() -> Result<SfxOutput, String> {
+@@ -1399,6 +1399,9 @@ fn open_sfx_sink() -> Result<SfxOutput, String> {
  }
  
  impl SfxPlayer {
@@ -1742,7 +2065,7 @@ index 4d90f71..16b0163 100644
      pub fn new() -> Option<Self> {
          #[cfg(not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")))]
 diff --git a/src/audio/theme.rs b/src/audio/theme.rs
-index 60f6c67..abc25e4 100644
+index 60f6c67252cdb09eb68707df577ea27ebace74f1..abc25e4ef0644fc8c7e330ca3640a9b6f16b2162 100644
 --- a/src/audio/theme.rs
 +++ b/src/audio/theme.rs
 @@ -142,6 +142,7 @@ pub(crate) struct ThemeGates {
@@ -1797,8 +2120,162 @@ index 60f6c67..abc25e4 100644
              continue;
          };
          if let Some(track) = prepare_bytes(track_name, &file) {
+diff --git a/src/render/sidebar_chrome.rs b/src/render/sidebar_chrome.rs
+index af865657580fd65ee02837fab1fe4dbfb0224769..cdf914332d0cce0318d669c9e7f702ee12a0bd81 100644
+--- a/src/render/sidebar_chrome.rs
++++ b/src/render/sidebar_chrome.rs
+@@ -40,7 +40,7 @@ pub(crate) fn packed_command_bar_fixture(
+ ) -> (CommandBarArt<SidebarChromeEntry>, Vec<u8>, [u32; 2]) {
+     let route = SidebarSideRoute::for_theme(assets, theme);
+     let palette = decode_sidebar_palette(route.resolve("SIDEBAR.PAL").unwrap().bytes).unwrap();
+-    let rendered = command_bar::load(route, &palette);
++    let rendered = command_bar::load(route, &palette, theme);
+     let width = rendered.entries().map(|entry| entry.width).max().unwrap();
+     let height = rendered
+         .entries()
+@@ -988,7 +988,7 @@ fn build_theme_atlas(
+         .decode(generic_palette_name, |asset| {
+             Some((decode_sidebar_palette(asset.bytes).ok()?, asset.source))
+         })?;
+-    let command_bar_art = command_bar::load(side_route, &generic_palette);
++    let command_bar_art = command_bar::load(side_route, &generic_palette, theme);
+     let in_game_shell_art = in_game_shell::load(side_route, &generic_palette);
+     let layout_art_rendered = layout_art::load(side_route, &generic_palette);
+     let observer_art_rendered = observer_art::load(theme_route);
+diff --git a/src/render/sidebar_chrome_command_bar.rs b/src/render/sidebar_chrome_command_bar.rs
+index 7011d23b6e275c135d45aa3ee756ec637b66862e..1d0c443694892f3d4d7b63c3d279a05278255a57 100644
+--- a/src/render/sidebar_chrome_command_bar.rs
++++ b/src/render/sidebar_chrome_command_bar.rs
+@@ -7,6 +7,7 @@ pub struct CommandBarArt<T> {
+     pub left_cap: [Option<T>; 3],
+     pub right_cap: Option<T>,
+     pub background: Option<T>,
++    pub fullscreen: Option<T>,
+     pub buttons: [[Option<T>; 2]; 11],
+     pub slots: [Vec<Option<usize>>; 2],
+ }
+@@ -18,6 +19,7 @@ impl<T> CommandBarArt<T> {
+             .chain(self.left_cap.iter().flatten())
+             .chain(self.right_cap.iter())
+             .chain(self.background.iter())
++            .chain(self.fullscreen.iter())
+             .chain(self.buttons.iter().flatten().flatten())
+     }
+     pub fn map<U>(&self, mut f: impl FnMut(&T) -> U) -> CommandBarArt<U> {
+@@ -29,6 +31,7 @@ impl<T> CommandBarArt<T> {
+                 .map(|entry| entry.as_ref().map(&mut f)),
+             right_cap: self.right_cap.as_ref().map(&mut f),
+             background: self.background.as_ref().map(&mut f),
++            fullscreen: self.fullscreen.as_ref().map(&mut f),
+             buttons: self
+                 .buttons
+                 .each_ref()
+@@ -41,6 +44,7 @@ impl<T> CommandBarArt<T> {
+ pub(super) fn load(
+     route: SidebarSideRoute<'_>,
+     palette: &Palette,
++    theme: SidebarTheme,
+ ) -> CommandBarArt<RenderedChromeEntry> {
+     let render = |name: &str, frame| route.render(name, palette, frame);
+     // InitSideMixFiles534FA0 loads UIMD.INI before674650 installs ButtonList.
+@@ -59,6 +63,12 @@ pub(super) fn load(
+         left_cap: std::array::from_fn(|i| render("LENDCAP.SHP", i)),
+         right_cap: render("RENDCAP.SHP", 0),
+         background: render("BTTNBKGD.SHP", 0),
++        fullscreen: cfg!(all(
++            feature = "wasm",
++            target_arch = "wasm32",
++            target_os = "unknown"
++        ))
++        .then(|| fullscreen_glyph(theme)),
+         // TabClass::LoadSHPs @ 0x006D02B0 loads Button00..Button24.SHP
+         // (FreeSHPs @ 0x006D0270 frees them), indexed by command; only the
+         // 11 command names (6CFCC0) can take a slot, so 11..24 never draw.
+@@ -68,3 +78,82 @@ pub(super) fn load(
+         slots,
+     }
+ }
++
++/// Newly authored indexed glyph following the approved outward four-corner
++/// silhouette. Draw it over the active side's decoded BTTNBKGD.SHP, so no
++/// retail plate or palette bytes ship with the extension. One glyph serves
++/// both enter and exit; controller state never selects different art.
++fn fullscreen_glyph(theme: SidebarTheme) -> RenderedChromeEntry {
++    const W: usize = 22;
++    const H: usize = 15;
++    const CORNER: [[u8; 6]; 5] = [
++        [0, 0, 2, 2, 2, 1],
++        [0, 3, 3, 2, 1, 0],
++        [2, 3, 2, 0, 0, 0],
++        [2, 2, 1, 0, 0, 0],
++        [1, 2, 0, 0, 0, 0],
++    ];
++    let colors: [[u8; 4]; 4] = match theme {
++        SidebarTheme::Allied => [
++            [0, 0, 0, 0],
++            [29, 85, 140, 255],
++            [61, 151, 227, 255],
++            [132, 216, 253, 255],
++        ],
++        SidebarTheme::Soviet | SidebarTheme::Yuri => [
++            [0, 0, 0, 0],
++            [130, 77, 8, 255],
++            [218, 148, 34, 255],
++            [255, 216, 111, 255],
++        ],
++    };
++    let mut indices = vec![0; W * H];
++    for (y, row) in CORNER.iter().enumerate() {
++        for (x, &shade) in row.iter().enumerate() {
++            for py in [y, H - 1 - y] {
++                for px in [x, W - 1 - x] {
++                    indices[py * W + px] = shade;
++                }
++            }
++        }
++    }
++    let rgba = indices
++        .iter()
++        .flat_map(|&i| colors[usize::from(i)])
++        .collect();
++    RenderedChromeEntry {
++        rgba,
++        indices,
++        width: W as u32,
++        height: H as u32,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn fullscreen_glyph_has_four_open_corners_and_side_colors() {
++        let blue = fullscreen_glyph(SidebarTheme::Allied);
++        let gold = fullscreen_glyph(SidebarTheme::Soviet);
++        let yuri = fullscreen_glyph(SidebarTheme::Yuri);
++        let (w, h) = (blue.width as usize, blue.height as usize);
++        let index = |x, y| y * w + x;
++        assert_eq!((w, h), (22, 15));
++        assert_eq!(blue.indices, gold.indices);
++        assert_eq!(gold.rgba, yuri.rgba);
++        assert_ne!(blue.rgba, gold.rgba);
++        for y in [1, h - 2] {
++            for x in [1, w - 2] {
++                let i = index(x, y) * 4;
++                assert_eq!(blue.rgba[i + 3], 255);
++                assert!(blue.rgba[i + 2] > blue.rgba[i]);
++                assert!(gold.rgba[i] > gold.rgba[i + 2]);
++            }
++        }
++        for (x, y) in [(w / 2, 0), (0, h / 2), (w / 2, h / 2)] {
++            assert_eq!(blue.rgba[index(x, y) * 4 + 3], 0);
++        }
++    }
++}
 diff --git a/src/rules/theme_ini.rs b/src/rules/theme_ini.rs
-index c9204ce..3de8212 100644
+index c9204ce3b6a5c181308076f766f90c9f7b54d192..3de821249fb87cb9fc8c8ba6647d4cce8f0b0413 100644
 --- a/src/rules/theme_ini.rs
 +++ b/src/rules/theme_ini.rs
 @@ -126,10 +126,13 @@ fn scan_catalog_availability(entries: &mut [ThemeEntry], assets: &AssetManager)
@@ -1816,11 +2293,73 @@ index c9204ce..3de8212 100644
              .unwrap_or(0);
      }
  }
+diff --git a/src/ui/main_menu_dialogs/options.rs b/src/ui/main_menu_dialogs/options.rs
+index 38eba41e2b4ec35cd26d670f3fa82ec7f2e60dbc..94b4c3778a18be741ebb5039845d852412c3bd3a 100644
+--- a/src/ui/main_menu_dialogs/options.rs
++++ b/src/ui/main_menu_dialogs/options.rs
+@@ -1357,6 +1357,7 @@ impl Default for LauncherOptionsValues {
+             C::Tooltips,
+             C::TargetLines,
+             C::VSync,
++            C::YrOriginalStyle,
+             C::HdMapPreviews,
+             C::CommanderFeedback,
+         ] {
+diff --git a/src/ui/sidebar/command_bar.rs b/src/ui/sidebar/command_bar.rs
+index e776a2bf2f3a3e8a0e7a9dbf831b30b4a7a58bb6..fc7b316910ca0d745620df4c9ee84a0301459b7a 100644
+--- a/src/ui/sidebar/command_bar.rs
++++ b/src/ui/sidebar/command_bar.rs
+@@ -22,6 +22,18 @@ pub const COMMAND_NAMES: [&str; 11] = [
+     "Cheer",
+ ];
+ 
++/// Browser-only command appended by the frontend, never an INI command.
++pub(crate) const FULLSCREEN_COMMAND: usize = COMMAND_NAMES.len();
++pub(crate) const FULLSCREEN_GADGET_ID: u16 = 0x3F00;
++
++pub(crate) fn append_fullscreen_slot(layout: CommandBarLayout, slots: &mut Vec<Option<usize>>) {
++    // Preserve every authored hole (unknown, duplicate or missing-art token).
++    // A collapsed or narrow bar never truncates the existing retail buttons.
++    if layout.slot(slots.len()).is_some() {
++        slots.push(Some(FULLSCREEN_COMMAND));
++    }
++}
++
+ /// UIMD.INI maps command identities to slots, rather than numbering artwork
+ /// by slot. `674650` reads `ButtonList` into 0x200 bytes and gives each
+ /// `strtok(",")` token the next slot; the name search `6CFCC0` is an exact
+@@ -211,6 +223,26 @@ mod tests {
+         );
+     }
+     #[test]
++    fn fullscreen_uses_first_slot_after_the_authored_sequence_without_inserting() {
++        let layout = |width, open| {
++            CommandBarLayout::new([width, 600], 168, [28, 32], [52, 32], [28, 32], open).unwrap()
++        };
++        let ini = crate::rules::ini_parser::IniFile::from_str(
++            "[AdvancedCommandBar]\nButtonList=Team01,wrong,Team01,Deploy,unused\n",
++        );
++        let old = read_button_list(ini.section_or_empty("AdvancedCommandBar"));
++        assert_eq!(old, [None, None, Some(0), Some(4), None]);
++        let mut roomy = old.clone();
++        append_fullscreen_slot(layout(800, true), &mut roomy);
++        assert_eq!(&roomy[..old.len()], &old);
++        assert_eq!(roomy.last(), Some(&Some(FULLSCREEN_COMMAND)));
++        for control in [layout(480, true), layout(800, false)] {
++            let mut unchanged = old.clone();
++            append_fullscreen_slot(control, &mut unchanged);
++            assert_eq!(unchanged, old);
++        }
++    }
++    #[test]
+     fn original_800_by_600_command_bar_layout() {
+         // Original complete72FC60, retail canvas headers: tools/sidebar_oracle/command_bar/layout-native.json.
+         let layout =
 diff --git a/src/util/file_system.rs b/src/util/file_system.rs
-index fff31ba..7e55146 100644
+index f9a43b90277a70451d05f37f45fc22bfc9e216a1..51f9658aff5bfa1cad51e6cb249e7b024be2f030 100644
 --- a/src/util/file_system.rs
 +++ b/src/util/file_system.rs
-@@ -199,6 +199,10 @@ mod memory {
+@@ -206,6 +206,10 @@ mod memory {
          directories().retain(|dir| !dir.starts_with(&path) || dir == Path::new("/"));
          before - files.len()
      }
@@ -1831,7 +2370,7 @@ index fff31ba..7e55146 100644
      pub fn read_shared(path: impl AsRef<Path>) -> io::Result<Arc<[u8]>> {
          files()
              .get(&key(path.as_ref()))
-@@ -359,6 +363,18 @@ mod memory {
+@@ -366,6 +370,18 @@ mod memory {
  
  #[cfg(all(test, tests_util, feature = "wasm"))]
  mod tests {
@@ -1851,10 +2390,77 @@ index fff31ba..7e55146 100644
  
      #[test]
 diff --git a/src/web.rs b/src/web.rs
-index 2667150..a0afc78 100644
+index 26671507c3f7599127e4bc4b1b8663446ca43826..5ff11eb2b8e52e6bdc08ef8b799ece7cc647fc7c 100644
 --- a/src/web.rs
 +++ b/src/web.rs
-@@ -65,8 +65,18 @@ pub(crate) fn status(message: &str) {
+@@ -5,6 +5,66 @@ pub(crate) mod sim_worker;
+ 
+ use std::cell::RefCell;
+ use wasm_bindgen::prelude::*;
++use wasm_bindgen::JsCast;
++
++fn battlefield_fullscreen_toggle() -> Option<js_sys::Function> {
++    js_sys::Reflect::get(&js_sys::global(), &"vera20kBattlefieldFullscreen".into())
++        .ok()?
++        .dyn_into()
++        .ok()
++}
++
++pub(crate) fn battlefield_fullscreen_available() -> bool {
++    battlefield_fullscreen_toggle().is_some()
++        && web_sys::window()
++            .and_then(|window| window.document())
++            .is_some_and(|document| document.fullscreen_enabled())
++}
++
++/// Only present to the host on a successful frame hand-off, and only on
++/// transitions. A rejected browser action can keep the fallback visible
++/// without a later frame hiding it again.
++pub(crate) fn report_battlefield_fullscreen(visible: bool) {
++    thread_local! {
++        static REPORTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
++    }
++    if REPORTED.with(|reported| reported.replace(visible)) == visible {
++        return;
++    }
++    if let Some(report) = js_sys::Reflect::get(
++        &js_sys::global(),
++        &"vera20kBattlefieldFullscreenAvailability".into(),
++    )
++    .ok()
++    .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
++    {
++        let _ = report.call1(&JsValue::UNDEFINED, &visible.into());
++    }
++}
++
++pub(crate) fn host_fullscreen() -> Option<bool> {
++    battlefield_fullscreen_available().then(|| {
++        web_sys::window()
++            .and_then(|window| window.document())
++            .and_then(|document| document.fullscreen_element())
++            .is_some()
++    })
++}
++
++pub(crate) fn set_host_fullscreen(active: bool) -> bool {
++    let Some(toggle) = battlefield_fullscreen_toggle() else { return false; };
++    let _ = toggle.call1(&JsValue::UNDEFINED, &active.into());
++    true
++}
++
++/// Keep the browser document state in the existing host owner, including Esc
++/// and external exits. Call from the release gesture so the host can ask for
++/// fullscreen synchronously; this never requests pointer lock.
++pub(crate) fn toggle_battlefield_fullscreen() {
++    if let Some(toggle) = battlefield_fullscreen_toggle() {
++        let _ = toggle.call1(&JsValue::UNDEFINED, &"battlefield".into());
++    }
++}
+ 
+ // The host awaits `initThreadPool(workers)` after `init()`, before any
+ // simulation work. Without it the same package runs that work serially.
+@@ -65,8 +125,18 @@ pub(crate) fn status(message: &str) {
      }
  }
  
@@ -1875,7 +2481,7 @@ index 2667150..a0afc78 100644
  #[wasm_bindgen]
  pub fn set_lifecycle_callback(callback: js_sys::Function) {
      ON_LIFECYCLE.with(|slot| *slot.borrow_mut() = Some(callback));
-@@ -119,6 +129,7 @@ pub(crate) fn spawn_finished(report: &str) {
+@@ -119,6 +189,7 @@ pub(crate) fn spawn_finished(report: &str) {
  }
  
  pub(crate) fn engine_exited() {
@@ -1883,7 +2489,7 @@ index 2667150..a0afc78 100644
      crate::audio::web_output::pause();
      remove_spawn_files();
      ime::remove();
-@@ -144,7 +155,7 @@ fn request_spawn_action(action: crate::app::SpawnAction) -> Result<(), JsValue>
+@@ -144,7 +215,7 @@ fn request_spawn_action(action: crate::app::SpawnAction) -> Result<(), JsValue>
  }
  
  /// Run the event loop's next pass now, even while it waits.
@@ -1892,7 +2498,7 @@ index 2667150..a0afc78 100644
      WAKE.with(|slot| {
          if let Some(proxy) = slot.borrow().as_ref() {
              let _ = proxy.send_event(());
-@@ -287,7 +298,7 @@ fn mod_folder(folder: &str) -> Result<(), JsValue> {
+@@ -287,7 +358,7 @@ fn mod_folder(folder: &str) -> Result<(), JsValue> {
      Ok(())
  }
  
@@ -1901,7 +2507,7 @@ index 2667150..a0afc78 100644
      if LIFECYCLE.with(|slot| slot.borrow().idle()) {
          Ok(())
      } else {
-@@ -492,7 +503,12 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
+@@ -492,7 +563,12 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
  }
  
  #[wasm_bindgen]
@@ -1915,7 +2521,7 @@ index 2667150..a0afc78 100644
      if !LIFECYCLE.with(|slot| slot.borrow().idle()) {
          return Err(JsValue::from_str(
              "Restore user data before starting or after the engine exited",
-@@ -503,14 +519,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
+@@ -503,14 +579,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
      if path.starts_with("/replays/") {
          return Ok(());
      }

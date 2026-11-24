@@ -28,7 +28,7 @@ function releaseHtml(html){
  html=once(html,'id="folder-meta"','id="folder-meta" hidden');
  html=html.replace(/<title>[\s\S]*?<\/title>/,'<title>YR Web · 尤里的复仇</title>');
  html=html.replace(/<div class="edition">[\s\S]*?<\/div>/,'<div class="edition">YR WEB · 非官方修改版，基于 VERA20K</div>');
- html=html.replace('https://github.com/libi/vera20k-web','https://github.com/iamapig120/vera20k/tree/web-ondemand-toy-20261108');
+ html=html.replace('https://github.com/libi/vera20k-web',process.env.VERA_TOY_SOURCE_URL||'https://github.com/iamapig120/vera20k/tree/web-ondemand-toy-20261108');
  return html.replace('</head>','<script async src="https://s1.hdslb.com/bfs/seed/toy/app/sdk/toy-sdk.js"></script>\n</head>');
 }
 module.exports={releaseLauncher,releaseHtml,manifestOnlyResources};

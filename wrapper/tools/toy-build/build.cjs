@@ -43,7 +43,7 @@ async function main(){
  assert.equal(replacements,1);assert(!html.includes('.mjs'));
  fs.writeFileSync(path.join(output,'index.html'),html);
  fs.writeFileSync(path.join(output,filename),contents);
- fs.appendFileSync(path.join(output,'build-info.txt'),'\nToy helpers bundled with esbuild '+esbuild.version+'; no runtime .mjs files.\nCorresponding source: https://github.com/iamapig120/vera20k/tree/web-ondemand-toy-20261108\n');
+ fs.appendFileSync(path.join(output,'build-info.txt'),'\nToy helpers bundled with esbuild '+esbuild.version+'; no runtime .mjs files.\nCorresponding source: '+(process.env.VERA_TOY_SOURCE_URL||'https://github.com/iamapig120/vera20k/tree/web-ondemand-toy-20261108')+'\n');
  const metadata={packageDependencies:files.filter(name=>/^pkg\/(fonts|snippets)\//.test(name)),esbuild:esbuild.version,filename,inputFiles:inputs,externalImports:imports,wasmSha256:crypto.createHash('sha256').update(fs.readFileSync(path.join(output,'pkg/vera20k_bg.wasm'))).digest('hex'),metafile:built.metafile};
  fs.writeFileSync(path.resolve(metadataArg),JSON.stringify(metadata,null,2)+'\n');
  console.log(JSON.stringify({output,filename,esbuild:esbuild.version,wasmSha256:metadata.wasmSha256}));

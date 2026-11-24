@@ -106,7 +106,7 @@
             <p>项目源码：<a href="https://github.com/libi/vera20k-web" target="_blank" rel="noopener noreferrer">VERA20k 网页版</a> · <a href="https://github.com/iamapig120/vera20k/tree/web-preview-source" target="_blank" rel="noopener noreferrer">本站集成源码</a></p>
         </aside>
     </main>
-    <div id="game" aria-label="尤里的复仇游戏画面"><div id="fullscreen-tools"><button id="toggle-fullscreen" type="button" aria-pressed="false">全屏</button><span id="fullscreen-status" role="status"></span></div></div>
+    <div id="game" aria-label="尤里的复仇游戏画面"><span id="fullscreen-status" role="status"></span></div>
     <aside id="storage-tools" aria-label="本机数据">
         <details id="storage-panel">
             <summary>本机数据 / 备份</summary>
@@ -114,7 +114,9 @@
                     id="export-data" type="button" disabled>导出备份</button><button id="import-data" type="button"
                     disabled>导入备份</button><button id="retry-storage" type="button" hidden>重试读取与保存</button><button
                     id="clear-cache" type="button">清除资源缓存</button><input id="backup-file" type="file"
-                    accept="application/json,.json" hidden></div>
+                    accept="application/json,.json" hidden></div><div class="storage-actions" id="prior-backup-panel" hidden><label>旧版存档备份
+                <select id="prior-layout" aria-label="选择旧版存档格式"></select></label>
+                <button id="export-prior-layout" type="button">导出旧版数据（不迁移）</button></div>
         </details>
     </aside>
 <section id="runtime-panel" class="runtime-overlay" role="dialog" aria-modal="true" aria-label="加载游戏资源" hidden><p id="runtime-message" role="status"></p><button id="runtime-retry" type="button" hidden>重试</button><button id="runtime-cancel" type="button">取消 / 跳过</button></section>
