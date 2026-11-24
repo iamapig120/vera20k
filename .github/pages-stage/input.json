@@ -1,0 +1,12 @@
+{
+  "engine": "926a036e648a505e9d2d93b87ee7a5ccff7e7953",
+  "wrapper": "890f0578cff85550befa9f9459e564f26f8ff430",
+  "ciHead": "5e35fef6f4a18bb82893c7252c17fcbe59d75d25",
+  "runId": 45332500846,
+  "artifact": "yr-pages-final-926a036",
+  "artifactId": 14892293315,
+  "outerSha256": "65446dfe965aaa7f3d8d073b2ab9ca6314ac5fcbad55c018b6f579fb10ebbd0d",
+  "zipName": "pages-926a036.zip",
+  "zipSha256": "3b769053a852cbe3d56df0a03edf2759042239bca4ab3570af8886d9621e88b3",
+  "wasmSha256": "e0d07990668669792e84dffbaeba404bfacb9ba32957ce0c5312fd9221891602"
+}

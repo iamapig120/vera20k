@@ -1,0 +1,58 @@
+# Install only on the expressly approved, temporary CI source branch.
+# Commit the verified inputs adjacent to stage.py as .github/pages-stage/input.json.
+name: Prepare candidate Pages commit
+on:
+  push:
+    branches: [ci/yr-pages-stage-926a036]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: yr-pages-stage-926a036
+  cancel-in-progress: false
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Fetch validated package and prepare candidate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base=28459074e561f6ced77276338fea2db127db01bb
+          staging=stage/yr-pages-926a036
+          spec=.github/pages-stage/input.json
+          engine=$(jq -er '.engine | select(test("^926a036[0-9a-f]{33}$"))' "$spec")
+          wrapper=$(jq -er '.wrapper | select(test("^[0-9a-f]{40}$"))' "$spec")
+          run=$(jq -er '.runId | select(type == "number" and . > 0 and . == floor)' "$spec")
+          bundle=$(jq -er '.artifact | select(test("^[A-Za-z0-9_.-]+$"))' "$spec")
+          zipsha=$(jq -er '.zipSha256 | select(test("^[0-9a-f]{64}$"))' "$spec")
+          wasmsha=$(jq -er '.wasmSha256 | select(test("^[0-9a-f]{64}$"))' "$spec")
+          cihead=$(jq -er '.ciHead | select(test("^[0-9a-f]{40}$"))' "$spec")
+          artifact_id=$(jq -er '.artifactId | select(type == "number" and . > 0 and . == floor)' "$spec")
+          outersha=$(jq -er '.outerSha256 | select(test("^[0-9a-f]{64}$"))' "$spec")
+          zipname=$(jq -er '.zipName | select(. == "pages-926a036.zip")' "$spec")
+          run_info=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/$run")
+          jq -e --arg head "$cihead" '.head_sha == $head and .status == "completed" and .conclusion == "success"' <<<"$run_info" >/dev/null
+          artifact_info=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$artifact_id")
+          jq -e --arg name "$bundle" --arg digest "sha256:$outersha" --arg head "$cihead" --argjson run "$run" --argjson id "$artifact_id" '.id == $id and .name == $name and .digest == $digest and .expired == false and .workflow_run.id == $run and .workflow_run.head_sha == $head' <<<"$artifact_info" >/dev/null
+          temp=$(mktemp -d)
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/$artifact_id/zip" > "$temp/outer.zip"
+          printf '%s  %s\n' "$outersha" "$temp/outer.zip" | sha256sum -c -
+          python .github/pages-stage/unpack.py "$temp/outer.zip" "$temp/pkg"
+          inner="$temp/pkg/$zipname"
+          test -f "$inner"
+          printf '%s  %s\n' "$zipsha" "$inner" | sha256sum -c -
+          python .github/pages-stage/unpack.py "$inner" "$temp/dist"
+          git fetch --depth=1 origin refs/heads/gh-pages
+          test "$(git rev-parse FETCH_HEAD)" = "$base"
+          git worktree add --detach "$temp/pages" "$base"
+          git -C "$temp/pages" config user.name "github-actions[bot]"
+          git -C "$temp/pages" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python .github/pages-stage/stage.py --checkout "$temp/pages" --dist "$temp/dist" --parent "$base" --wrapper "$wrapper" --engine "$engine" --wasm-sha256 "$wasmsha" | tee "$temp/receipt.json"
+          jq -e --arg tree c8c5f430a12dbe3363fc8e76ac5152b5d65b9264 '.tree == $tree and .fileCount == 44' "$temp/receipt.json" >/dev/null
+          # New unique ref only. Empty expected value refuses a pre-existing ref.
+          git -C "$temp/pages" push --force-with-lease="refs/heads/$staging:" origin "HEAD:refs/heads/$staging"
+          jq . "$temp/receipt.json" >> "$GITHUB_STEP_SUMMARY"
