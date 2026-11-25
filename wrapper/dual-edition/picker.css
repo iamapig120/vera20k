@@ -1,0 +1,26 @@
+#edition-picker{border:0;padding:0;margin:23px auto 0;max-width:525px;min-width:0}
+#edition-picker legend{padding:0 0 9px;margin:auto;color:#cec6bb;font-size:14px;font-weight:600}
+.edition-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 auto}
+.edition-choice{position:relative;cursor:pointer;min-width:0}
+.edition-choice input{position:absolute;width:1px;height:1px;opacity:0;inset:0}
+.edition-card{height:100%;min-height:127px;display:grid;justify-items:center;align-content:center;row-gap:4px;padding:12px 8px;border:1px solid #515053;border-radius:5px;background:#222226;color:#eee;position:relative}
+.edition-card svg{width:64px;height:48px}
+.edition-card strong{font-size:17px;line-height:1.4}
+.edition-card small{color:#bdb6ba;font-size:12px}
+.edition-ra2 .edition-card svg{color:#ee8b78}
+.edition-yr .edition-card svg{color:#c5abf1}
+.edition-choice:hover .edition-card{border-color:#a9a0a4}
+.edition-choice input:checked+.edition-card{border-color:#ffdc8c;box-shadow:inset 0 0 0 1px #ffdc8c;background:#312b24}
+.edition-choice input:checked+.edition-card::after{content:'✓';position:absolute;top:6px;right:8px;color:#ffdc8c;font-weight:700;font-size:15px}
+.edition-choice input:focus-visible+.edition-card{outline:2px solid #fff4d5;outline-offset:4px}
+#edition-picker:disabled .edition-choice{cursor:default}
+#edition-start{max-width:100%;width:min(100%,315px);margin:17px auto 0}
+.ra2-import{font-size:13px;line-height:1.5;color:#dfd6ce;margin:14px auto 0;max-width:525px}
+.ra2-import p{margin:7px 0}
+.ra2-import-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:8px}
+.ra2-import button{color:#e5dfd4;background:#282424;border:1px solid #75645b;border-radius:3px;padding:8px 13px;min-height:42px}
+.ra2-feedback.error,#ra2-save-alert{color:#ffb096}
+#launcher .manifest-only{margin-top:8px;padding:0;border:0}
+#launcher .manifest-only h2{display:none}
+body[data-game-edition="ra2"] :is(#launcher .manifest-only,#button-caption,#progress-area,#feedback,#error-details,#retry,#storage-tools,#current-bootstrap-error){display:none!important}
+@media(max-width:600px){#edition-picker{margin-top:19px}.edition-options{gap:8px}.edition-card{min-height:109px}.edition-card svg{width:58px;height:42px}.edition-card strong{font-size:15px}.edition-card small{font-size:11px}.edition-choice input:checked+.edition-card::after{top:3px;right:5px}}
