@@ -2,7 +2,7 @@ name: 'Isolated Pages RA2 Web candidate'
 on:
   push:
     branches:
-      - ci/pages-ra2-926a036-pure
+      - ci/pages-ra2-926a036-pure-v3
     paths:
       - patches/pages-shared-engine.patch
       - .github/workflows/pages-ra2-candidate.yml
@@ -12,13 +12,13 @@ permissions:
 
 jobs:
   build:
-    if: github.repository == 'iamapig120/vera20k' && github.ref == 'refs/heads/ci/pages-ra2-926a036-pure'
+    if: github.repository == 'iamapig120/vera20k' && github.ref == 'refs/heads/ci/pages-ra2-926a036-pure-v3'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       ENGINE_REV: 926a036e648a505e9d2d93b87ee7a5ccff7e7953
-      ENGINE_TREE: f8c5c1f0002635f901ad644493d0fa03332e82ba
-      ENGINE_PATCH_SHA: 1378c88dba5dd1fe47bc9257160159ce9edcdd4a91a365b6881855dabe252ea7
+      ENGINE_TREE: 1f05e9c745f38c934d16c6192ffdd8a6ec5a0525
+      ENGINE_PATCH_SHA: 992eb1a484289bac7cae21eded6234271493d538eb796637ee957bb51f52cf4b
       EXPECTED_LAYOUT: '3603389783'
       RUSTUP_TOOLCHAIN: '1.100.0'
       CARGO_BUILD_JOBS: '1'
@@ -128,12 +128,12 @@ jobs:
           test "$(wc -l < "$RUNNER_TEMP/pages-files.txt")" = "$(find "$root" -type f | wc -l)"
           out="$RUNNER_TEMP/result"
           mkdir "$out"
-          (cd "$root"; zip -q -9 "$out/pages-ra2-926a036-pure.zip" -@ < "$RUNNER_TEMP/pages-files.txt")
-          (cd "$out"; sha256sum pages-ra2-926a036-pure.zip > SHA256SUMS)
+          (cd "$root"; zip -q -9 "$out/pages-ra2-926a036-pure-v3.zip" -@ < "$RUNNER_TEMP/pages-files.txt")
+          (cd "$out"; sha256sum pages-ra2-926a036-pure-v3.zip > SHA256SUMS)
           cat "$root/build-info.txt" "$out/SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: pages-ra2-926a036-pure
+          name: pages-ra2-926a036-pure-v3
           path: "${{ runner.temp }}/result/"
           if-no-files-found: error
           retention-days: 7

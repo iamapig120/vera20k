@@ -125,6 +125,38 @@ index 581bc1e..ef78351 100644
  }
  
  /// A front-end box's rects on the window's mapping.
+diff --git a/src/app/frontend/skirmish_session.rs b/src/app/frontend/skirmish_session.rs
+index 0a9d48b..b927d7e 100644
+--- a/src/app/frontend/skirmish_session.rs
++++ b/src/app/frontend/skirmish_session.rs
+@@ -965,14 +965,19 @@ impl MultiplayerShellRuntime {
+         defaults: SkirmishGlobalDefaults,
+     ) -> Self {
+         let mut scenario_rng = SimRng::new(u64::from(seed));
+-        let cooperative_registry = assets
+-            .map(CooperativeRegistry::from_assets)
+-            .transpose()
+-            .unwrap_or_else(|err| {
+-                log::warn!("Could not load Cooperative campaign registry: {err}");
+-                None
+-            })
+-            .unwrap_or_default();
++        let cooperative_registry = if crate::util::ra2_launch::strict_web() {
++            // CoopCampMD is a YR registry, absent from the base-only Web launch.
++            CooperativeRegistry::default()
++        } else {
++            assets
++                .map(CooperativeRegistry::from_assets)
++                .transpose()
++                .unwrap_or_else(|err| {
++                    log::warn!("Could not load Cooperative campaign registry: {err}");
++                    None
++                })
++                .unwrap_or_default()
++        };
+         let cooperative_progress =
+             CooperativeProgressState::construct(&cooperative_registry, &mut scenario_rng)
+                 .unwrap_or_else(|err| {
 diff --git a/src/app/handler.rs b/src/app/handler.rs
 index d62c711..7082fca 100644
 --- a/src/app/handler.rs
@@ -610,10 +642,47 @@ index ade3524..fea7636 100644
              slots: [Vec::new(), Vec::new()],
          }
 diff --git a/src/app/process_assets.rs b/src/app/process_assets.rs
-index 1c99772..a0a037c 100644
+index 1c99772..0208edc 100644
 --- a/src/app/process_assets.rs
 +++ b/src/app/process_assets.rs
-@@ -1376,6 +1376,50 @@ impl ProcessAssets {
+@@ -1177,8 +1177,11 @@ impl ProcessAssets {
+             compared.push("langrule.ini");
+         }
+         compared.extend(modes.iter().map(|mode| mode.override_file.as_str()));
+-        compared
+-            .push(crate::app::frontend::skirmish_session::cooperative::COOPERATIVE_CAMPAIGN_INI);
++        if !crate::util::ra2_launch::strict_web() {
++            compared.push(
++                crate::app::frontend::skirmish_session::cooperative::COOPERATIVE_CAMPAIGN_INI,
++            );
++        }
+         // VERA: a mod's theater INIs and tiles are its game. The original
+         // game's are kept apart (`terrain_files`): they change no match whose
+         // map names only tiles the original game has.
+@@ -1256,12 +1259,16 @@ impl ProcessAssets {
+                     .unwrap_or_else(IniFile::empty)
+             })
+             .collect();
+-        let cooperative = select_ini(
+-            assets,
+-            crate::app::frontend::skirmish_session::cooperative::COOPERATIVE_CAMPAIGN_INI,
+-        )
+-        .ok()
+-        .map(|selected| selected.ini);
++        let cooperative = if crate::util::ra2_launch::strict_web() {
++            None
++        } else {
++            select_ini(
++                assets,
++                crate::app::frontend::skirmish_session::cooperative::COOPERATIVE_CAMPAIGN_INI,
++            )
++            .ok()
++            .map(|selected| selected.ini)
++        };
+         self.native_ini_hashes = Some(crate::rules::native_ini_hash::NativeIniHashes::compute(
+             rules.selected_rules_root(),
+             &mode_inis,
+@@ -1376,6 +1383,50 @@ impl ProcessAssets {
          self.manager.as_ref()
      }
  
@@ -2257,6 +2326,104 @@ index 60f6c67..abc25e4 100644
              continue;
          };
          if let Some(track) = prepare_bytes(track_name, &file) {
+diff --git a/src/i18n/mod.rs b/src/i18n/mod.rs
+index 33bd8de..9b03c6c 100644
+--- a/src/i18n/mod.rs
++++ b/src/i18n/mod.rs
+@@ -848,7 +848,30 @@ impl Subtags {
+ /// ahead of the game's, and English answers labels neither has. Called by the
+ /// one CSF loader and after a language change.
+ pub fn apply(csf: &mut CsfFile) {
+-    apply_catalog(&catalog(), csf, show_string_keys());
++    let catalog = catalog();
++    let show_keys = show_string_keys();
++    apply_catalog(&catalog, csf, show_keys);
++    if crate::util::ra2_launch::strict_web() {
++        install_web_ra2_campaign_captions(&catalog, csf, show_keys);
++    }
++}
++
++/// The common campaign page names YR's icon-specific tooltips. The base RA2
++/// table can supply the general animation captions; keep the original table and
++/// resolve the two missing aliases without consulting ra2md.csf.
++fn install_web_ra2_campaign_captions(catalog: &Catalog, csf: &mut CsfFile, show_keys: bool) {
++    for (caption, native, fallback) in [
++        ("STT:AlliedCampaignIcon", "STT:CampaignAnimAllied", "VERA:Ra2CampaignAlliedHelp"),
++        ("STT:SovietCampaignIcon", "STT:CampaignAnimSoviet", "VERA:Ra2CampaignSovietHelp"),
++    ] {
++        if show_keys {
++            csf.set_override(caption, &caption.to_ascii_uppercase());
++        } else if csf.get(caption).is_none()
++            && let Some(text) = csf.get(native).or_else(|| catalog.text(fallback)).map(str::to_owned)
++        {
++            csf.set_fallback(caption, &text);
++        }
++    }
+ }
+ 
+ fn apply_catalog(catalog: &Catalog, csf: &mut CsfFile, show_keys: bool) {
+@@ -1416,6 +1439,22 @@ mod tests {
+         catalog
+     }
+ 
++    #[test]
++    fn web_ra2_campaign_captions_prefer_native_and_fill_missing_values() {
++        let catalog = catalog_with(
++            "zh-CN",
++            "[Language]\nName=Chinese\n[Strings]\nVERA:Ra2CampaignSovietHelp=苏军战役",
++        );
++        let mut csf = test_csf(&[("STT:CampaignAnimAllied", "Native Allied")]);
++        apply_catalog(&catalog, &mut csf, false);
++        install_web_ra2_campaign_captions(&catalog, &mut csf, false);
++        assert_eq!(csf.get("STT:AlliedCampaignIcon"), Some("Native Allied"));
++        assert_eq!(csf.get("STT:SovietCampaignIcon"), Some("苏军战役"));
++        let mut csf = test_csf(&[("STT:AlliedCampaignIcon", "Specific Allied")]);
++        install_web_ra2_campaign_captions(&catalog, &mut csf, false);
++        assert_eq!(csf.get("STT:AlliedCampaignIcon"), Some("Specific Allied"));
++    }
++
+     /// The AutoLoad result line ships in English with a `{count}` slot so the
+     /// hotkey's issued-order count can be shown without a type lookup.
+     #[test]
+diff --git a/src/i18n/vera20k.en.ini b/src/i18n/vera20k.en.ini
+index 5d2c76b..c7666b0 100644
+--- a/src/i18n/vera20k.en.ini
++++ b/src/i18n/vera20k.en.ini
+@@ -7,6 +7,8 @@
+ Name=English
+ 
+ [Strings]
++VERA:Ra2CampaignAlliedHelp=Click the Allied emblem to start the Allied campaign.
++VERA:Ra2CampaignSovietHelp=Click the Soviet emblem to start the Soviet campaign.
+ VERA:Unlimited=Unlimited
+ VERA:GameSpeed90=90 ticks/s
+ VERA:GameSpeed60=60 ticks/s
+diff --git a/src/i18n/vera20k.zh-CN.ini b/src/i18n/vera20k.zh-CN.ini
+index 67cdf30..56fcc00 100644
+--- a/src/i18n/vera20k.zh-CN.ini
++++ b/src/i18n/vera20k.zh-CN.ini
+@@ -5,6 +5,8 @@
+ Name=简体中文
+ 
+ [Strings]
++VERA:Ra2CampaignAlliedHelp=点击盟军徽章，开始盟军战役。
++VERA:Ra2CampaignSovietHelp=点击苏军徽章，开始苏军战役。
+ VERA:Unlimited=无限制
+ VERA:GameSpeed90=90 帧/秒
+ VERA:GameSpeed60=60 帧/秒
+diff --git a/src/i18n/vera20k.zh-TW.ini b/src/i18n/vera20k.zh-TW.ini
+index bb33ef0..37d98bc 100644
+--- a/src/i18n/vera20k.zh-TW.ini
++++ b/src/i18n/vera20k.zh-TW.ini
+@@ -5,6 +5,8 @@
+ Name=繁體中文
+ 
+ [Strings]
++VERA:Ra2CampaignAlliedHelp=點選盟軍徽章，開始盟軍戰役。
++VERA:Ra2CampaignSovietHelp=點選蘇軍徽章，開始蘇軍戰役。
+ VERA:Unlimited=無限制
+ VERA:GameSpeed90=90 幀/秒
+ VERA:GameSpeed60=60 幀/秒
 diff --git a/src/render/sidebar_chrome.rs b/src/render/sidebar_chrome.rs
 index af86565..cdf9143 100644
 --- a/src/render/sidebar_chrome.rs
