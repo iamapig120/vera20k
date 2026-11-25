@@ -1,0 +1,46 @@
+name: Prepare an unpublished experimental RA2 Pages candidate
+on:
+  push:
+    branches: [ci/pages-ra2-stage-0676dc7]
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: pages-ra2-stage-0676dc7
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.repository == 'iamapig120/vera20k' && github.ref == 'refs/heads/ci/pages-ra2-stage-0676dc7'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Check exact build provenance, fragment navigation and candidate tree
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base=dd22bd98ab2996aff05736106e5d81ee13aa8eea
+          expected=c6bc9fa27851f90866303cffe3622cca76ac7cc53d5cb2270fd372d3725cfdce
+          head=0676dc7a2eaaaf1878f77ca9bb5e9aead75eaccc
+          run_id=45547820943
+          artifact_id=14993231140
+          ref=refs/heads/stage/pages-ra2-0676dc7a2eaa
+          temp=$(mktemp -d)
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" | jq -e --arg head "$head" '.head_sha==$head and .conclusion=="success" and .status=="completed"' >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id" | jq -e --arg head "$head" --arg hash "sha256:$expected" --argjson run "$run_id" --argjson artifact "$artifact_id" '.id==$artifact and .name=="pages-ra2-926a036-candidate" and .expired==false and .digest==$hash and .workflow_run.id==$run and .workflow_run.head_sha==$head' >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$temp/outer.zip"
+          printf '%s  %s\n' "$expected" "$temp/outer.zip" | sha256sum -c -
+          git fetch --depth=1 origin refs/heads/gh-pages
+          test "$(git rev-parse FETCH_HEAD)" = "$base"
+          git worktree add --detach "$temp/pages" "$base"
+          git -C "$temp/pages" config user.name 'github-actions[bot]'
+          git -C "$temp/pages" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python .github/ra2-stage/stage-ra2.py "$temp/pages" "$temp/outer.zip" | tee "$temp/receipt.json"
+          jq -e '.tree=="55fd139f05d1527f5cb4c487b271ef2bc6751253" and .newFiles==44 and .modified==["index.html"]' "$temp/receipt.json" >/dev/null
+          CHROME_BIN="$(command -v google-chrome)" node .github/ra2-stage/chromium-smoke.mjs "$temp/pages/releases/0676dc7a2eaa" | tee "$temp/browser.json"
+          jq -e '.fragmentRevealsRa2 and .optionalCollapsed and .missingMultiKeepsYr and .launchedGame==false' "$temp/browser.json" >/dev/null
+          # The empty lease makes this fail if the non-live ref already exists.
+          git -C "$temp/pages" push --force-with-lease="$ref:" origin "HEAD:$ref"
+          cat "$temp/receipt.json" "$temp/browser.json" >> "$GITHUB_STEP_SUMMARY"
