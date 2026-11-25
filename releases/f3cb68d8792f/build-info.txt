@@ -1,0 +1,7 @@
+Revision: 926a036e648a505e9d2d93b87ee7a5ccff7e7953
+Web integration: f3cb68d8792f662c37fc4a5d0e23bfa2102d3bd8
+Engine source tree: f8c5c1f0002635f901ad644493d0fa03332e82ba
+WASM SHA256: 2159d052b2bab9d4f2c604bd2b97e0be2c1facb8885cf322c878108b0d13e5d9
+Gateway: wss://wss.vera20k.com (upstream default, separately versioned)
+Snapshot layout: 3603389783
+Status: unpublished QA candidate; no retail assets
