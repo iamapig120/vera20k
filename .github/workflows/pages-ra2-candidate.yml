@@ -2,7 +2,7 @@ name: 'Isolated Pages RA2 Web candidate'
 on:
   push:
     branches:
-      - ci/pages-ra2-926a036-pure-v3
+      - ci/pages-ra2-926a036-pure-v3b
     paths:
       - patches/pages-shared-engine.patch
       - .github/workflows/pages-ra2-candidate.yml
@@ -12,13 +12,13 @@ permissions:
 
 jobs:
   build:
-    if: github.repository == 'iamapig120/vera20k' && github.ref == 'refs/heads/ci/pages-ra2-926a036-pure-v3'
+    if: github.repository == 'iamapig120/vera20k' && github.ref == 'refs/heads/ci/pages-ra2-926a036-pure-v3b'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       ENGINE_REV: 926a036e648a505e9d2d93b87ee7a5ccff7e7953
-      ENGINE_TREE: 1f05e9c745f38c934d16c6192ffdd8a6ec5a0525
-      ENGINE_PATCH_SHA: 992eb1a484289bac7cae21eded6234271493d538eb796637ee957bb51f52cf4b
+      ENGINE_TREE: 37090817950f11ab3560bbd0617879c0a0c33a5a
+      ENGINE_PATCH_SHA: 2171d38afbff77bd49d42f07787d7aa14f71b6142f75db0de8aeda4deb42d898
       EXPECTED_LAYOUT: '3603389783'
       RUSTUP_TOOLCHAIN: '1.100.0'
       CARGO_BUILD_JOBS: '1'

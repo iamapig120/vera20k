@@ -2728,7 +2728,7 @@ index f9a43b9..51f9658 100644
  
      #[test]
 diff --git a/src/util/ra2_launch.rs b/src/util/ra2_launch.rs
-index f4fc1e4..f7e6558 100644
+index f4fc1e4..f397b6a 100644
 --- a/src/util/ra2_launch.rs
 +++ b/src/util/ra2_launch.rs
 @@ -39,6 +39,12 @@ pub fn enabled() -> bool {
@@ -2737,7 +2737,7 @@ index f4fc1e4..f7e6558 100644
  
 +/// Explicit browser RA2 accepts a base-only installation. Native RA2 retains
 +/// the existing MD compatibility layer; YR never enters this branch.
-+pub(crate) fn strict_web() -> bool {
++pub fn strict_web() -> bool {
 +    cfg!(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")) && enabled()
 +}
 +
