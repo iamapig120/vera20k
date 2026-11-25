@@ -15,6 +15,8 @@ const local=()=>new Promise(async resolve=>{
   });
   server.listen(0,'127.0.0.1',()=>resolve(server));
 });
+const buildInfo=require(path.join(dist,'dual-edition-build-info.json'));
+const ra2Finger=buildInfo.engines.ra2.slice(0,16);
 const manifest=(base)=>{
   const manifestFiles=['ra2.mix','ra2md.mix','mapsmd03.mix'].map(path=>({path,size:4,sha256:crypto.createHash('sha256').update('fake').digest('hex'),url:base+'/fixture/'+path}));
   return JSON.stringify({format:'vera20k-resources',version:1,files:manifestFiles,profiles:{bootstrap:manifestFiles.map(x=>x.path)}});
@@ -23,6 +25,9 @@ const manifest=(base)=>{
   const site=await local(),base='http://127.0.0.1:'+site.address().port;
   const host=http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0}iframe{width:100vw;height:100vh;border:none}</style><iframe allow="fullscreen" sandbox="allow-scripts allow-same-origin allow-downloads" src="'+base+'/toy/yr-test/index.html"></iframe>')});
   await new Promise(r=>host.listen(0,'127.0.0.1',r));
+  const diskFixture=await fs.mkdtemp(path.resolve('ra2-test-files-'));
+  await fs.mkdir(path.join(diskFixture,'MIXFILES'));
+  for(const name of ['RA2.MIX','LANGUAGE.MIX','MULTI.MIX','MIXFILES/MOVIES01.MIX','RA2MD.MIX','MAPSMD03.MIX','EXPANDMD01.MIX','RA2MD.CSF','GAME.EXE']) await fs.writeFile(path.join(diskFixture,name),'TEST-NOT-RETAIL');
   const chrome=await chromium.launch({headless:true,executablePath:process.env.CHROME_BIN||'/usr/bin/chromium',args:['--no-sandbox','--enable-unsafe-webgpu','--enable-unsafe-swiftshader','--use-angle=swiftshader']});
   try{
     const report=[];
@@ -59,13 +64,18 @@ const manifest=(base)=>{
       await iframe.getByRole('button',{name:'手动选择文件'}).click();
       const handle=await fileChooser;
       const files=names=>names.map(name=>({name,buffer:Buffer.from('TEST-NOT-RETAIL'),mimeType:'application/octet-stream'}));
-      await handle.setFiles(files(['RA2.MIX','RA2MD.MIX','LANGUAGE.MIX']));
+      await handle.setFiles(files(['RA2.MIX','LANGUAGE.MIX']));
       assert.match(await iframe.locator('#ra2-feedback').innerText(),/multi.mix/i);
       assert(await start.isDisabled());
-      await iframe.locator('#ra2-files').setInputFiles(files(['RA2.MIX','RA2MD.MIX','LANGUAGE.MIX','MULTI.MIX','GAME.EXE']));
+      if(touch) await iframe.locator('#ra2-files').setInputFiles(files(['RA2.MIX','LANGUAGE.MIX','MULTI.MIX','MOVIES01.MIX']));
+      else {
+        const folderChooser=page.waitForEvent('filechooser');
+        await iframe.getByRole('button',{name:'选择游戏文件夹'}).click();
+        await (await folderChooser).setFiles(diskFixture);
+      }
       await start.evaluate(el=>new Promise((r,j)=>{const end=Date.now()+45000;const tick=()=>el.disabled?Date.now()>end?j(Error('RA2 not ready')):setTimeout(tick,100):r();tick();}));
       selectedFileCount=Number((await iframe.locator('#ra2-feedback').innerText()).match(/(\d+) 个/)[1]);assert.equal(selectedFileCount,4);
-      assert(requests.some(u=>u.endsWith('/pkg/vera20k-ra2.7c64fb691ca2ff7d.wasm')));
+      assert(requests.some(u=>u.endsWith('/pkg/vera20k-ra2.'+ra2Finger+'.wasm')));
       assert.equal(routeYrPayloads,0);
       if(touch) await page.screenshot({path:'mobile-ra2.png'});
       else await page.screenshot({path:'desktop-ra2.png'});
@@ -89,9 +99,9 @@ const manifest=(base)=>{
       }
       // Malformed fixture is deliberate. No JS uncaught page errors are acceptable.
       assert.deepEqual(errors,[]);
-      report.push({name,width,modeDefault:'YR',nativeRadio:true,pairedWasmFetchedOnlyOnRA2:true,ownedFileChooser:true,missingMultiBlocks:true,invalidRetailReachesEngineProbe:touch,YRRemotePayloads:routeYrPayloads,RA2FilesAccepted:selectedFileCount,realRetailAssets:false,reportErrors:errors});
+      report.push({name,width,modeDefault:'YR',nativeRadio:true,pairedWasmFetchedOnlyOnRA2:true,ownedFileChooser:true,directoryChooser:!touch,missingMultiBlocks:true,invalidRetailReachesEngineProbe:touch,YRRemotePayloads:routeYrPayloads,RA2FilesAccepted:selectedFileCount,RA2FixtureIncludesYRArchives:!touch,realRetailAssets:false,reportErrors:errors});
       await context.close();
     }
     console.log(JSON.stringify(report,null,2));
-  }finally{await chrome.close();site.close();host.close();}
+  }finally{await chrome.close();site.close();host.close();await fs.rm(diskFixture,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exit(1)});

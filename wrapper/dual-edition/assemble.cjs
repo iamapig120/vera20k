@@ -6,8 +6,8 @@ const assert = require('node:assert/strict');
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const digestFile = file => digest(fs.readFileSync(file));
 const auditHash = 'e0d07990668669792e84dffbaeba404bfacb9ba32957ce0c5312fd9221891602';
-const pairedHash = '7c64fb691ca2ff7d39cfaaadd51097d572f5893767e226da650ffc89a31a44de';
-const pairedGlue = 'e8e3218f0eeb05b78a1dab95fb01fb6d23729d8e02ebc58a1d8f5d9791caf21f';
+const pairedHash = '2159d052b2bab9d4f2c604bd2b97e0be2c1facb8885cf322c878108b0d13e5d9';
+const pairedGlue = '5e33d10a3480e08f7b50349079a33ead60605f1020ce43d87fe360f9961a6b25';
 const auditReceipt = 'current-build-info.json';
 const integration = path.resolve(__dirname);
 function safeFile(root, name) {
@@ -43,7 +43,10 @@ function packagePicker(yrFrom, ra2From, target) {
   for (const name of ['index.html','storage.js','pkg/vera20k_bg.wasm','pkg/vera20k.js'])
     assert(Object.hasOwn(manifest.files,name),'Missing expected audited entry: '+name);
   let html = fs.readFileSync(safeFile(yr,'index.html'),'utf8');
-  const js = fs.readFileSync(safeFile(integration,'picker.js'));
+  const helper = fs.readFileSync(safeFile(integration,'ra2-retail.mjs'));
+  const helperName = 'ra2-retail.'+digest(helper).slice(0,16)+'.js';
+  const js = Buffer.from(fs.readFileSync(safeFile(integration,'picker.js'),'utf8')
+    .replaceAll('__RA2_BUILD_HASH__',pairedHash.slice(0,16)).replaceAll('./ra2-retail.js','./'+helperName));
   const css = fs.readFileSync(safeFile(integration,'picker.css'));
   const controls = fs.readFileSync(safeFile(integration,'picker.html'),'utf8');
   const jsName = 'edition-picker.'+digest(js).slice(0,16)+'.js';
@@ -64,11 +67,12 @@ function packagePicker(yrFrom, ra2From, target) {
   fs.writeFileSync(path.join(output,'index.html'),html);
   fs.writeFileSync(path.join(output,jsName),js);
   fs.writeFileSync(path.join(output,cssName),css);
+  fs.writeFileSync(path.join(output,helperName),helper);
   const prefix = 'pkg/vera20k-ra2.'+pairedHash.slice(0,16);
   fs.copyFileSync(safeFile(ra2,'pkg/vera20k.js'),path.join(output,prefix+'.js'));
   fs.copyFileSync(safeFile(ra2,'pkg/vera20k_bg.wasm'),path.join(output,prefix+'.wasm'));
   assert(js.toString().includes(prefix+'.js') && js.toString().includes(prefix+'.wasm'),'Bindings href mismatch');
-  fs.appendFileSync(path.join(output,'build-info.txt'),'\nAdditional RA2 mode (separate build): '+pairedHash+'\nRA2 source pin: https://github.com/iamapig120/vera20k/tree/0676dc7a2eaaaf1878f77ca9bb5e9aead75eaccc\nRA2 local saves/profile database scope: vera20k-toy-ra2-layout-d6c75d57\n');
+  fs.appendFileSync(path.join(output,'build-info.txt'),'\nAdditional RA2 mode (separate build): '+pairedHash+'\nRA2 source pin: https://github.com/iamapig120/vera20k/tree/f3cb68d8792f662c37fc4a5d0e23bfa2102d3bd8\nRA2 local saves/profile database scope: vera20k-toy-ra2-layout-d6c75d57\n');
   const walk = dir => Object.fromEntries(fs.readdirSync(dir,{withFileTypes:true}).flatMap(entry => {
     const file = path.join(dir,entry.name);
     return entry.isDirectory()?Object.entries(walk(file)):[[path.relative(output,file).split(path.sep).join('/'),digestFile(file)]];

@@ -1,3 +1,4 @@
+import {ownedRa2Entries} from './ra2-retail.js';
 const byId = id => document.getElementById(id);
 const selector = byId('edition-picker');
 const nativeYrStart = byId('start');
@@ -5,9 +6,6 @@ const start = byId('edition-start');
 const ra2Panel = byId('ra2-import');
 const feedback = byId('ra2-feedback');
 const launchMode = () => selector.querySelector('input:checked').value;
-const required = ['ra2.mix', 'ra2md.mix', 'language.mix', 'multi.mix'];
-const permitted = /\.(mix|csf|fnt|shp|pal|ini|map|mpr|mmx|wav|aud|bik|vxl|hva|tmp|tem|sno|urb|ubn|lun|des|pcx|png|jpg|jpeg|bag|idx|vqp|pkt)$|(?:^|\/)subtitle\.txt$/i;
-const personalProfile = /(?:^|\/)(?:vera(?:rules)?|ra2(?:md)?|keyboard(?:md)?|wolinfo(?:md)?|coopsave)\.ini$/i;
 let ra2Entries = [];
 let ra2Engine, engineRead, ra2Store;
 let running = false, ended = false, yrRequested = false;
@@ -35,8 +33,8 @@ function inform(message, error = false) {
 }
 async function preloadRa2() {
     if (ra2Engine || engineRead) return;
-    const bound = './pkg/vera20k-ra2.7c64fb691ca2ff7d.js';
-    const binary = new URL('./pkg/vera20k-ra2.7c64fb691ca2ff7d.wasm', import.meta.url);
+    const bound = './pkg/vera20k-ra2.__RA2_BUILD_HASH__.js';
+    const binary = new URL('./pkg/vera20k-ra2.__RA2_BUILD_HASH__.wasm', import.meta.url);
     engineRead = (async () => {
         try {
             if (!ra2Entries.length && !filesError) inform('正在准备原版引擎…');
@@ -57,36 +55,14 @@ async function preloadRa2() {
         }
     })();
 }
-function ownedEntries(files) {
-    if (!files.length || files.length > 12000) throw Error('文件为空或数量超出限制');
-    const names = new Set();
-    const all = files.map(file => ({
-        file, name: (file.webkitRelativePath || file.name).normalize('NFC'),
-    })).filter(row => permitted.test(row.name) && !personalProfile.test(row.name));
-    const roots = all.filter(row => /(?:^|\/)ra2\.mix$/i.test(row.name)).map(row => row.name.slice(0, -7));
-    const root = roots.length === 1 ? roots[0] : null;
-    if (root === null) throw Error(roots.length ? '请选择一个游戏目录，不要混用多套资源' : '缺少 ra2.mix，请选游戏安装目录');
-    let total = 0;
-    const entries = all.filter(row => row.name.startsWith(root)).map(row => {
-        const path = row.name.slice(root.length); const key = path.toLowerCase();
-        if (path.length > 1024 || /[\\:\x00-\x1f\x7f]/.test(path) || path.split('/').some(part => !part || part === '.' || part === '..') || names.has(key)) throw Error('发现重复或无效的资源路径');
-        names.add(key);
-        if (!row.file.size || row.file.size > 1024 ** 3) throw Error('资源为空或过大：' + path);
-        total += row.file.size;
-        if (total > 2 * 1024 ** 3) throw Error('游戏资源超过 2 GiB');
-        return {path, file: row.file};
-    });
-    const missing = required.filter(name => !names.has(name));
-    if (missing.length) throw Error('缺少：' + missing.join('、') + '。请选择包含原版和资料片档案的安装目录');
-    return entries;
-}
+if (!('webkitdirectory' in byId('ra2-directory'))) byId('ra2-choose').hidden = true;
 for (const [control, input] of [['ra2-choose','ra2-directory'],['ra2-multi','ra2-files']]) {
     const picker = byId(input);
     byId(control).onclick = () => { picker.value = ''; picker.click(); };
     picker.onchange = () => {
         if (!picker.files.length) return;
         try {
-            ra2Entries = ownedEntries([...picker.files]); filesError = false;
+            ra2Entries = ownedRa2Entries([...picker.files]); filesError = false;
             inform('已选择 ' + ra2Entries.length + ' 个游戏文件。' + (ra2Engine ? '' : '正在准备引擎…'));
         } catch (error) {
             ra2Entries = []; filesError = true; inform(error.message, true);
