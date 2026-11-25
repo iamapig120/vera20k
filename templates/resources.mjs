@@ -2,6 +2,22 @@
 export const LIMITS = Object.freeze({ archive: 2 * 1024 ** 3, total: 2 * 1024 ** 3,
   entry: 1024 ** 3, entries: 12000, directory: 32 * 1024 ** 2, depth: 32 });
 export const REQUIRED = ['ra2.mix', 'ra2md.mix', 'mapsmd03.mix'];
+export const RA2_REQUIRED = ['ra2.mix', 'language.mix', 'multi.mix'];
+const ra2Root = /^(?:ra2|language|multi|theme|audio|conquer|cameo|cache|local|generic|isogen|temperat|snow|urban|maps[0-9]{2}|movies[0-9]{2}|expand[0-9]{2}|ecache[a-z0-9]*|elocal[a-z0-9]*)\.mix$/i;
+export function isRa2RetailPath(path) {
+  if (/md[0-9]*\.mix$/i.test(path)) return false;
+  return ra2Root.test(path) || /^mixfiles\/movies[0-9]{2}\.mix$/i.test(path);
+}
+function ra2Projection(rows) {
+  const candidates = rows.filter(e => /(^|\/)ra2\.mix$/i.test(e.path));
+  if (candidates.length !== 1) throw Error(candidates.length ? '包含多个游戏目录，请只导入一个原版红警 2 目录' : '缺少原版红警 2 资源：ra2.mix');
+  const root = candidates[0].path.slice(0, -7), key = root.toLowerCase();
+  const selected = rows.filter(e => e.path.toLowerCase().startsWith(key) && isRa2RetailPath(e.path.slice(root.length)));
+  const names = new Set(selected.map(e => e.path.slice(root.length).toLowerCase()));
+  const missing = RA2_REQUIRED.filter(name => !names.has(name));
+  if (missing.length) throw Error(`缺少原版红警 2 资源：${missing.join('、')}`);
+  return {root, selected};
+}
 const crcTable = Uint32Array.from({length: 256}, (_, n) => {
   for (let i = 0; i < 8; i++) n = n & 1 ? (n >>> 1) ^ 0xedb88320 : n >>> 1;
   return n >>> 0;
@@ -19,8 +35,25 @@ export function safePath(value, limits = LIMITS) {
   if (path.startsWith('/') || parts.length > limits.depth || parts.some(p => !p || p === '.' || p === '..')) throw Error(`资源路径不安全：${value}`);
   return parts.join('/');
 }
-export function libraryFromEntries(entries, label, limits = LIMITS) {
+export function libraryFromEntries(entries, label, limits = LIMITS, edition = "yr") {
   if (!entries.length || entries.length > limits.entries) throw Error('资源条目为空或数量超过限制');
+  if (edition === 'ra2') {
+    const seen = new Set();
+    const normalized = entries.map(e => {
+      const path = safePath(e.path, limits), key = path.toLowerCase();
+      if (seen.has(key)) throw Error(`存在重名资源（不区分大小写）：${path}`);
+      seen.add(key); return {...e, path};
+    });
+    const {root, selected} = ra2Projection(normalized);
+    let bytes = 0;
+    const files = selected.map(e => {
+      if (!(e.blob instanceof Blob) || e.blob.size > limits.entry) throw Error(`资源过大或无效：${e.path}`);
+      bytes += e.blob.size;
+      if (bytes > limits.total) throw Error('原版红警 2 资源总大小超过 2 GiB 限制');
+      return {path:e.path.slice(root.length),blob:e.blob};
+    });
+    return {label:String(label).slice(0,160),files,bytes,importedAt:Date.now()};
+  }
   const seen = new Set(); let total = 0;
   const valid = entries.map(entry => {
     const path = safePath(entry.path, limits), key = path.toLowerCase();
@@ -113,7 +146,7 @@ async function consume(stream, {signal, max, onChunk = () => {}}) {
   } catch (error) { cancel(); throw error; }
   finally { signal?.removeEventListener('abort', cancel); reader.releaseLock(); }
 }
-export async function entriesFromZip(blob, {signal, limits = LIMITS, onProgress = () => {}} = {}) {
+export async function entriesFromZip(blob, {signal, limits = LIMITS, onProgress = () => {}, edition = "yr"} = {}) {
   check(signal);
   if (!(blob instanceof Blob) || blob.size > limits.archive || blob.size < 22) throw Error('ZIP 为空、损坏或超过 2 GiB 限制');
   const first = view(await range(blob, 0, 4)).getUint32(0, true);
@@ -147,7 +180,7 @@ export async function entriesFromZip(blob, {signal, limits = LIMITS, onProgress 
     if (seen.has(key)) throw Error(`ZIP 中存在重名文件：${path}`);
     seen.add(key);
     const isDirectory = rawName.endsWith('/') || rawName.endsWith('\\');
-    if (length > limits.entry || (total += length) > limits.total) throw Error('ZIP 解压体积超过限制');
+    if (edition !== "ra2" && (length > limits.entry || (total += length) > limits.total)) throw Error('ZIP 解压体积超过限制');
     if (isDirectory && length) throw Error('ZIP 目录条目无效');
     entries.push({path, isDirectory, flags, method, compressed, length, local, crc: dv.getUint32(p + 16, true)});
     p = end;
@@ -168,8 +201,12 @@ export async function entriesFromZip(blob, {signal, limits = LIMITS, onProgress 
   }
   spans.sort((a, b) => a[0] - b[0]);
   if (spans.some((span, i) => i && span[0] < spans[i - 1][1])) throw Error('ZIP 文件内容范围重叠');
+  const projected = edition === 'ra2' ? ra2Projection(entries.filter(e=>!e.isDirectory)).selected : entries;
+  if (edition === 'ra2') {
+    for (const e of projected) if (e.length > limits.entry || (total += e.length) > limits.total) throw Error('原版红警 2 ZIP 解压体积超过限制');
+  }
   let loaded = 0; const result = [];
-  for (const entry of entries) {
+  for (const entry of projected) {
     check(signal);
     let stream = blob.slice(entry.start, entry.start + entry.compressed).stream();
     if (entry.method === 8) {

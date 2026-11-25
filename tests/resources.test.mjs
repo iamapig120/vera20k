@@ -121,3 +121,17 @@ test('ZIP extraction cancellation does not produce a partial candidate', async (
   const controller=new AbortController();
   await assert.rejects(entriesFromZip(blob(gameEntries),{signal:controller.signal,onProgress:()=>controller.abort()}),error=>error.name==='AbortError');
 });
+
+test('original RA2 projects mixed folder and ZIP before the selected-byte limits', async () => {
+  const names=['RA2.MIX','LANGUAGE.MIX','MULTI.MIX','MAPS01.MIX','MAPS02.MIX','MIXFILES/MOVIES01.MIX'];
+  const selected=names.map(name=>({name:'Steam/'+name,text:'abc'}));
+  const trash=['RA2MD.MIX','LANGMD.MIX','MAPSMD03.MIX','MOVMD03.MIX','GAMEMD.EXE','Saves/a.SAV'].map(name=>({name:'Steam/'+name,text:'a'.repeat(32)}));
+  const limits={...LIMITS,entry:8,total:18};
+  const folder=[...selected,...trash].map(e=>({path:e.name,blob:new Blob([e.text])}));
+  assert.deepEqual(libraryFromEntries(folder,'Steam',limits,'ra2').files.map(e=>e.path),names);
+  assert.throws(()=>libraryFromEntries(folder,'Steam',limits),/过大/);
+  const zipped=await entriesFromZip(blob([...selected,...trash]),{limits,edition:'ra2'});
+  assert.deepEqual(libraryFromEntries(zipped,'Steam',limits,'ra2').files.map(e=>e.path),names);
+  assert.throws(()=>libraryFromEntries(folder.filter(e=>!e.path.endsWith('MULTI.MIX')),'Steam',limits,'ra2'),/multi\.mix/);
+  assert.throws(()=>libraryFromEntries(folder,'Steam',{...limits,total:17},'ra2'),/超过/);
+});

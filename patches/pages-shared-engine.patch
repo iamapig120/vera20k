@@ -1,8 +1,18 @@
 diff --git a/docs/ra2-mode.md b/docs/ra2-mode.md
-index 9a560be..b4478b7 100644
+index 9a560be..36efb37 100644
 --- a/docs/ra2-mode.md
 +++ b/docs/ra2-mode.md
-@@ -34,8 +34,17 @@ or a start refuses, that player's game names RA2 Mode, the other players'
+@@ -14,7 +14,8 @@ plays RA2 Mode for that start whatever the box says.
+   others without `md`) and uses Yuri's Revenge's only for what they lack. Its
+   rules are `rules.ini`, `art.ini`, `ai.ini` and the theater INIs without `md`,
+   whatever `config.toml`'s `[ini]` says. Its text is `ra2.csf`, with
+-  `ra2md.csf` for labels it lacks, and its subtitles `subtitle.txt`.
++  `ra2md.csf` for labels it lacks on desktop, and its subtitles `subtitle.txt`.
++  The explicit browser RA2 launch uses only the base archives and CSF.
+ - **Menus.** The campaign menu shows Red Alert 2's three emblems: Allied, Boot
+   Camp and Soviet. The loading screens, exit dialog and palettes are Red
+   Alert 2's, and the YR Original Style box has no effect.
+@@ -34,8 +35,17 @@ or a start refuses, that player's game names RA2 Mode, the other players'
  games list it among the reasons another game can differ, and an online room
  says the player has "RA2 Mode or the INI files named in config.toml". Quick
  Match plays Yuri's Revenge and asks you to turn RA2 Mode off. Players who all
@@ -1684,10 +1694,33 @@ index be0ad19..a466221 100644
          WolPersona::default()
      } else {
 diff --git a/src/assets/asset_manager.rs b/src/assets/asset_manager.rs
-index 2fd47b2..b956cbd 100644
+index 2fd47b2..b0d98ee 100644
 --- a/src/assets/asset_manager.rs
 +++ b/src/assets/asset_manager.rs
-@@ -676,6 +676,109 @@ impl AssetManager {
+@@ -558,6 +558,22 @@ pub(crate) fn is_md_startup_archive(name: &str) -> bool {
+     core.ends_with("md") && core.len() > 2
+ }
+ 
++fn blocks_strict_web_ra2(name: &str) -> bool {
++    crate::util::ra2_launch::strict_web() && md_only_web_resource(name)
++}
++
++fn md_only_web_resource(name: &str) -> bool {
++    let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
++    if file.eq_ignore_ascii_case("coopcampmd.ini") || file.eq_ignore_ascii_case("ra2md.csf") {
++        return true;
++    }
++    file.rsplit_once('.').is_some_and(|(_, extension)| {
++        extension.eq_ignore_ascii_case("mix")
++            && (is_md_startup_archive(file)
++                || file.get(..6).is_some_and(|prefix| prefix.eq_ignore_ascii_case("mapsmo")))
++    })
++}
++
+ /// One startup archive that an install inspection could not mount.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct ArchiveIssue {
+@@ -676,6 +692,109 @@ impl AssetManager {
          &self.archive_names
      }
  
@@ -1797,7 +1830,7 @@ index 2fd47b2..b956cbd 100644
      /// Whether this game overlays a selected mod on the installation.
      pub fn mod_selected(&self) -> bool {
          self.mod_dir.is_some()
-@@ -1081,6 +1184,44 @@ impl AssetManager {
+@@ -1081,6 +1200,44 @@ impl AssetManager {
              let Some(pair) = self.audio_pairs.first() else {
                  return Ok(None);
              };
@@ -1842,6 +1875,56 @@ index 2fd47b2..b956cbd 100644
              let (Some(idx), Some(bag)) = (&pair.idx, &pair.bag) else {
                  return Ok(None);
              };
+@@ -1266,6 +1423,9 @@ impl AssetManager {
+         name: &str,
+         maximum: Option<usize>,
+     ) -> Result<Option<ResolvedAssetFile<'_>>, AssetError> {
++        if blocks_strict_web_ra2(name) {
++            return Ok(None);
++        }
+         if let Some(loose) = self.loose_asset(name) {
+             let bytes = match maximum {
+                 Some(maximum) => loose.bytes_bounded(maximum)?,
+@@ -2009,7 +2169,7 @@ impl AssetManager {
+             // `-ra2` reads only the base archive family. A broad prefix such
+             // as `maps` also matches YR members (`mapsmd03`, `mapsmo03`); skip
+             // those so they cannot enter the search path ahead of RA2 data.
+-            if crate::util::ra2_launch::enabled() && is_md_startup_archive(file_name) {
++            if Self::skip_md_for_ra2(file_name) || blocks_strict_web_ra2(file_name) {
+                 log::debug!("-ra2: skipping md wildcard archive {file_name}");
+                 continue;
+             }
+@@ -2046,6 +2206,9 @@ impl AssetManager {
+     }
+ 
+     fn raw_relative_file_available(&self, relative: &str) -> bool {
++        if blocks_strict_web_ra2(relative) {
++            return false;
++        }
+         self.install_roots()
+             .any(|root| retail_enumerated_file(&root.join(relative)))
+     }
+@@ -2151,6 +2314,9 @@ impl AssetManager {
+         policy: &mut StartupArchivePolicy<'_>,
+     ) -> Result<bool, AssetError> {
+         if Self::skip_md_for_ra2(name) {
++            if crate::util::ra2_launch::strict_web() {
++                return Ok(false);
++            }
+             // Keep the MD member for the deferred fallback pass instead of
+             // dropping it. De-duplicate: the same name can be probed twice.
+             if !self.deferred_md_archives.iter().any(|n| n == name) {
+@@ -2215,6 +2381,10 @@ impl AssetManager {
+     }
+ 
+     fn mount_named_archive(&mut self, name: &str, required: bool) -> Result<bool, AssetError> {
++        if blocks_strict_web_ra2(name) {
++            return Ok(false);
++        }
++
+         match self.locate_named_archive(name) {
+             Some(NamedArchiveLocation::Registered) => Ok(true),
+             Some(NamedArchiveLocation::Loose(disk_path)) => {
 diff --git a/src/assets/audio_bag.rs b/src/assets/audio_bag.rs
 index 9ff0f42..1e3abbd 100644
 --- a/src/assets/audio_bag.rs
@@ -1897,6 +1980,18 @@ index 9ff0f42..1e3abbd 100644
          let idx = self.find_sample_index(name)?;
          let entry = &self.entries[idx];
          let start = entry.offset as usize;
+diff --git a/src/assets/csf_file.rs b/src/assets/csf_file.rs
+index 4297f6b..683103a 100644
+--- a/src/assets/csf_file.rs
++++ b/src/assets/csf_file.rs
+@@ -191,6 +191,7 @@ impl CsfFile {
+         // for the expansion). Adopt those as fallbacks: a label ra2.csf has
+         // keeps its original value, missing ones answer from ra2md.csf.
+         if crate::util::ra2_launch::enabled()
++            && !crate::util::ra2_launch::strict_web()
+             && let Some(md_bytes) = lookup("ra2md.csf")
+             && let Ok(md_table) = Self::from_bytes(md_bytes)
+         {
 diff --git a/src/assets/deferred_assets.rs b/src/assets/deferred_assets.rs
 new file mode 100644
 index 0000000..7442289
@@ -2465,8 +2560,25 @@ index f9a43b9..51f9658 100644
      use super::memory;
  
      #[test]
+diff --git a/src/util/ra2_launch.rs b/src/util/ra2_launch.rs
+index f4fc1e4..f7e6558 100644
+--- a/src/util/ra2_launch.rs
++++ b/src/util/ra2_launch.rs
+@@ -39,6 +39,12 @@ pub fn enabled() -> bool {
+     RA2_REQUESTED.load(Ordering::Relaxed)
+ }
+ 
++/// Explicit browser RA2 accepts a base-only installation. Native RA2 retains
++/// the existing MD compatibility layer; YR never enters this branch.
++pub(crate) fn strict_web() -> bool {
++    cfg!(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")) && enabled()
++}
++
+ /// Test-only: make [`enabled`] report `value` on the current thread until
+ /// [`clear_override`]. Restores nothing on drop — callers clear explicitly.
+ #[cfg(test)]
 diff --git a/src/web.rs b/src/web.rs
-index 2667150..7ca9454 100644
+index 2667150..9dc9985 100644
 --- a/src/web.rs
 +++ b/src/web.rs
 @@ -5,6 +5,66 @@ pub(crate) mod sim_worker;
@@ -2706,7 +2818,7 @@ index 2667150..7ca9454 100644
  
 +fn require_ra2_archives() -> Result<(), JsValue> {
 +    let retail = std::path::Path::new("/retail");
-+    for name in ["ra2.mix", "ra2md.mix", "language.mix", "multi.mix"] {
++    for name in ["ra2.mix", "language.mix", "multi.mix"] {
 +        if !crate::util::case_insensitive_path::find(retail, name)
 +            .is_some_and(crate::util::file_system::is_file)
 +        {

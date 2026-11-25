@@ -1,6 +1,6 @@
 import init, {fonts_ready, import_file, prepare_audio, restore_user_file, set_persistence_callbacks, set_lifecycle_callback, start_game, start_ra2} from './pkg/vera20k.js';
 import {planUserRestore} from './user-data.mjs';
-import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs';
+import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries,RA2_REQUIRED,isRa2RetailPath} from './resources.mjs';
 import {installFullscreen} from './fullscreen.mjs';
 const $=id=>document.getElementById(id);
 globalThis.vera20kToggleFullscreen=installFullscreen(document,$('game'),$('fullscreen-status'),message=>{
@@ -12,12 +12,14 @@ if(typeof $('game').requestFullscreen==='function'&&typeof document.exitFullscre
 }
 const status=$('status'), button=$('start'), files=$('files');
 const ra2Button=$('start-ra2');
-const ra2Required=['ra2.mix','ra2md.mix','language.mix','multi.mix'];
+const ra2Entry=globalThis.location?.hash==='#start-ra2';
+const ra2Required=typeof RA2_REQUIRED==='undefined'?['ra2.mix','language.mix','multi.mix']:RA2_REQUIRED;
+if(ra2Entry){button.hidden=true;$('edition-switch').open=true;$('import-title').textContent='导入原版红警 2 游戏文件';}
 
 let selectionRevision=0, restoreRevision=0, engineLoading=false;
 let ready=false, busy=false, failed=false, selecting=false, selected=[];
 let importController,lastImport,exiting=false;
-const store=globalThis.VeraStorage;
+const store=ra2Entry?globalThis.createVeraStorage('vera20k-pages-ra2-v1',{migrateLegacy:false}):globalThis.VeraStorage;
 const enginePin='926a036e648a505e9d2d93b87ee7a5ccff7e7953';
 const priorBackupPin='79edebfa25eb3411105117409a3363497e4529b6';
 let storageAvailable=false, cachedSelection=false, saving=false;
@@ -150,13 +152,13 @@ function selectResources(chosen,folderName){
  selectionRevision++;
  const keep=chosen;
  const rootNames=new Set(keep.filter(file=>!relativePath(file).includes('/')).map(file=>file.name.toLowerCase()));
- if(!rootNames.has('ra2.mix')||!rootNames.has('ra2md.mix'))throw Error('请选择完整尤里的复仇资源；旧选择保留');
+ if(ra2Entry ? ra2Required.some(name=>!rootNames.has(name)) : !rootNames.has('ra2.mix')||!rootNames.has('ra2md.mix'))throw Error('请选择对应版本的完整资源；旧选择保留');
  selected=keep;cachedSelection=false;
  $('folder-name').textContent=folderName;
  $('folder-meta').textContent=`${selected.length} 个资源文件 · ${sizeLabel(selected.reduce((sum,file)=>sum+file.size,0))}`;
  $('choose-folder').hidden=true;$('folder-selected').hidden=false;
  $('button-caption').textContent='首次读取可能需要一些时间，请保持页面打开';
- feedback(ready?'资源已就绪，点击「开始游戏」。':'游戏目录已选好，正在准备网页引擎，请稍候…');syncButton();
+ feedback(ready?(ra2Entry?'资源已就绪，点击「启动原版红色警戒 2」。':'资源已就绪，点击「开始游戏」。'):'游戏目录已选好，正在准备网页引擎，请稍候…');syncButton();
 }
 function resourceFiles(library){
  return library.files.map(entry=>{
@@ -179,7 +181,7 @@ async function importResources(read,label){
  $('cancel-import').hidden=false;$('cancel-import').disabled=false;$('retry-cache').hidden=true;syncButton();
  try{
   const entries=await read({signal:controller.signal,onProgress:resourceProgress});controller.signal.throwIfAborted();
-  const candidate=libraryFromEntries(entries,label),chosen=resourceFiles(candidate);controller.signal.throwIfAborted();
+  const candidate=libraryFromEntries(entries,label,undefined,ra2Entry?"ra2":"yr"),chosen=resourceFiles(candidate);controller.signal.throwIfAborted();
   let cached=false,cacheError;
   if($('cache-resources').checked){
    $('cancel-import').disabled=true;feedback('资源校验完成，正在原子保存缓存…');
@@ -198,12 +200,12 @@ files.onchange=()=>{
 function chooseFolder(){files.value='';files.click();}
 $('choose-folder').onclick=chooseFolder;$('change-folder').onclick=chooseFolder;
 $('choose-zip').onclick=()=>{$('zip-file').value='';$('zip-file').click();};
-function importZip(file){return importResources(options=>entriesFromZip(file,options),file.name||'本地 ZIP');}
+function importZip(file){return importResources(options=>entriesFromZip(file,{...options,edition:ra2Entry?"ra2":"yr"}),file.name||'本地 ZIP');}
 $('zip-file').onchange=()=>{const file=$('zip-file').files[0];if(file)void importZip(file);};
 $('zip-form').onsubmit=event=>{
  event.preventDefault();const url=$('zip-url').value.trim();let label='远程 ZIP';
  try{label='ZIP · '+new URL(url).hostname;}catch{}
- void importResources(async options=>entriesFromZip(await downloadZip(url,options),options),label);
+ void importResources(async options=>entriesFromZip(await downloadZip(url,options),{...options,edition:ra2Entry?"ra2":"yr"}),label);
 };
 $('cancel-import').onclick=()=>importController?.abort();
 $('retry-import').onclick=()=>{if(lastImport)void lastImport();};
@@ -226,12 +228,12 @@ dropZone.addEventListener('drop',event=>{
 button.onclick=()=>launch(false);
 ra2Button.onclick=()=>launch(true);
 async function launch(ra2){
- if((ra2?ra2Button:button).disabled||busy||document.body.classList.contains('playing'))return;
+ if((!ra2&&ra2Entry)||(ra2?ra2Button:button).disabled||busy||document.body.classList.contains('playing'))return;
  busy=true;syncButton();feedback('正在读取游戏资源，请保持页面打开。');
- let loaded=0;const total=selected.reduce((sum,file)=>sum+file.size,0);
+ let loaded=0;const launchFiles=ra2?selected.filter(file=>typeof isRa2RetailPath==='undefined'||isRa2RetailPath(relativePath(file))):selected;const total=launchFiles.reduce((sum,file)=>sum+file.size,0);
  try{
   prepare_audio();
-  for(const file of selected){
+  for(const file of launchFiles){
    progress(loaded/total*90,`正在读取 ${file.name}`);
    import_file(relativePath(file),new Uint8Array(await file.arrayBuffer()));loaded+=file.size;
    await new Promise(resolve=>setTimeout(resolve,0));
@@ -293,7 +295,7 @@ async function prepareEngine(){
   set_lifecycle_callback(engineLifecycle);
   ready=true;failed=false;
   $('environment').className='environment ready';$('environment-label').textContent='浏览器已就绪';
-  if(!selecting)feedback(selected.length?'资源已就绪，点击「开始游戏」。':'请选择游戏目录；如果正在恢复缓存，也可以稍候。');
+  if(!selecting)feedback(selected.length?(ra2Entry?'资源已就绪，点击「启动原版红色警戒 2」。':'资源已就绪，点击「开始游戏」。'):'请选择游戏目录；如果正在恢复缓存，也可以稍候。');
  }catch(error){
   $('environment').className='environment error';$('environment-label').textContent='引擎准备失败';
   fail('游戏引擎未能准备好，请查看详情并重试。',String(error));
@@ -311,7 +313,7 @@ async function restoreStorage(){
   const library=await store.library();
   if(revision!==restoreRevision)return;
   if(selection===selectionRevision&&!busy&&library?.files?.length){
-   const checked=libraryFromEntries(library.files.map(entry=>({path:entry.path,blob:entry.file})),library.folder);
+   const checked=libraryFromEntries(library.files.map(entry=>({path:entry.path,blob:entry.file})),library.folder,undefined,ra2Entry?"ra2":"yr");
    selectResources(resourceFiles(checked),checked.label);
    cachedSelection=selected.length>0;
   }
