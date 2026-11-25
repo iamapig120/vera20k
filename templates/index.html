@@ -57,6 +57,10 @@
                                 <path d="M2 1v22l18-11z" />
                             </svg><span id="start-label">开始游戏</span></button>
                     </div>
+                    <details id="edition-switch" hidden><summary>其他启动选项</summary>
+                        <button id="start-ra2" class="retry" type="button" disabled>启动原版红色警戒 2（实验）</button>
+                        <p id="ra2-resource-note" role="status"></p>
+                    </details>
                     <div class="zip-actions"><button id="choose-zip" class="retry" type="button">选择 ZIP</button><input id="zip-file" type="file" accept=".zip,application/zip" hidden aria-label="游戏资源 ZIP"></div>
                     <form id="zip-form" class="zip-form"><label for="zip-url">从 HTTPS ZIP 地址下载</label><div><input id="zip-url" type="url" placeholder="https://example.com/game.zip" autocomplete="off" spellcheck="false"><button id="download-zip" type="submit">下载并导入</button></div></form>
                     <label class="cache-choice"><input id="cache-resources" type="checkbox" checked> 缓存资源，下次直接开始</label>

@@ -1,4 +1,4 @@
-import init, {fonts_ready, import_file, prepare_audio, restore_user_file, set_persistence_callbacks, set_lifecycle_callback, start_game} from './pkg/vera20k.js';
+import init, {fonts_ready, import_file, prepare_audio, restore_user_file, set_persistence_callbacks, set_lifecycle_callback, start_game, start_ra2} from './pkg/vera20k.js';
 import {planUserRestore} from './user-data.mjs';
 import {entriesFromFolder,entriesFromDrop,entriesFromZip,downloadZip,libraryFromEntries} from './resources.mjs';
 import {installFullscreen} from './fullscreen.mjs';
@@ -11,6 +11,8 @@ if(typeof $('game').requestFullscreen==='function'&&typeof document.exitFullscre
  globalThis.vera20kBattlefieldFullscreenAvailability=globalThis.vera20kToggleFullscreen.setBattlefieldAvailable;
 }
 const status=$('status'), button=$('start'), files=$('files');
+const ra2Button=$('start-ra2');
+const ra2Required=['ra2.mix','ra2md.mix','language.mix','multi.mix'];
 
 let selectionRevision=0, restoreRevision=0, engineLoading=false;
 let ready=false, busy=false, failed=false, selecting=false, selected=[];
@@ -87,8 +89,17 @@ $('backup-file').onchange=async()=>{
 const droppedPaths=new WeakMap();
 const relativePath=file=>droppedPaths.get(file) ?? (file.webkitRelativePath ? file.webkitRelativePath.split('/').slice(1).join('/') : file.name);
 const sizeLabel=bytes=>bytes>=1024**3 ? `${(bytes/1024**3).toFixed(1)} GB` : `${Math.max(1,Math.round(bytes/1024**2))} MB`;
+function missingRa2Archives(){
+ const rootNames=new Set(selected.map(file=>relativePath(file).toLowerCase()));
+ return ra2Required.filter(name=>!rootNames.has(name));
+}
 function syncButton(){
  button.disabled=exiting||!ready||busy||failed||selecting||!selected.length;
+ const ra2Available=typeof start_ra2==='function';
+ $('edition-switch').hidden=!ra2Available;
+ const missing=missingRa2Archives();
+ ra2Button.disabled=button.disabled||!ra2Available||missing.length>0;
+ $('ra2-resource-note').textContent=selected.length&&missing.length?`原版红警 2 缺少：${missing.join('、')}`:'';
  $('start-label').textContent=busy?'正在进入战场…':!ready?'正在准备游戏…':'开始游戏';
  $('choose-folder').disabled=exiting||busy||failed||selecting;
  $('change-folder').disabled=exiting||busy||failed||selecting;
@@ -212,8 +223,10 @@ dropZone.addEventListener('drop',event=>{
  if(file&&/\.zip$/i.test(file.name)){void importZip(file);return;}
  void importResources(options=>entriesFromDrop(items,options),'拖入的游戏资源');
 });
-button.onclick=async()=>{
- if(button.disabled)return;
+button.onclick=()=>launch(false);
+ra2Button.onclick=()=>launch(true);
+async function launch(ra2){
+ if((ra2?ra2Button:button).disabled||busy||document.body.classList.contains('playing'))return;
  busy=true;syncButton();feedback('正在读取游戏资源，请保持页面打开。');
  let loaded=0;const total=selected.reduce((sum,file)=>sum+file.size,0);
  try{
@@ -230,17 +243,17 @@ button.onclick=async()=>{
   await store.open();storageAvailable=true;
   await store.preserveUsers(enginePin);
   $('export-before-upgrade').disabled=false;
-  const restored=planUserRestore(await store.users());
+  const restored=planUserRestore(await store.users(),ra2);
   for(const row of restored.imports)import_file(row.name,row.bytes);
   for(const row of restored.files)restore_user_file(row.path,row.bytes,row.modified_ms);
   if(restored.retained.length)storageStatus(`${restored.retained.length} 条旧版记录仍保留在浏览器和备份中，本引擎未应用：${restored.retained.slice(0,3).join('、')}`);
   $('import-data').disabled=true;
   const canvas=document.createElement('canvas');canvas.tabIndex=0;
   $('game').append(canvas);
-  start_game(canvas,engineStatus);
+  (ra2?start_ra2:start_game)(canvas,engineStatus);
   enterGame();
  }catch(error){fail('读取或启动失败，请重新加载后再试。',String(error));}
-};
+}
 
 async function engineBytes(){
  const controller=new AbortController();

@@ -1,9 +1,11 @@
 const profiles=new Map(['VERA.INI','VERARULES.INI','RA2MD.INI','KeyboardMD.ini','wolinfoMD.ini','coopsave.ini']
  .map(name=>[name.toLowerCase(),name]));
 
-export function planUserRestore(rows){
+export function planUserRestore(rows,ra2=false){
  const chosen=new Map(),retained=[];
  for(const row of rows){
+  const isRa2=/^\/saves\/ra2\//i.test(row.path);
+  if(isRa2!==ra2)continue;
   const legacy=/^\/retail\/([^/]+)$/i.exec(row.path);
   const current=/^\/saves\/profile\/([^/]+)$/i.exec(row.path);
   const profile=profiles.get((legacy?.[1]??current?.[1]??'').toLowerCase());

@@ -1,0 +1,139 @@
+name: 'Isolated Pages RA2 Web candidate'
+on:
+  push:
+    branches:
+      - ci/pages-ra2-926a036-candidate
+    paths:
+      - patches/pages-shared-engine.patch
+      - .github/workflows/pages-ra2-candidate.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'iamapig120/vera20k' && github.ref == 'refs/heads/ci/pages-ra2-926a036-candidate'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ENGINE_REV: 926a036e648a505e9d2d93b87ee7a5ccff7e7953
+      ENGINE_TREE: 095ee1129f8a3557a6e5dde9cae6835b1ae7a528
+      ENGINE_PATCH_SHA: 9acc5b9bddd263aeba63ea39fe4b6850d97b403853e8ea7f4fc1919717ffe3b1
+      EXPECTED_LAYOUT: '3603389783'
+      RUSTUP_TOOLCHAIN: '1.100.0'
+      CARGO_BUILD_JOBS: '1'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_FAST_OPT_LEVEL: '0'
+      CARGO_PROFILE_FAST_DEBUG: '0'
+      CARGO_PROFILE_FAST_CODEGEN_UNITS: '256'
+      CARGO_PROFILE_FAST_LTO: 'off'
+      CARGO_PROFILE_WASM_LTO: 'off'
+      CARGO_PROFILE_WASM_CODEGEN_UNITS: '32'
+      RUSTC_BOOTSTRAP: '1'
+      RUSTFLAGS: '-Zunstable-options --jobs-backend=1 --jobs-frontend=1 -Zfewer-names=yes'
+      VERA20K_MIN_FREE_GIB: '3'
+      VERA20K_FREE_HEADROOM_GIB: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: '1.100.0'
+          targets: wasm32-unknown-unknown
+      - name: Verify compiler and retrieve matching wasm-bindgen
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc -V
+          rustup target add --toolchain "$RUSTUP_TOOLCHAIN" wasm32-unknown-unknown
+          target_lib=$(rustc --print target-libdir --target wasm32-unknown-unknown)
+          compgen -G "$target_lib/libcore-*.rlib" >/dev/null
+          base=https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.127
+          name=wasm-bindgen-0.2.127-x86_64-unknown-linux-musl
+          curl --fail --location --retry 3 "$base/$name.tar.gz" -o "$RUNNER_TEMP/bindgen.tar.gz"
+          printf '%s  %s\n' 61d4a7dc85acfa0d2354ccc0b8361928c7e52a746d17f28ebaa795ed3dc1614a "$RUNNER_TEMP/bindgen.tar.gz" | sha256sum -c
+          tar -xf "$RUNNER_TEMP/bindgen.tar.gz" -C "$RUNNER_TEMP"
+          [[ "$("$RUNNER_TEMP/$name/wasm-bindgen" --version)" == 'wasm-bindgen 0.2.127' ]]
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+      - name: Recover and attest the corresponding engine source
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$GITHUB_WORKSPACE/patches/pages-shared-engine.patch"
+          printf '%s  %s\n' "$ENGINE_PATCH_SHA" "$patch" | sha256sum -c
+          git init -q engine
+          git -C engine fetch --depth=1 https://github.com/YuriPlanet/vera20k.git "$ENGINE_REV"
+          git -C engine checkout -q --detach FETCH_HEAD
+          [[ "$(git -C engine rev-parse HEAD)" == "$ENGINE_REV" ]]
+          git -C engine apply --index "$patch"
+          [[ "$(git -C engine write-tree)" == "$ENGINE_TREE" ]]
+          git -C engine diff --cached --check
+          git -C engine diff --cached --exit-code -- Cargo.lock
+          node --test tests/*.test.*
+          node --test engine/tools/wasm/tests/*.test.cjs
+      - name: Build single-threaded Internet WebAssembly
+        shell: bash
+        working-directory: engine
+        run: |
+          set -euo pipefail
+          unset WS_PROXY_URL
+          python tools/wasm/build.py --profile wasm --network
+      - name: Confirm real package content and fingerprints
+        shell: bash
+        working-directory: engine
+        run: |
+          set -euo pipefail
+          site=target/wasm-dist
+          mapfile -d '' layouts < <(find target/owned-worktrees -type f -path '*/fast/snapshot-layout' -print0)
+          [[ "${#layouts[@]}" == 1 ]]
+          layout="$("${layouts[0]}")"
+          [[ "$layout" == "$EXPECTED_LAYOUT" ]]
+          [[ -f "$site/pkg/fonts/NotoSans-VF.ttf" && -f "$site/pkg/fonts/Unifont-CJK-15.bin" ]]
+          [[ -f "$site/lobby.js" && -f "$site/network.js" && ! -e "$site/lan_rtc.js" ]]
+          node --input-type=module - "$site/pkg/vera20k_bg.wasm" <<'JS'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const bytes = fs.readFileSync(process.argv[2]);
+          assert(bytes.includes(Buffer.from('wss://wss.vera20k.com')));
+          assert(bytes.includes(Buffer.from('vera20kBattlefieldFullscreenAvailability')));
+          const module = await WebAssembly.compile(bytes);
+          const exports = new Set(WebAssembly.Module.exports(module).map(x => x.name));
+          for (const name of ['start_game', 'start_ra2', 'probe', 'probe_ra2', 'fonts_ready', 'prepare_audio', 'configure_remote_assets', 'finish_remote_asset', 'set_lifecycle_callback', 'set_persistence_callbacks', 'restore_user_file']) {
+            assert(exports.has(name), 'missing ' + name);
+          }
+          assert(!WebAssembly.Module.imports(module).some(x => x.name.includes('veraLan')));
+          JS
+      - name: Assemble the asset-free exact Pages wrapper and attest it
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/pages-ra2"
+          engine=engine/target/wasm-dist
+          mkdir -p "$root/assets"
+          for file in index.html launcher.css launcher.js storage.js user-data.mjs resources.mjs fullscreen.mjs; do
+            cp "templates/$file" "$root/$file"
+          done
+          cp "$engine/"{lobby,network}.js "$root/"
+          cp assets/RA2MD.png "$root/assets/"
+          cp LICENSE-GPL "$root/"
+          cp -r LICENSES "$root/"
+          node --experimental-vm-modules tools/package-preflight.cjs copy-pkg "$engine/pkg" "$root/pkg"
+          wasm=$(sha256sum "$root/pkg/vera20k_bg.wasm" | cut -d ' ' -f1)
+          printf '%s\n' "Revision: $ENGINE_REV" "Web integration: $GITHUB_SHA" "Engine source tree: $ENGINE_TREE" "WASM SHA256: $wasm" "Gateway: wss://wss.vera20k.com (upstream default, separately versioned)" "Snapshot layout: $EXPECTED_LAYOUT" "Status: unpublished QA candidate; no retail assets" > "$root/build-info.txt"
+          node --experimental-vm-modules tools/package-files.cjs "$root" "$GITHUB_SHA" "$ENGINE_REV" > "$RUNNER_TEMP/pages-files.txt"
+          test "$(wc -l < "$RUNNER_TEMP/pages-files.txt")" = "$(find "$root" -type f | wc -l)"
+          out="$RUNNER_TEMP/result"
+          mkdir "$out"
+          (cd "$root"; zip -q -9 "$out/pages-ra2-926a036.zip" -@ < "$RUNNER_TEMP/pages-files.txt")
+          (cd "$out"; sha256sum pages-ra2-926a036.zip > SHA256SUMS)
+          cat "$root/build-info.txt" "$out/SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pages-ra2-926a036-candidate
+          path: "${{ runner.temp }}/result/"
+          if-no-files-found: error
+          retention-days: 7

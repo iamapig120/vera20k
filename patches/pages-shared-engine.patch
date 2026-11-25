@@ -1,5 +1,29 @@
+diff --git a/docs/ra2-mode.md b/docs/ra2-mode.md
+index 9a560be..b4478b7 100644
+--- a/docs/ra2-mode.md
++++ b/docs/ra2-mode.md
+@@ -34,8 +34,17 @@ or a start refuses, that player's game names RA2 Mode, the other players'
+ games list it among the reasons another game can differ, and an online room
+ says the player has "RA2 Mode or the INI files named in config.toml". Quick
+ Match plays Yuri's Revenge and asks you to turn RA2 Mode off. Players who all
+-have it on play together ([Networking](Networking.md)). The browser version
+-has no RA2 Mode.
++have it on play together ([Networking](Networking.md)).
++
++## Browser launcher
++
++The default entry starts Yuri’s Revenge and uses original YR presentation on a
++fresh profile. An explicit saved style choice still wins. When your selected
++game folder supplies both editions’ archives, **Start original Red Alert 2**
++uses the same rules and asset selection as native `-ra2`. Use a complete YR
++installation containing the original RA2 data, including `language.mix` and
++`multi.mix`; archive presence alone does not validate its contents. RA2 uses
++separate browser saves and settings and never displays the YR styling option.
+ 
+ ## Known gaps
+ 
 diff --git a/src/app/audio_runtime.rs b/src/app/audio_runtime.rs
-index 1a8dbc6f83ac1e579a17b29ed6b5463d6acd6636..528350b24aac8fe00a73509f2f6e0f156de3698d 100644
+index 1a8dbc6..528350b 100644
 --- a/src/app/audio_runtime.rs
 +++ b/src/app/audio_runtime.rs
 @@ -325,6 +325,17 @@ impl AppAudioRuntime {
@@ -21,7 +45,7 @@ index 1a8dbc6f83ac1e579a17b29ed6b5463d6acd6636..528350b24aac8fe00a73509f2f6e0f15
          let mut draw_main =
              crate::audio::sfx::PlaybackDraws::new(move |low, high| retained.ranged(low, high));
 diff --git a/src/app/frame.rs b/src/app/frame.rs
-index 41008b6b099a83e9a52995bf2874b935f4e0d559..e19cde43d2d8dd1890173ee52a910b8cc8559d96 100644
+index 41008b6..e19cde4 100644
 --- a/src/app/frame.rs
 +++ b/src/app/frame.rs
 @@ -199,6 +199,10 @@ impl App {
@@ -68,7 +92,7 @@ index 41008b6b099a83e9a52995bf2874b935f4e0d559..e19cde43d2d8dd1890173ee52a910b8c
              // Browser hand-off submits/presents inline. Ask for the snapshot
              // now, before the browser can recycle the canvas drawing buffer.
 diff --git a/src/app/frontend/shell_layout.rs b/src/app/frontend/shell_layout.rs
-index 581bc1ef359b1e12711ded35c321aa3e9fd66425..ef78351fa62cca83c7c84680f5c2b0fe32c93ff5 100644
+index 581bc1e..ef78351 100644
 --- a/src/app/frontend/shell_layout.rs
 +++ b/src/app/frontend/shell_layout.rs
 @@ -115,7 +115,18 @@ pub(crate) fn on<L>(state: &AppState, layout: impl FnOnce(i32, i32, ShellScale)
@@ -92,7 +116,7 @@ index 581bc1ef359b1e12711ded35c321aa3e9fd66425..ef78351fa62cca83c7c84680f5c2b0fe
  
  /// A front-end box's rects on the window's mapping.
 diff --git a/src/app/handler.rs b/src/app/handler.rs
-index d62c711960f4b6349adaa01fe33593d41894189d..7082fca560719f02f9e2f68ee9db771f56b29a26 100644
+index d62c711..7082fca 100644
 --- a/src/app/handler.rs
 +++ b/src/app/handler.rs
 @@ -227,6 +227,15 @@ impl App {
@@ -187,7 +211,7 @@ index d62c711960f4b6349adaa01fe33593d41894189d..7082fca560719f02f9e2f68ee9db771f
              // cursor lock: the OS drops the clip on focus loss /
              // Windows key, so re-assert the player's choice every frame while
 diff --git a/src/app/input/command_bar_input.rs b/src/app/input/command_bar_input.rs
-index 442da2fc4a9fb77426b999eabd84f22306341eb3..6e0ed07d98cd5ee43493a051f7fa978993590333 100644
+index 442da2f..6e0ed07 100644
 --- a/src/app/input/command_bar_input.rs
 +++ b/src/app/input/command_bar_input.rs
 @@ -1,6 +1,7 @@
@@ -238,7 +262,7 @@ index 442da2fc4a9fb77426b999eabd84f22306341eb3..6e0ed07d98cd5ee43493a051f7fa9789
          return false;
      }
 diff --git a/src/app/input/dispatch/hotkey_dispatch.rs b/src/app/input/dispatch/hotkey_dispatch.rs
-index 2b209c22cfe5e7e09aec2cb5766faca32e1cd7f9..6256a3b967b3d37c7e1b9a45fd10495e49726753 100644
+index 2b209c2..6256a3b 100644
 --- a/src/app/input/dispatch/hotkey_dispatch.rs
 +++ b/src/app/input/dispatch/hotkey_dispatch.rs
 @@ -546,7 +546,7 @@ pub(crate) fn run_window_command(state: &mut AppState, command: HotkeyCommand) {
@@ -251,7 +275,7 @@ index 2b209c22cfe5e7e09aec2cb5766faca32e1cd7f9..6256a3b967b3d37c7e1b9a45fd10495e
          }
          HotkeyCommand::PerformanceStats => {
 diff --git a/src/app/input/gadget_input.rs b/src/app/input/gadget_input.rs
-index 1b91732bcee7ad4e82cc633f3bdede45c54e9f27..9f5f645930890b26fcff0255f6267d4e98954d69 100644
+index 1b91732..9f5f645 100644
 --- a/src/app/input/gadget_input.rs
 +++ b/src/app/input/gadget_input.rs
 @@ -94,7 +94,7 @@ pub(crate) struct InGameGadgets {
@@ -264,7 +288,7 @@ index 1b91732bcee7ad4e82cc633f3bdede45c54e9f27..9f5f645930890b26fcff0255f6267d4e
      /// The layout's added parts, a gadget for each: grown to fit and never
      /// shrunk, with every part that is no button disabled.
 diff --git a/src/app/loading/pump.rs b/src/app/loading/pump.rs
-index a18094a99a663f36e2707489b554ef3a84f7b4db..5335a3853158416f967ef444d4ba17d65cd2d934 100644
+index a18094a..5335a38 100644
 --- a/src/app/loading/pump.rs
 +++ b/src/app/loading/pump.rs
 @@ -408,6 +408,11 @@ impl LoadingRequest {
@@ -289,7 +313,7 @@ index a18094a99a663f36e2707489b554ef3a84f7b4db..5335a3853158416f967ef444d4ba17d6
      crate::app::match_runtime::sim_tick::finish_threaded_frame(state);
      state
 diff --git a/src/app/mod.rs b/src/app/mod.rs
-index 08743fd5957e858b3e8fb2d990a6415e978531bd..cdd00ac107aa455b9da8d7d65b52fb8a00b1c406 100644
+index 08743fd..cdd00ac 100644
 --- a/src/app/mod.rs
 +++ b/src/app/mod.rs
 @@ -63,6 +63,8 @@ pub(crate) mod diagnostics;
@@ -302,7 +326,7 @@ index 08743fd5957e858b3e8fb2d990a6415e978531bd..cdd00ac107aa455b9da8d7d65b52fb8a
  pub mod frontend;
  mod game_data_check;
 diff --git a/src/app/persistence/commands.rs b/src/app/persistence/commands.rs
-index d1e61a579d770302b42624e6e1bc6f9e64eb3d2f..96801ea948b4791c00bedc0b6fa650004c8149e5 100644
+index d1e61a5..96801ea 100644
 --- a/src/app/persistence/commands.rs
 +++ b/src/app/persistence/commands.rs
 @@ -433,29 +433,63 @@ pub(crate) fn request_saved_game_load(state: &mut AppState, path: PathBuf) {
@@ -401,8 +425,26 @@ index d1e61a579d770302b42624e6e1bc6f9e64eb3d2f..96801ea948b4791c00bedc0b6fa65000
      if let Err(error) = crate::app::loading::pump::present_saved_game_loading(state) {
          log::warn!("Saved-game loading dialog presentation failed: {error:#}");
      }
+diff --git a/src/app/persistence/mod.rs b/src/app/persistence/mod.rs
+index 2fcd800..ea2689d 100644
+--- a/src/app/persistence/mod.rs
++++ b/src/app/persistence/mod.rs
+@@ -428,9 +428,11 @@ pub(crate) struct SaveRepository {
+ 
+ impl SaveRepository {
+     fn new() -> Self {
+-        Self {
+-            directory: PathBuf::from(DEFAULT_SAVES_DIRECTORY),
++        #[cfg(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown"))]
++        if crate::util::ra2_launch::enabled() {
++            return Self::at("/saves/ra2");
+         }
++        Self::at(DEFAULT_SAVES_DIRECTORY)
+     }
+ 
+     pub(crate) fn at(directory: impl Into<PathBuf>) -> Self {
 diff --git a/src/app/persistence/options_profile.rs b/src/app/persistence/options_profile.rs
-index a3db68d18e2aa1f5cd7dc7fb879b03e70a96cfd5..416dcc91a086123ed5cef75a9009fc245d544bac 100644
+index a3db68d..416dcc9 100644
 --- a/src/app/persistence/options_profile.rs
 +++ b/src/app/persistence/options_profile.rs
 @@ -149,8 +149,8 @@ pub(crate) struct RetailOptionsProfile {
@@ -488,7 +530,7 @@ index a3db68d18e2aa1f5cd7dc7fb879b03e70a96cfd5..416dcc91a086123ed5cef75a9009fc24
  
      /// RA2 Mode comes from its own key and is saved under it, and saving
 diff --git a/src/app/presentation/sidebar_command_bar.rs b/src/app/presentation/sidebar_command_bar.rs
-index ade3524b85cab730abb4102c99600b0432148b8a..fea7636b4d6ed5ffe5ca455fbfd767e1d735ac2d 100644
+index ade3524..fea7636 100644
 --- a/src/app/presentation/sidebar_command_bar.rs
 +++ b/src/app/presentation/sidebar_command_bar.rs
 @@ -19,7 +19,29 @@ pub(crate) fn layout_and_slots(state: &AppState) -> Option<(CommandBarLayout, Ve
@@ -558,7 +600,7 @@ index ade3524b85cab730abb4102c99600b0432148b8a..fea7636b4d6ed5ffe5ca455fbfd767e1
              slots: [Vec::new(), Vec::new()],
          }
 diff --git a/src/app/process_assets.rs b/src/app/process_assets.rs
-index 1c99772d93bab4c0e45b9ec6f2cfe528e65a5a8b..a0a037c446ae67d80c906aebfddd780e2d7aa14b 100644
+index 1c99772..a0a037c 100644
 --- a/src/app/process_assets.rs
 +++ b/src/app/process_assets.rs
 @@ -1376,6 +1376,50 @@ impl ProcessAssets {
@@ -613,7 +655,7 @@ index 1c99772d93bab4c0e45b9ec6f2cfe528e65a5a8b..a0a037c446ae67d80c906aebfddd780e
      /// YRO archives, and its PKT titles resolve through the process CSF. Both
      /// fields live on this owner, so the pair is borrowed together.
 diff --git a/src/app/radar_movie.rs b/src/app/radar_movie.rs
-index cfcc36c61d3f2e48d2efc5ff5bf865c082ff02a0..dbe1b144d59a6846e54961b9405964167640b354 100644
+index cfcc36c..dbe1b14 100644
 --- a/src/app/radar_movie.rs
 +++ b/src/app/radar_movie.rs
 @@ -172,12 +172,44 @@ pub(crate) fn enqueue(state: &mut AppState, index: i32, pause_simulation: bool)
@@ -668,7 +710,7 @@ index cfcc36c61d3f2e48d2efc5ff5bf865c082ff02a0..dbe1b144d59a6846e54961b940596416
      };
 diff --git a/src/app/remote_assets.rs b/src/app/remote_assets.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..5192cb6b6dbf5848950bbcc77877b0f610769c2d
+index 0000000..5192cb6
 --- /dev/null
 +++ b/src/app/remote_assets.rs
 @@ -0,0 +1,798 @@
@@ -1471,7 +1513,7 @@ index 0000000000000000000000000000000000000000..5192cb6b6dbf5848950bbcc77877b0f6
 +    }
 +}
 diff --git a/src/app/shell_campaign.rs b/src/app/shell_campaign.rs
-index ba51f3c241f1900e4a8138c263c386327b48d55b..ec1fdde5cb5f0e23be03a8b9605de54fce17088a 100644
+index ba51f3c..ec1fdde 100644
 --- a/src/app/shell_campaign.rs
 +++ b/src/app/shell_campaign.rs
 @@ -259,6 +259,14 @@ impl App {
@@ -1490,7 +1532,7 @@ index ba51f3c241f1900e4a8138c263c386327b48d55b..ec1fdde5cb5f0e23be03a8b9605de54f
              let (Some(assets), Some(rules), Some(config)) = (
                  state.process_assets.manager(),
 diff --git a/src/app/shell_main_menu.rs b/src/app/shell_main_menu.rs
-index 321a6967b8bc42159d679dd5203ab4d21d0c45a6..84c7cfa223fd8fa490bc07768c30fb0dbc188c11 100644
+index 321a696..84c7cfa 100644
 --- a/src/app/shell_main_menu.rs
 +++ b/src/app/shell_main_menu.rs
 @@ -816,7 +816,7 @@ impl App {
@@ -1503,7 +1545,7 @@ index 321a6967b8bc42159d679dd5203ab4d21d0c45a6..84c7cfa223fd8fa490bc07768c30fb0d
              state.audio.launcher_audio_available,
              displays,
 diff --git a/src/app/shell_movies_credits.rs b/src/app/shell_movies_credits.rs
-index bbf125292436fa279406f50580ed984509a60782..0a490a1d4950ed4d57755e6ca732154c19c0d611 100644
+index bbf1252..0a490a1 100644
 --- a/src/app/shell_movies_credits.rs
 +++ b/src/app/shell_movies_credits.rs
 @@ -150,6 +150,39 @@ impl App {
@@ -1568,7 +1610,7 @@ index bbf125292436fa279406f50580ed984509a60782..0a490a1d4950ed4d57755e6ca732154c
              // No .BIK (and no VQA decoder is needed: retail YR ships none):
              // Play_Movie returns with no visible or audible change.
 diff --git a/src/app/shell_random_map.rs b/src/app/shell_random_map.rs
-index cd461a17069a05d7f0b3fff87af5d7698ee70f22..0d67f870ec5e1c80e75089eec3bfa88297f86e04 100644
+index cd461a1..0d67f87 100644
 --- a/src/app/shell_random_map.rs
 +++ b/src/app/shell_random_map.rs
 @@ -1308,6 +1308,39 @@ impl App {
@@ -1612,7 +1654,7 @@ index cd461a17069a05d7f0b3fff87af5d7698ee70f22..0d67f870ec5e1c80e75089eec3bfa882
          // even when setup cannot progress far enough to spawn the worker.
          begin_random_map_generation_owners(
 diff --git a/src/app/shell_wol/service.rs b/src/app/shell_wol/service.rs
-index be0ad1913895457e28adf01a6a918fffb7872c82..a466221f69267b350218c59a47684c0da01204f3 100644
+index be0ad19..a466221 100644
 --- a/src/app/shell_wol/service.rs
 +++ b/src/app/shell_wol/service.rs
 @@ -973,6 +973,25 @@ pub(super) fn begin_connect(state: &mut AppState) {
@@ -1642,7 +1684,7 @@ index be0ad1913895457e28adf01a6a918fffb7872c82..a466221f69267b350218c59a47684c0d
          WolPersona::default()
      } else {
 diff --git a/src/assets/asset_manager.rs b/src/assets/asset_manager.rs
-index 2fd47b2daec683a9b91986ace6d2a4629c1b2138..b956cbdaba57ca413df1f5ea87e0b56741657f09 100644
+index 2fd47b2..b956cbd 100644
 --- a/src/assets/asset_manager.rs
 +++ b/src/assets/asset_manager.rs
 @@ -676,6 +676,109 @@ impl AssetManager {
@@ -1801,7 +1843,7 @@ index 2fd47b2daec683a9b91986ace6d2a4629c1b2138..b956cbdaba57ca413df1f5ea87e0b567
                  return Ok(None);
              };
 diff --git a/src/assets/audio_bag.rs b/src/assets/audio_bag.rs
-index 9ff0f42618df0e78c0f033f7146da4e33852ba66..1e3abbd855b760fa086312482a959d75fed65739 100644
+index 9ff0f42..1e3abbd 100644
 --- a/src/assets/audio_bag.rs
 +++ b/src/assets/audio_bag.rs
 @@ -112,6 +112,7 @@ pub struct AudioIndex {
@@ -1857,7 +1899,7 @@ index 9ff0f42618df0e78c0f033f7146da4e33852ba66..1e3abbd855b760fa086312482a959d75
          let start = entry.offset as usize;
 diff --git a/src/assets/deferred_assets.rs b/src/assets/deferred_assets.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..7442289fe7b82b81570f86cba93b2dc18c87d77f
+index 0000000..7442289
 --- /dev/null
 +++ b/src/assets/deferred_assets.rs
 @@ -0,0 +1,81 @@
@@ -1943,7 +1985,7 @@ index 0000000000000000000000000000000000000000..7442289fe7b82b81570f86cba93b2dc1
 +    })
 +}
 diff --git a/src/assets/mix_archive.rs b/src/assets/mix_archive.rs
-index e8533f9aa5df743f2fb655898c222462828ddba6..2c1bd8510500fdfc7645e7d169986737c04d8f91 100644
+index e8533f9..2c1bd85 100644
 --- a/src/assets/mix_archive.rs
 +++ b/src/assets/mix_archive.rs
 @@ -220,6 +220,14 @@ impl std::ops::Deref for SharedBytes {
@@ -1962,7 +2004,7 @@ index e8533f9aa5df743f2fb655898c222462828ddba6..2c1bd8510500fdfc7645e7d169986737
      ///
      /// Detects old vs new format by checking the first u16:
 diff --git a/src/assets/mod.rs b/src/assets/mod.rs
-index f051b799308fdeb549e2d1dfe248fc561f32ec0d..92f875ff2e45302ebdd002869fa5fb914d4ffbe4 100644
+index f051b79..92f875f 100644
 --- a/src/assets/mod.rs
 +++ b/src/assets/mod.rs
 @@ -31,6 +31,7 @@ pub mod bink_file;
@@ -1974,7 +2016,7 @@ index f051b799308fdeb549e2d1dfe248fc561f32ec0d..92f875ff2e45302ebdd002869fa5fb91
  pub mod fnt_file;
  pub mod format_sniff;
 diff --git a/src/audio/music.rs b/src/audio/music.rs
-index 5df8107d4bcbb41152c0fbe49fd00604b588eb52..04e5210215f8f906e91cd2354d8faa08b3009bb8 100644
+index 5df8107..04e5210 100644
 --- a/src/audio/music.rs
 +++ b/src/audio/music.rs
 @@ -131,6 +131,7 @@ pub struct MusicPlayer {
@@ -2051,7 +2093,7 @@ index 5df8107d4bcbb41152c0fbe49fd00604b588eb52..04e5210215f8f906e91cd2354d8faa08
      /// and its release resumes the paused song where it stopped
      /// (`0x004082F0`): Theme's Stops and PlayFiles in between do nothing.
 diff --git a/src/audio/sfx.rs b/src/audio/sfx.rs
-index 7215b314f7fef6f1b9b242e4d917fc78a10319fa..575a9f5a525347452406845f38813f211523853c 100644
+index 7215b31..575a9f5 100644
 --- a/src/audio/sfx.rs
 +++ b/src/audio/sfx.rs
 @@ -1399,6 +1399,9 @@ fn open_sfx_sink() -> Result<SfxOutput, String> {
@@ -2065,7 +2107,7 @@ index 7215b314f7fef6f1b9b242e4d917fc78a10319fa..575a9f5a525347452406845f38813f21
      pub fn new() -> Option<Self> {
          #[cfg(not(all(feature = "wasm", target_arch = "wasm32", target_os = "unknown")))]
 diff --git a/src/audio/theme.rs b/src/audio/theme.rs
-index 60f6c67252cdb09eb68707df577ea27ebace74f1..abc25e4ef0644fc8c7e330ca3640a9b6f16b2162 100644
+index 60f6c67..abc25e4 100644
 --- a/src/audio/theme.rs
 +++ b/src/audio/theme.rs
 @@ -142,6 +142,7 @@ pub(crate) struct ThemeGates {
@@ -2121,7 +2163,7 @@ index 60f6c67252cdb09eb68707df577ea27ebace74f1..abc25e4ef0644fc8c7e330ca3640a9b6
          };
          if let Some(track) = prepare_bytes(track_name, &file) {
 diff --git a/src/render/sidebar_chrome.rs b/src/render/sidebar_chrome.rs
-index af865657580fd65ee02837fab1fe4dbfb0224769..cdf914332d0cce0318d669c9e7f702ee12a0bd81 100644
+index af86565..cdf9143 100644
 --- a/src/render/sidebar_chrome.rs
 +++ b/src/render/sidebar_chrome.rs
 @@ -40,7 +40,7 @@ pub(crate) fn packed_command_bar_fixture(
@@ -2143,7 +2185,7 @@ index af865657580fd65ee02837fab1fe4dbfb0224769..cdf914332d0cce0318d669c9e7f702ee
      let layout_art_rendered = layout_art::load(side_route, &generic_palette);
      let observer_art_rendered = observer_art::load(theme_route);
 diff --git a/src/render/sidebar_chrome_command_bar.rs b/src/render/sidebar_chrome_command_bar.rs
-index 7011d23b6e275c135d45aa3ee756ec637b66862e..1d0c443694892f3d4d7b63c3d279a05278255a57 100644
+index 7011d23..1d0c443 100644
 --- a/src/render/sidebar_chrome_command_bar.rs
 +++ b/src/render/sidebar_chrome_command_bar.rs
 @@ -7,6 +7,7 @@ pub struct CommandBarArt<T> {
@@ -2275,7 +2317,7 @@ index 7011d23b6e275c135d45aa3ee756ec637b66862e..1d0c443694892f3d4d7b63c3d279a052
 +    }
 +}
 diff --git a/src/rules/theme_ini.rs b/src/rules/theme_ini.rs
-index c9204ce3b6a5c181308076f766f90c9f7b54d192..3de821249fb87cb9fc8c8ba6647d4cce8f0b0413 100644
+index c9204ce..3de8212 100644
 --- a/src/rules/theme_ini.rs
 +++ b/src/rules/theme_ini.rs
 @@ -126,10 +126,13 @@ fn scan_catalog_availability(entries: &mut [ThemeEntry], assets: &AssetManager)
@@ -2294,10 +2336,29 @@ index c9204ce3b6a5c181308076f766f90c9f7b54d192..3de821249fb87cb9fc8c8ba6647d4cce
      }
  }
 diff --git a/src/ui/main_menu_dialogs/options.rs b/src/ui/main_menu_dialogs/options.rs
-index 38eba41e2b4ec35cd26d670f3fa82ec7f2e60dbc..94b4c3778a18be741ebb5039845d852412c3bd3a 100644
+index 38eba41..fb58b06 100644
 --- a/src/ui/main_menu_dialogs/options.rs
 +++ b/src/ui/main_menu_dialogs/options.rs
-@@ -1357,6 +1357,7 @@ impl Default for LauncherOptionsValues {
+@@ -994,7 +994,7 @@ impl Setting {
+ 
+     /// Whether this build has it: the browser's has no VSync, High Refresh
+     /// Rate or HD Map Previews, and only Windows has a Graphics API to pick.
+-    const fn available(self) -> bool {
++    fn available(self) -> bool {
+         match self {
+             Self::Checkbox(
+                 LauncherCheckboxId::VSync | LauncherCheckboxId::HighRefreshRateInBattle,
+@@ -1002,6 +1002,9 @@ impl Setting {
+             Self::List(LauncherComboId::GraphicsApi) => HAS_GRAPHICS_API,
+             Self::Checkbox(LauncherCheckboxId::HdMapPreviews) => HAS_HD_MAP_PREVIEWS,
+             Self::Checkbox(LauncherCheckboxId::Ra2Mode) => HAS_RA2_MODE,
++            Self::Checkbox(LauncherCheckboxId::YrOriginalStyle) => {
++                !crate::util::ra2_launch::enabled()
++            }
+             _ => true,
+         }
+     }
+@@ -1357,6 +1360,7 @@ impl Default for LauncherOptionsValues {
              C::Tooltips,
              C::TargetLines,
              C::VSync,
@@ -2305,8 +2366,23 @@ index 38eba41e2b4ec35cd26d670f3fa82ec7f2e60dbc..94b4c3778a18be741ebb5039845d8524
              C::HdMapPreviews,
              C::CommanderFeedback,
          ] {
+diff --git a/src/ui/main_menu_dialogs/options/shell/launcher_pages.rs b/src/ui/main_menu_dialogs/options/shell/launcher_pages.rs
+index aea9a6f..a56d343 100644
+--- a/src/ui/main_menu_dialogs/options/shell/launcher_pages.rs
++++ b/src/ui/main_menu_dialogs/options/shell/launcher_pages.rs
+@@ -115,7 +115,9 @@ pub(super) fn controls(
+             {
+                 let y = 252 + i as i32 * 24;
+                 check(&mut row, left, x, y);
+-                check(&mut row, right_id, right, y);
++                if Setting::Checkbox(right_id).available() {
++                    check(&mut row, right_id, right, y);
++                }
+             }
+             heading(&mut row, "VERA:DebugHeading", 377);
+             for (i, id) in [
 diff --git a/src/ui/sidebar/command_bar.rs b/src/ui/sidebar/command_bar.rs
-index e776a2bf2f3a3e8a0e7a9dbf831b30b4a7a58bb6..fc7b316910ca0d745620df4c9ee84a0301459b7a 100644
+index e776a2b..fc7b316 100644
 --- a/src/ui/sidebar/command_bar.rs
 +++ b/src/ui/sidebar/command_bar.rs
 @@ -22,6 +22,18 @@ pub const COMMAND_NAMES: [&str; 11] = [
@@ -2356,7 +2432,7 @@ index e776a2bf2f3a3e8a0e7a9dbf831b30b4a7a58bb6..fc7b316910ca0d745620df4c9ee84a03
          // Original complete72FC60, retail canvas headers: tools/sidebar_oracle/command_bar/layout-native.json.
          let layout =
 diff --git a/src/util/file_system.rs b/src/util/file_system.rs
-index f9a43b90277a70451d05f37f45fc22bfc9e216a1..51f9658aff5bfa1cad51e6cb249e7b024be2f030 100644
+index f9a43b9..51f9658 100644
 --- a/src/util/file_system.rs
 +++ b/src/util/file_system.rs
 @@ -206,6 +206,10 @@ mod memory {
@@ -2390,7 +2466,7 @@ index f9a43b90277a70451d05f37f45fc22bfc9e216a1..51f9658aff5bfa1cad51e6cb249e7b02
  
      #[test]
 diff --git a/src/web.rs b/src/web.rs
-index 26671507c3f7599127e4bc4b1b8663446ca43826..5ff11eb2b8e52e6bdc08ef8b799ece7cc647fc7c 100644
+index 2667150..7ca9454 100644
 --- a/src/web.rs
 +++ b/src/web.rs
 @@ -5,6 +5,66 @@ pub(crate) mod sim_worker;
@@ -2489,7 +2565,15 @@ index 26671507c3f7599127e4bc4b1b8663446ca43826..5ff11eb2b8e52e6bdc08ef8b799ece7c
      crate::audio::web_output::pause();
      remove_spawn_files();
      ime::remove();
-@@ -144,7 +215,7 @@ fn request_spawn_action(action: crate::app::SpawnAction) -> Result<(), JsValue>
+@@ -126,6 +197,7 @@ pub(crate) fn engine_exited() {
+     SFX.with(|slot| slot.borrow_mut().take());
+     WAKE.with(|slot| slot.borrow_mut().take());
+     CANVAS.with(|slot| slot.borrow_mut().take());
++    crate::util::ra2_launch::set(false);
+     emit_lifecycle(LIFECYCLE.with(|slot| slot.borrow_mut().exited()));
+ }
+ 
+@@ -144,7 +216,7 @@ fn request_spawn_action(action: crate::app::SpawnAction) -> Result<(), JsValue>
  }
  
  /// Run the event loop's next pass now, even while it waits.
@@ -2498,7 +2582,7 @@ index 26671507c3f7599127e4bc4b1b8663446ca43826..5ff11eb2b8e52e6bdc08ef8b799ece7c
      WAKE.with(|slot| {
          if let Some(proxy) = slot.borrow().as_ref() {
              let _ = proxy.send_event(());
-@@ -287,7 +358,7 @@ fn mod_folder(folder: &str) -> Result<(), JsValue> {
+@@ -287,7 +359,7 @@ fn mod_folder(folder: &str) -> Result<(), JsValue> {
      Ok(())
  }
  
@@ -2507,7 +2591,7 @@ index 26671507c3f7599127e4bc4b1b8663446ca43826..5ff11eb2b8e52e6bdc08ef8b799ece7c
      if LIFECYCLE.with(|slot| slot.borrow().idle()) {
          Ok(())
      } else {
-@@ -492,7 +563,12 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
+@@ -492,7 +564,12 @@ pub(crate) fn hand_over_replay(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
  }
  
  #[wasm_bindgen]
@@ -2521,7 +2605,7 @@ index 26671507c3f7599127e4bc4b1b8663446ca43826..5ff11eb2b8e52e6bdc08ef8b799ece7c
      if !LIFECYCLE.with(|slot| slot.borrow().idle()) {
          return Err(JsValue::from_str(
              "Restore user data before starting or after the engine exited",
-@@ -503,14 +579,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
+@@ -503,14 +580,18 @@ pub fn restore_user_file(path: &str, bytes: Vec<u8>, modified_ms: f64) -> Result
      if path.starts_with("/replays/") {
          return Ok(());
      }
@@ -2543,3 +2627,329 @@ index 26671507c3f7599127e4bc4b1b8663446ca43826..5ff11eb2b8e52e6bdc08ef8b799ece7c
      Ok(())
  }
  
+@@ -555,6 +636,23 @@ pub fn fonts_ready() -> js_sys::Promise {
+ pub fn start_game(
+     canvas: web_sys::HtmlCanvasElement,
+     on_status: js_sys::Function,
++) -> Result<(), JsValue> {
++    start_shell(canvas, on_status, false)
++}
++
++/// Start the original Red Alert 2 rules and asset family, like native -ra2.
++#[wasm_bindgen]
++pub fn start_ra2(
++    canvas: web_sys::HtmlCanvasElement,
++    on_status: js_sys::Function,
++) -> Result<(), JsValue> {
++    start_shell(canvas, on_status, true)
++}
++
++fn start_shell(
++    canvas: web_sys::HtmlCanvasElement,
++    on_status: js_sys::Function,
++    ra2: bool,
+ ) -> Result<(), JsValue> {
+     run(
+         canvas,
+@@ -563,6 +661,7 @@ pub fn start_game(
+             crate::app::frontend::startup_options::RetailStartupOptions::default(),
+         ),
+         false,
++        ra2,
+     )
+ }
+ 
+@@ -585,7 +684,7 @@ pub fn start_spawn(
+         crate::app::frontend::startup_options::RetailStartupOptions::default(),
+     );
+     app.set_spawn_request(request);
+-    run(canvas, on_status, app, true)
++    run(canvas, on_status, app, true, false)
+ }
+ 
+ /// Whether `start_spawn` may run now: before the first launch and after a
+@@ -652,6 +751,22 @@ pub fn probe(map_name: Option<String>) -> Result<String, JsValue> {
+     serde_json::to_string(&report).map_err(|error| JsValue::from_str(&error.to_string()))
+ }
+ 
++/// Inspect the original RA2 rules and resolved campaign strings without starting
++/// a game or changing the mode/config used by the next YR launch.
++#[wasm_bindgen]
++pub fn probe_ra2() -> Result<String, JsValue> {
++    if !LIFECYCLE.with(|slot| slot.borrow().may_start(false)) {
++        return Err(JsValue::from_str("Inspect RA2 before starting the engine"));
++    }
++    require_ra2_archives()?;
++    let previous = crate::util::ra2_launch::enabled();
++    crate::util::ra2_launch::set(true);
++    let result = probe(None);
++    crate::util::ra2_launch::set(previous);
++    install_config();
++    result
++}
++
+ /// docs/spawn.md "Random maps": the random map a share code (`VR1-…`) or
+ /// `.SED` text describes, made from the retail files imported with
+ /// `import_file` (never a mod), as `{ report, bytes }`: `report` is the JSON
+@@ -739,17 +854,35 @@ fn install_config() {
+ /// mod `set_mod` chose (its name holds nothing to escape: `mod_folder`).
+ fn config_text() -> String {
+     let mut text = String::from("[paths]\nra2_dir = \"/retail\"\n");
++    if crate::util::ra2_launch::enabled() {
++        text.push_str("settings_dir = \"/saves/ra2/profile\"\n");
++    }
+     if let Some(folder) = MOD.with(|slot| slot.borrow().clone()) {
+         text.push_str(&format!("mod = \"{folder}\"\n"));
+     }
+     text
+ }
+ 
++fn require_ra2_archives() -> Result<(), JsValue> {
++    let retail = std::path::Path::new("/retail");
++    for name in ["ra2.mix", "ra2md.mix", "language.mix", "multi.mix"] {
++        if !crate::util::case_insensitive_path::find(retail, name)
++            .is_some_and(crate::util::file_system::is_file)
++        {
++            return Err(JsValue::from_str(&format!(
++                "Original Red Alert 2 requires {name}"
++            )));
++        }
++    }
++    Ok(())
++}
++
+ fn run(
+     canvas: web_sys::HtmlCanvasElement,
+     on_status: js_sys::Function,
+     app: crate::app::App,
+     external: bool,
++    ra2: bool,
+ ) -> Result<(), JsValue> {
+     use winit::platform::web::EventLoopExtWebSys;
+     if !LIFECYCLE.with(|slot| slot.borrow().may_start(external)) {
+@@ -760,11 +893,16 @@ fn run(
+     if !crate::render::text_engine::web_fonts::preloads_arrived() {
+         return Err(JsValue::from_str("Await fonts_ready() before starting"));
+     }
++    if ra2 {
++        require_ra2_archives()?;
++    }
+     let event_loop =
+         winit::event_loop::EventLoop::new().map_err(|e| JsValue::from_str(&e.to_string()))?;
+     LIFECYCLE
+         .with(|slot| slot.borrow_mut().start(external))
+         .map_err(|error| JsValue::from_str(&error))?;
++    // A rejected second launch must not change the running game mode.
++    crate::util::ra2_launch::set(ra2);
+     install_config();
+     WAKE.with(|slot| *slot.borrow_mut() = Some(event_loop.create_proxy()));
+     CANVAS.with(|slot| *slot.borrow_mut() = Some(canvas));
+diff --git a/tools/wasm/host.js b/tools/wasm/host.js
+index 400f292..61babe1 100644
+--- a/tools/wasm/host.js
++++ b/tools/wasm/host.js
+@@ -13,6 +13,7 @@ const fullscreen = $('#fullscreen');
+ const diagnostics = $('#diagnostics');
+ const drop = $('#drop');
+ const start = $('#start');
++const startRa2 = $('#start-ra2');
+ const canvas = $('#game');
+ const launcher = $('#launcher');
+ const hud = $('#hud');
+@@ -23,8 +24,8 @@ const steps = { browser: $('#step-browser'), folder: $('#step-folder'), start: $
+ // Ignore executable installers and development metadata. The same formats
+ // may also appear in nested game resource folders.
+ const RESOURCE = /\.(mix|mmx|yrm|map|ini|pkt|csf|fnt|wav|aud|shp|pal|vxl|hva|tmp|pcx|bik)$/i;
+-// Red Alert 2's own map archive: the engine never mounts it, so it would only hold memory.
+-const UNUSED = /^multi\.mix$/i;
++// Only RA2 mounts the original multiplayer-map archive.
++const RA2_MAPS = /^multi\.mix$/i;
+ 
+ const TEXT = {
+     en: {
+@@ -32,7 +33,7 @@ const TEXT = {
+         browserTitle: 'Check browser', folderTitle: 'Import game files', startTitle: 'Start game',
+         dropHint: 'Drop your game folder here', dropSub: 'or click to choose it',
+         manifest: 'GAME FILES', filesLabel: 'Files', present: 'found', absent: 'missing',
+-        pick: 'Choose game folder', start: 'Start game',
++        pick: 'Choose game folder', start: 'Start Yuri’s Revenge', startRa2: 'Start original Red Alert 2',
+         engineLoading: 'Loading engine…',
+         browserReady: 'Engine ready. Choose your Yuri’s Revenge folder.',
+         insecure: 'Open this page over HTTPS or from localhost; WebGPU needs a secure page.',
+@@ -76,7 +77,7 @@ const TEXT = {
+         browserTitle: '检查浏览器', folderTitle: '导入游戏资源', startTitle: '开始游戏',
+         dropHint: '把游戏文件夹拖到这里', dropSub: '或点击此处选择',
+         manifest: '游戏资源', filesLabel: '文件', present: '已找到', absent: '缺失',
+-        pick: '选择游戏文件夹', start: '开始游戏',
++        pick: '选择游戏文件夹', start: '启动尤里的复仇', startRa2: '启动原版红色警戒2',
+         engineLoading: '正在加载引擎…',
+         browserReady: '引擎已就绪，请选择《尤里的复仇》游戏文件夹',
+         insecure: '请通过 HTTPS 或 localhost 打开本页；WebGPU 需要安全页面。',
+@@ -218,7 +219,16 @@ function showManifest(top, total = '—') {
+     fileTotal.textContent = total;
+ }
+ // The red plate always marks the next thing to do.
++function canStartRa2() {
++    if (typeof engine.start_ra2 !== 'function') return false;
++    const names = new Set(selection.map(([path]) => path.toLowerCase()));
++    return ['ra2.mix', 'ra2md.mix', 'language.mix', 'multi.mix'].every(name => names.has(name));
++}
++
+ function ready(canStart) {
++    const ra2Available = canStart && canStartRa2();
++    startRa2.disabled = !ra2Available;
++    startRa2.hidden = !ra2Available;
+     start.disabled = !canStart;
+     start.classList.toggle('primary', canStart);
+     pick.classList.toggle('primary', !canStart && resume.hidden);
+@@ -259,6 +269,7 @@ async function finishExit() {
+         launcher.classList.remove('leaving');
+         launcher.hidden = false;
+         start.disabled = true;
++    startRa2.disabled = true;
+         $('#local-replays').open = true;
+     }
+     if (storageFailed) { say(hud, 'exitSaveFailed'); return; }
+@@ -394,9 +405,9 @@ function choose(entries) {
+     selection = entries
+         .filter(([path]) => path.startsWith(root))
+         .map(([path, file]) => [path.slice(root.length), file])
+-        .filter(([path]) => RESOURCE.test(path) && !UNUSED.test(path));
++        .filter(([path]) => RESOURCE.test(path));
+ 
+-    if (!selection.length) {
++    if (!selection.some(([path]) => !RA2_MAPS.test(path))) {
+         showManifest(null);
+         setFolder('err', 'noFiles');
+         setStatus('err', 'noFiles');
+@@ -471,7 +482,9 @@ async function dropped(items) {
+     return out;
+ }
+ 
+-async function launch() {
++async function launch(ra2 = false) {
++    if (started || start.disabled || (ra2 && !canStartRa2())) return;
++    const files = ra2 ? selection : selection.filter(([path]) => !RA2_MAPS.test(path));
+     // Requested inside the click, before any await. Full screen puts the page edge at the screen
+     // edge, so edge scrolling works; the engine keeps drawing its own cursor.
+     if (fullscreen.checked && !document.fullscreenElement) {
+@@ -485,17 +498,18 @@ async function launch() {
+         try { prepare_audio(); } catch (error) { show(TEXT[lang].audioUnavailable(error)); }
+         progress.hidden = false;
+         const bar = progress.firstElementChild;
+-        const total = selection.reduce((sum, [, file]) => sum + file.size, 0) || 1;
++        const total = files.reduce((sum, [, file]) => sum + file.size, 0) || 1;
+         let done = 0;
+-        for (const [index, [path, file]] of selection.entries()) {
+-            setStatus('busy', 'importing', index + 1, selection.length, path);
++        for (const [index, [path, file]] of files.entries()) {
++            setStatus('busy', 'importing', index + 1, files.length, path);
+             import_file(path, new Uint8Array(await file.arrayBuffer()));
+             done += file.size;
+             bar.style.width = `${(100 * done / total).toFixed(1)}%`;
+         }
+         // The engine began fetching its first fonts when it loaded.
+         await fonts_ready();
+-        start_game(canvas, show);
++        if (ra2) engine.start_ra2(canvas, show);
++        else start_game(canvas, show);
+         started = true;
+         launcher.classList.add('leaving');
+         setTimeout(() => { if (!exiting || !replayFallback) launcher.hidden = true; }, 400);
+@@ -597,7 +611,8 @@ try {
+                 }
+             } catch (error) { folderError(error); }
+         });
+-        start.addEventListener('click', launch);
++        start.addEventListener('click', () => launch());
++        startRa2.addEventListener('click', () => launch(true));
+     }
+ } catch (error) {
+     setStep(steps.browser, 'error');
+diff --git a/tools/wasm/index.html b/tools/wasm/index.html
+index 4d4eb0e..a80eae0 100644
+--- a/tools/wasm/index.html
++++ b/tools/wasm/index.html
+@@ -220,7 +220,10 @@
+       </button>
+       <button class="btn" id="start" type="button" disabled>
+         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 2l14 8-14 8z" fill="currentColor"/></svg>
+-        <span data-i18n="start">Start game</span>
++        <span data-i18n="start">Start Yuri’s Revenge</span>
++      </button>
++      <button class="btn secondary" id="start-ra2" type="button" disabled hidden>
++        <span data-i18n="startRa2">Start original Red Alert 2</span>
+       </button>
+       <div class="progress" id="progress" hidden><div></div></div>
+     </div>
+diff --git a/tools/wasm/tests/launch-edition.test.cjs b/tools/wasm/tests/launch-edition.test.cjs
+new file mode 100644
+index 0000000..67a7a36
+--- /dev/null
++++ b/tools/wasm/tests/launch-edition.test.cjs
+@@ -0,0 +1,65 @@
++const assert = require('node:assert/strict');
++const {readFileSync} = require('node:fs');
++const path = require('node:path');
++const vm = require('node:vm');
++const test = require('node:test');
++
++function fixture(hasRa2Export = true) {
++    const elements = new Map();
++    function element(key) {
++        if (!elements.has(key)) elements.set(key, {
++            textContent: '', hidden: false, dataset: {}, style: {}, firstElementChild: {style: {}},
++            classList: {add() {}, remove() {}, toggle() {}},
++            addEventListener() {}, setAttribute() {}, focus() {}, closest: () => ({}),
++        });
++        return elements.get(key);
++    }
++    const calls = [];
++    const context = vm.createContext({
++        document: {documentElement: {}, querySelector: element, querySelectorAll: () => []},
++        navigator: {language: 'en'}, localStorage: {getItem: () => 'en'},
++        window: {}, setTimeout() {}, Uint8Array,
++        import_file: (name) => calls.push(name),
++        prepare_audio: () => calls.push('audio'),
++        fonts_ready: async () => calls.push('fonts'),
++        start_game: () => calls.push('YR'),
++        engine: hasRa2Export ? {start_ra2: () => calls.push('RA2')} : {},
++    });
++    let source = readFileSync(path.join(__dirname, '../host.js'), 'utf8')
++        .replace(/\r\n/g, '\n').replace(/^import .*\n/gm, '');
++    source = source.slice(0, source.indexOf('try {\n    await init();'));
++    vm.runInContext(source + '\nglobalThis.api = {choose, launch};', context);
++    const files = names => names.map(name => [name, {
++        size: 1, arrayBuffer: async () => new ArrayBuffer(1),
++    }]);
++    return {files, choose: context.api.choose, launch: context.api.launch, calls, element};
++}
++
++test('YR is still the primary entry and does not import the RA2 map archive', async () => {
++    const f = fixture();
++    f.choose(f.files(['retail/ra2md.mix', 'retail/RA2.MIX', 'retail/language.mix', 'retail/multi.mix']));
++    assert.equal(f.element('#start').disabled, false);
++    assert.equal(f.element('#start-ra2').hidden, false);
++    await f.launch();
++    assert.deepEqual(f.calls, ['audio', 'ra2md.mix', 'RA2.MIX', 'language.mix', 'fonts', 'YR']);
++});
++
++test('the optional entry launches real RA2, including its map archive, only once', async () => {
++    const f = fixture();
++    f.choose(f.files(['retail/ra2md.mix', 'retail/RA2.MIX', 'retail/language.mix', 'retail/MULTI.MIX']));
++    await Promise.all([f.launch(true), f.launch(false)]);
++    assert.deepEqual(f.calls, ['audio', 'ra2md.mix', 'RA2.MIX', 'language.mix', 'MULTI.MIX', 'fonts', 'RA2']);
++});
++
++test('YR-only resources and older engines do not present an inert RA2 entry', async () => {
++    for (const [exported, names] of [[true, ['ra2md.mix', 'not-the-game/ra2.mix']], [true, ['ra2md.mix', 'ra2.mix', 'language.mix']], [false, ['ra2md.mix', 'ra2.mix', 'language.mix', 'multi.mix']]]) {
++        const f = fixture(exported);
++        f.choose(f.files(names));
++        assert.equal(f.element('#start-ra2').hidden, true);
++        assert.equal(f.element('#start-ra2').disabled, true);
++        await f.launch(true);
++        assert.deepEqual(f.calls, []);
++        await f.launch();
++        assert.equal(f.calls.at(-1), 'YR');
++    }
++});
